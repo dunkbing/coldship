@@ -130,11 +130,12 @@ func TestBuild(t *testing.T) {
 	b := spec.Build{Git: repo, Commit: commit, Context: "services/api", Dockerfile: "Dockerfile", Args: map[string]string{"VERSION": "1.2"}}
 	log := NewLogTail(100)
 
-	tag, err := g.Build(context.Background(), "api", b, log)
+	res, err := g.Build(context.Background(), "api", b, log)
 	if err != nil {
 		t.Fatalf("build: %v\n%s", err, strings.Join(log.Lines(), "\n"))
 	}
-	if tag != ImageTag("api", b) || !strings.HasPrefix(tag, "hangar-build/api:"+commit[:12]+"-") {
+	tag := res.Image
+	if res.Auto || tag != ImageTag("api", b) || !strings.HasPrefix(tag, "hangar-build/api:"+commit[:12]+"-") {
 		t.Errorf("unexpected tag %s", tag)
 	}
 	raw, _ := os.ReadFile(argsFile)
@@ -157,7 +158,7 @@ func TestBuildMissingDockerfileSuggestsOne(t *testing.T) {
 	repo := newRepo(t, map[string]string{"package.json": "{}", "deploy/web.Dockerfile": "FROM scratch\n"})
 	commit := gitRun(t, repo, "rev-parse", "HEAD")
 	g, _ := testBuilder(t)
-	_, err := g.Build(context.Background(), "web", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10))
+	_, err := g.Build(context.Background(), "web", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile", Builder: spec.BuilderDockerfile}, NewLogTail(10))
 	ae, _ := apierr.As(err)
 	if code(err) != "dockerfile_not_found" || !strings.Contains(ae.Message, "Node.js") {
 		t.Fatalf("want dockerfile_not_found mentioning Node.js, got %v", err)
@@ -201,5 +202,104 @@ func TestLogTail(t *testing.T) {
 	got := strings.Join(l.Lines(), "|")
 	if got != "hangar: 1 earlier lines omitted|b|c|d|partial" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// stubDockerCopyingDockerfile records docker's args and copies the -f file,
+// since the build's work directory is removed afterwards.
+func stubDockerCopyingDockerfile(t *testing.T) (*Git, string) {
+	t.Helper()
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "docker")
+	script := `#!/bin/sh
+if [ "$1" = image ]; then exit 1; fi
+printf '%s\n' "$@" > ` + dir + `/args
+while [ $# -gt 0 ]; do
+  if [ "$1" = -f ]; then cp "$2" ` + dir + `/Dockerfile; cp "$2.dockerignore" ` + dir + `/dockerignore 2>/dev/null; fi
+  shift
+done
+`
+	os.WriteFile(stub, []byte(script), 0o755)
+	g := NewGit()
+	g.DockerBin, g.AllowedProtocols, g.WorkDir = stub, "file", t.TempDir()
+	return g, dir
+}
+
+func TestAutoBuildGeneratesDockerfileOutsideCheckout(t *testing.T) {
+	repo := newRepo(t, map[string]string{
+		"package.json":      `{"scripts":{"build":"tsc","start":"node dist/server.js"},"engines":{"node":">=20"}}`,
+		"package-lock.json": "{}",
+		"src/server.ts":     "",
+	})
+	commit := gitRun(t, repo, "rev-parse", "HEAD")
+	g, out := stubDockerCopyingDockerfile(t)
+	log := NewLogTail(200)
+	res, err := g.Build(context.Background(), "web", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, log)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(log.Lines(), "\n"))
+	}
+	if !res.Auto || res.Summary != "node 20 · npm · npm start" {
+		t.Fatalf("result %+v", res)
+	}
+	args, _ := os.ReadFile(filepath.Join(out, "args"))
+	var fpath string
+	lines := strings.Split(string(args), "\n")
+	for i, a := range lines {
+		if a == "-f" {
+			fpath = lines[i+1]
+		}
+	}
+	if !strings.HasSuffix(fpath, "/Dockerfile.hangar") || strings.Contains(fpath, "/src/") {
+		t.Fatalf("generated Dockerfile must live outside the checkout, got %s", fpath)
+	}
+	if !strings.Contains(string(args), "hangar.builder=auto") {
+		t.Fatal("auto images must be labelled")
+	}
+	df, _ := os.ReadFile(filepath.Join(out, "Dockerfile"))
+	for _, want := range []string{"FROM node:20-alpine", "COPY --chown=node:node package.json package-lock.json ./", "RUN npm ci", "RUN npm run build",
+		"ENV NODE_ENV=production PORT=3000", `CMD ["sh","-c","npm start"]`} {
+		if !strings.Contains(string(df), want) {
+			t.Errorf("generated Dockerfile missing %q:\n%s", want, df)
+		}
+	}
+	if strings.Index(string(df), "NODE_ENV") < strings.Index(string(df), "RUN npm run build") {
+		t.Error("NODE_ENV=production must come after the build, or devDependencies are skipped")
+	}
+	if ign, _ := os.ReadFile(filepath.Join(out, "dockerignore")); !strings.Contains(string(ign), "node_modules") || !strings.Contains(string(ign), ".env") {
+		t.Errorf("dockerignore: %q", ign)
+	}
+	if !strings.Contains(strings.Join(log.Lines(), "\n"), "generated Dockerfile") {
+		t.Error("the generated Dockerfile should be in the build log")
+	}
+}
+
+func TestAutoBuildRefusesSymlinkedProjectFiles(t *testing.T) {
+	repo := newRepo(t, map[string]string{"README": "x"})
+	if err := os.Symlink("/etc/passwd", filepath.Join(repo, "package.json")); err != nil {
+		t.Skip(err)
+	}
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-q", "-m", "symlink")
+	commit := gitRun(t, repo, "rev-parse", "HEAD")
+	g, out := stubDockerCopyingDockerfile(t)
+	_, err := g.Build(context.Background(), "x", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10))
+	if code(err) != "build_detect_failed" {
+		t.Fatalf("a symlinked package.json must not be used, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "args")); err == nil {
+		t.Fatal("docker must not run")
+	}
+}
+
+func TestDetectDryRun(t *testing.T) {
+	repo := newRepo(t, map[string]string{"go.mod": "module x\n\ngo 1.22\n", "main.go": "package main\nfunc main(){}\n"})
+	commit := gitRun(t, repo, "rev-parse", "HEAD")
+	g, out := stubDockerCopyingDockerfile(t)
+	det, err := g.Detect(context.Background(), spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10))
+	if err != nil || det.Language != "go" || det.Version != "1.22" || !strings.Contains(det.Dockerfile, "FROM golang:1.22-alpine AS build") {
+		t.Fatalf("detect: %+v %v", det, err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "args")); err == nil {
+		t.Fatal("detect must not run docker")
 	}
 }

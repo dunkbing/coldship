@@ -37,6 +37,12 @@ type Build struct {
 	Context    string            `json:"context,omitempty" yaml:"context,omitempty" jsonschema:"build context directory inside the repository (default .)"`
 	Dockerfile string            `json:"dockerfile,omitempty" yaml:"dockerfile,omitempty" jsonschema:"Dockerfile path relative to the context (default Dockerfile)"`
 	Args       map[string]string `json:"args,omitempty" yaml:"args,omitempty" jsonschema:"docker build args. Visible in plans and image history: never put secrets here"`
+	// Builder picks how the image is built: "dockerfile" requires the
+	// Dockerfile, "auto" generates one from the project, and empty uses the
+	// Dockerfile if the repository has one and generates one otherwise.
+	Builder string `json:"builder,omitempty" yaml:"builder,omitempty" jsonschema:"dockerfile, auto, or empty (default: the Dockerfile if present, otherwise detect the project and generate one)"`
+	// Auto overrides what detection decides for generated Dockerfiles.
+	Auto *AutoBuild `json:"auto,omitempty" yaml:"auto,omitempty" jsonschema:"overrides for builds without a Dockerfile: language, version, install, build, start"`
 }
 
 // Database engines Hangar manages.
@@ -141,7 +147,7 @@ func Parse(b []byte) (*App, error) {
 	var a App
 	if err := dec.Decode(&a); err != nil {
 		return nil, apierr.New(400, "invalid_spec", "cannot parse spec: %v", err).
-			WithHint("allowed fields: name, stage, image, build (git, ref, commit, context, dockerfile, args), port, host_port, domains, health (path, timeout), memory, env, volumes, databases (name, engine, version, env), on_push (action, previews, preview_ttl)")
+			WithHint("allowed fields: name, stage, image, build (git, ref, commit, context, dockerfile, args, builder, auto), port, host_port, domains, health (path, timeout), memory, env, volumes, databases (name, engine, version, env), on_push (action, previews, preview_ttl)")
 	}
 	a.Normalize()
 	return &a, a.Validate()
@@ -348,6 +354,20 @@ func (b *Build) validate() error {
 	if !relPathOK(b.Context) {
 		return apierr.Invalid("build.context", "build.context %q must be a relative path inside the repository", b.Context)
 	}
+	switch b.Builder {
+	case "", BuilderDockerfile, BuilderAuto:
+	default:
+		return apierr.Invalid("build.builder", "build.builder %q must be dockerfile, auto, or empty", b.Builder).
+			WithFix(map[string]any{"build": map[string]any{"builder": BuilderAuto}})
+	}
+	if b.Auto != nil {
+		if b.Builder == BuilderDockerfile {
+			return apierr.Invalid("build.auto", "build.auto has no effect with builder: dockerfile; remove one of them")
+		}
+		if err := b.Auto.validate(); err != nil {
+			return err
+		}
+	}
 	if !relPathOK(b.Dockerfile) {
 		return apierr.Invalid("build.dockerfile", "build.dockerfile %q must be a relative path inside the build context", b.Dockerfile)
 	}
@@ -414,6 +434,46 @@ func relPathOK(p string) bool {
 	return true
 }
 
+// AutoBuild overrides project detection for builds without a Dockerfile.
+type AutoBuild struct {
+	Language string `json:"language,omitempty" yaml:"language,omitempty" jsonschema:"node, bun, python, go or static (default: detected)"`
+	Version  string `json:"version,omitempty" yaml:"version,omitempty" jsonschema:"runtime version, e.g. 22 for node or 3.12 for python (default: from the project, else a current one)"`
+	Install  string `json:"install,omitempty" yaml:"install,omitempty" jsonschema:"command that installs dependencies"`
+	Build    string `json:"build,omitempty" yaml:"build,omitempty" jsonschema:"command that builds the app (go: the go build target, e.g. ./cmd/server)"`
+	Start    string `json:"start,omitempty" yaml:"start,omitempty" jsonschema:"command that starts the app"`
+}
+
+const (
+	BuilderDockerfile = "dockerfile"
+	BuilderAuto       = "auto"
+)
+
+// Languages that builds without a Dockerfile support.
+var AutoLanguages = []string{"node", "bun", "python", "go", "static"}
+
+var (
+	versionRe = regexp.MustCompile(`^[0-9]{1,2}(\.[0-9]{1,2})?$`)
+)
+
+func (a *AutoBuild) validate() error {
+	if a.Language != "" && !contains(AutoLanguages, a.Language) {
+		return apierr.Invalid("build.auto.language", "language %q is not supported; use one of %s", a.Language, strings.Join(AutoLanguages, ", "))
+	}
+	if a.Version != "" && !versionRe.MatchString(a.Version) {
+		return apierr.Invalid("build.auto.version", "version %q must look like 22 or 3.12", a.Version)
+	}
+	for field, cmd := range map[string]string{"install": a.Install, "build": a.Build, "start": a.Start} {
+		if len(cmd) > 500 || strings.ContainsAny(cmd, "\r\n\x00") {
+			return apierr.Invalid("build.auto."+field, "build.auto.%s must be a single line of at most 500 characters", field)
+		}
+	}
+	return nil
+}
+
+// UsesAuto reports whether the build is configured beyond the original
+// Dockerfile-only fields (used to keep image tags of existing apps stable).
+func (b *Build) UsesAuto() bool { return b.Builder != "" || b.Auto != nil }
+
 // Clone returns a deep copy.
 func (b *Build) Clone() *Build {
 	if b == nil {
@@ -425,6 +485,10 @@ func (b *Build) Clone() *Build {
 		for k, v := range b.Args {
 			c.Args[k] = v
 		}
+	}
+	if b.Auto != nil {
+		a := *b.Auto
+		c.Auto = &a
 	}
 	return &c
 }

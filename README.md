@@ -23,7 +23,7 @@ and a web dashboard embedded in the binary.
 | Git webhooks | `on_push: {action: plan\|deploy, previews: true}`: signed pushes from GitHub, GitLab or Gitea plan or deploy the branch tip, and branches get previews. |
 | Managed databases | `databases: [{name: main, engine: postgres}]`: credentials generated and injected as `DATABASE_URL`, never shown; snapshots daily and before anything destructive; restores are approved plans. |
 | Self-upgrades | Signed releases (Ed25519 + SHA-256), installed automatically when idle; "new version available" in the dashboard and CLI. |
-| Build from Git | `build: {git, ref}` instead of `image`. Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
+| Build from Git | `build: {git, ref}` instead of `image`; no Dockerfile needed for Node, Bun, Python, Go and static sites (`hangar build detect` explains the generated one). Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
 | No secret leaks | Env values are redacted in all output. The runtime gets them through a 0600 env file, never argv. |
 | Prompt-injection hygiene | Logs are labeled untrusted data in every response and tool description. |
 | Accountability | Every mutation is audited with the actor (token name) and a required `reason`. |
@@ -108,7 +108,7 @@ volumes:
     path: /data
 ```
 
-Or build from Git instead of `image` (a Dockerfile is required):
+Or build from Git instead of `image` (with your Dockerfile, or one Hangar generates for Node, Bun, Python, Go and static sites):
 
 ```yaml
 build:
@@ -123,7 +123,7 @@ Private repos: `hangar server --git-credentials <git-credential-store file>`, or
 ## Roadmap
 
 - [x] Build from a Git repo with a Dockerfile
-- [ ] Builds without a Dockerfile (Nixpacks/Buildpacks-style detection)
+- [x] Builds without a Dockerfile (Node, Bun, Python, Go, static)
 - [x] Git webhooks: plan, deploy or preview on push
 - [x] Reverse proxy + automatic TLS (managed Caddy) with domains in the spec
 - [x] Zero-downtime deploys (start new container, health check, then swap)

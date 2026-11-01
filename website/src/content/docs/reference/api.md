@@ -33,6 +33,7 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `GET` | `/v1/apps/{name}/databases` | read | Databases with status and latest snapshot |
 | `GET` | `/v1/apps/{name}/snapshots?database=` | read | Snapshots, newest first |
 | `POST` | `/v1/apps/{name}/databases/{db}/snapshots` | deploy | Snapshot now: `{reason?}` |
+| `POST` | `/v1/build/detect` | deploy | `{app}` or `{spec}`: check out the commit and report how it would be built, without building |
 | `POST` | `/v1/previews` | deploy | Create or update a preview: `{app, ref?, image?, name?, ttl?, env?, inherit_env?, reason?}` |
 | `GET` | `/v1/previews` | read | List previews |
 | `DELETE` | `/v1/previews/{name}?reason=...` | deploy | Delete a preview |

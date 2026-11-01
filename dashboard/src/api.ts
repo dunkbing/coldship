@@ -15,6 +15,8 @@ export interface Build {
   context?: string
   dockerfile?: string
   args?: Record<string, string>
+  builder?: '' | 'dockerfile' | 'auto'
+  auto?: { language?: string; version?: string; install?: string; build?: string; start?: string }
 }
 
 export interface Spec {
@@ -68,6 +70,7 @@ export interface Deployment {
   failed_in?: 'build' | 'deploy'
   kept_previous?: boolean
   strategy?: 'zero-downtime' | 'recreate'
+  detected?: string
   actor: string
   reason: string
   created_at: string

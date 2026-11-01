@@ -510,3 +510,38 @@ func TestStartProxyRestoresRoutes(t *testing.T) {
 		t.Fatalf("routes must be rebuilt from state on start, got %+v", px.Routes)
 	}
 }
+
+func TestAutoBuildInjectsPortAndRecordsDetection(t *testing.T) {
+	e, rt := setup(t)
+	ctx := context.Background()
+	bd := e.bd.(*builder.Fake)
+	bd.Refs["https://github.com/acme/web.git@main"] = strings.Repeat("a", 40)
+	app := &spec.App{Name: "web", Port: 8080, Build: &spec.Build{Git: "https://github.com/acme/web.git", Ref: "main", Builder: spec.BuilderAuto}}
+	res := deploy(t, e, app)
+	if rt.Containers["web"].Env["PORT"] != "8080" || res.Deployment.Detected != "node 22 · npm · npm start" {
+		t.Fatalf("auto builds must get PORT and record what was detected: env=%v detected=%q", rt.Containers["web"].Env, res.Deployment.Detected)
+	}
+	// An explicit PORT wins.
+	app2 := app.Clone()
+	app2.Env = map[string]string{"PORT": "9000"}
+	deploy(t, e, app2)
+	if rt.Containers["web"].Env["PORT"] != "9000" {
+		t.Fatal("an explicit PORT must not be overridden")
+	}
+	// Dockerfile builds don't get PORT injected.
+	plain := &spec.App{Name: "plain", Port: 8080, Build: &spec.Build{Git: "https://github.com/acme/web.git", Ref: "main"}}
+	deploy(t, e, plain)
+	if _, ok := rt.Containers["plain"].Env["PORT"]; ok {
+		t.Fatal("Dockerfile builds must not get PORT injected")
+	}
+	// A preview of an auto-built app works the same way (this staging
+	// parent's env, including its explicit PORT, is inherited).
+	pr, err := e.CreatePreview(ctx, "agent", PreviewRequest{App: "web", Ref: "main", Name: "try"})
+	if err != nil || rt.Containers[pr.App].Env["PORT"] != "9000" {
+		t.Fatalf("preview of an auto-built app: %v %v", err, rt.Containers[pr.App].Env)
+	}
+	det, err := e.DetectBuild(ctx, DetectRequest{App: "web"})
+	if err != nil || det.Detection.Language != "node" {
+		t.Fatalf("detect: %+v %v", det, err)
+	}
+}

@@ -168,6 +168,11 @@ func (c *Client) Snapshot(ctx context.Context, app, database, reason string) (*s
 	return &out, c.do(ctx, "POST", "/v1/apps/"+esc(app)+"/databases/"+esc(database)+"/snapshots", api.SnapshotRequest{Reason: reason}, &out)
 }
 
+func (c *Client) DetectBuild(ctx context.Context, req engine.DetectRequest) (*engine.DetectResult, error) {
+	var out engine.DetectResult
+	return &out, c.do(ctx, "POST", "/v1/build/detect", req, &out)
+}
+
 func (c *Client) CreatePreview(ctx context.Context, req engine.PreviewRequest) (*engine.PreviewResult, error) {
 	var out engine.PreviewResult
 	return &out, c.do(ctx, "POST", "/v1/previews", req, &out)

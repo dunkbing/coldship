@@ -123,12 +123,15 @@ type Deployment struct {
 	FailedIn  string    `json:"failed_in,omitempty"` // build | deploy
 	// KeptPrevious is true when the deployment failed without touching the
 	// previous version, which kept running and serving traffic.
-	KeptPrevious bool       `json:"kept_previous,omitempty"`
-	Strategy     string     `json:"strategy,omitempty"` // zero-downtime | recreate`
-	Actor        string     `json:"actor"`
-	Reason       string     `json:"reason"`
-	CreatedAt    time.Time  `json:"created_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	KeptPrevious bool   `json:"kept_previous,omitempty"`
+	Strategy     string `json:"strategy,omitempty"` // zero-downtime | recreate
+	// Detected summarizes the project detection when Hangar generated the
+	// Dockerfile, e.g. "node 22 · pnpm · pnpm start".
+	Detected   string     `json:"detected,omitempty"`
+	Actor      string     `json:"actor"`
+	Reason     string     `json:"reason"`
+	CreatedAt  time.Time  `json:"created_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
 type AuditEntry struct {

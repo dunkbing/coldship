@@ -48,7 +48,8 @@ Every error from every interface has the same shape:
 | `git_ref_not_found` | 422 | At plan time. `details.available_refs` lists real branches and tags. |
 | `git_commit_not_found` | 422 | The pinned commit is gone (force-pushed?). Plan again. |
 | `git_clone_failed` | 500 | Setting up the checkout failed |
-| `dockerfile_not_found` | 422 | No Dockerfile at `context/dockerfile`. The suggested fix names one found elsewhere in the repository. |
+| `dockerfile_not_found` | 422 | `builder: dockerfile` (or a named Dockerfile) is set, but the file doesn't exist. The suggested fix names one found elsewhere in the repository. |
+| `build_detect_failed` | 422 | No Dockerfile, and Hangar couldn't work out how to build or start the project. The suggested fix shows the `build.auto` fields to set. |
 | `build_failed` | 422 | `docker build` failed. Read the build log. The running app is untouched (`failed_in: build`). |
 | `build_timeout` | 504 | The build exceeded the server's `--build-timeout` |
 | `health_check_failed` | 502 | The new container never became healthy. With zero-downtime deploys the previous version keeps serving (`details.previous_version_running`). |

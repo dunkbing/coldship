@@ -80,6 +80,12 @@ Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tool
 | `hangar deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
 | `hangar version` | CLI and server versions, and whether an update is available |
 
+## Builds
+
+| Command | Description |
+|---|---|
+| `hangar build detect [-f hangar.yaml \| --app A] [--dockerfile]` | Show how the app would be built (its Dockerfile, or what Hangar detects and generates) without building |
+
 ## Webhooks
 
 | Command | Description |

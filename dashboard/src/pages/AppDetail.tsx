@@ -126,9 +126,17 @@ function SpecCard({ a }: { a: AppView }) {
               <Mono>{s.build.ref || 'default branch'}</Mono>
               {s.build.commit && <span className="muted mono small"> · {s.build.commit.slice(0, 12)}</span>}
             </dd>
-            <dt>Dockerfile</dt>
+            <dt>Built with</dt>
             <dd>
-              <Mono>{s.build.context === '.' || !s.build.context ? s.build.dockerfile : `${s.build.context}/${s.build.dockerfile}`}</Mono>
+              {a.latest_deployment?.detected ? (
+                <span title="Hangar generated the Dockerfile; override with build.auto">
+                  generated Dockerfile · <Mono>{a.latest_deployment.detected}</Mono>
+                </span>
+              ) : s.build.builder === 'auto' ? (
+                'generated Dockerfile'
+              ) : (
+                <Mono>{s.build.context === '.' || !s.build.context ? s.build.dockerfile : `${s.build.context}/${s.build.dockerfile}`}</Mono>
+              )}
             </dd>
             {s.build.args && Object.keys(s.build.args).length > 0 && (
               <>
@@ -378,6 +386,7 @@ function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean;
         </td>
         <td>
           <Mono>{x.image || x.spec?.image || '—'}</Mono>
+          {x.detected && <div className="small muted">generated: {x.detected}</div>}
         </td>
         <td>
           {x.commit ? <Mono>{x.commit.slice(0, 7)}</Mono> : '—'}

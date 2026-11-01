@@ -108,7 +108,54 @@ Building someone's repository on your server is code execution by design: the Do
   client disconnects, and calling apply again returns the result once it has finished.
 </Aside>
 
+## Without a Dockerfile
+
+If the repository has no Dockerfile, Hangar works out what kind of project it is and generates one:
+
+| Project | Detected from | Version from | Install | Start |
+|---|---|---|---|---|
+| Node | `package.json` | `.nvmrc`, `.node-version`, `engines.node` (default 22) | `npm ci`, `pnpm`, `yarn` by lockfile | `start` script, `main`, `server.js`/`index.js` |
+| Bun | `bun.lock`, `bunfig.toml`, `packageManager: bun@…`, a `bun` start script | default 1 | `bun install` | `start` script, `main`, `index.ts` |
+| Python | `requirements.txt`, `pyproject.toml`, `uv.lock`, `setup.py` | `.python-version`, `runtime.txt` (default 3.12) | pip or `uv sync` | `Procfile` `web:`, `main.py`/`app.py`/`server.py` |
+| Go | `go.mod` | the `go` line (default 1.23) | `go mod download` | the main package at the root or the only one under `cmd/` |
+| Static site | `index.html` | | | nginx |
+
+A `Procfile` `web:` line, if there is one, sets the start command for any language. Generated images run as a non-root user and read their port from `$PORT`, which Hangar sets to the spec's `port`. The static-site server reads it too.
+
+**Check before deploying.** `hangar build detect -f hangar.yaml` (or the `hangar_build_detect` MCP tool) checks out the commit and explains every choice without building anything:
+
+```txt
+Commit 1d8062bed3e9 builds with node 20 · npm · npm start.
+  - language node: found package.json
+  - version 20, from engines.node in package.json
+  - package manager npm, chosen from the lockfile
+  - install: npm ci
+  - build: npm run build
+  - start: npm start
+```
+
+Add `--dockerfile` to print the generated Dockerfile. Every build also writes it to the deploy log, and the deployment records a summary.
+
+**Correct it in the spec** when detection guesses wrong:
+
+```yaml
+build:
+  git: https://github.com/acme/api.git
+  builder: auto          # dockerfile | auto | empty (default: Dockerfile if present, else auto)
+  auto:
+    language: python     # node, bun, python, go, static
+    version: "3.11"
+    install: pip install -r requirements/prod.txt
+    start: gunicorn app:app --bind 0.0.0.0:$PORT
+```
+
+For Go, `auto.build` is the package to build, e.g. `./cmd/server`. When detection can't decide, for example with no start command or several `cmd/` packages, the error lists what it found and suggests the `build.auto` fix.
+
+**Values from the repository are untrusted.** Versions read from files must match strict patterns, or the default is used and a note says why. Start commands are encoded safely into `CMD`. Symlinked project files are ignored. The generated Dockerfile is written outside the checkout, with its own `.dockerignore`, which keeps `.git`, `node_modules` and `.env` files out of the image in addition to the repository's own ignores. Nothing is ever written into the repository.
+
+To use the repository's Dockerfile only, and fail if it's missing, set `builder: dockerfile`.
+
 ## Limits
 
-- A Dockerfile is required. If none is found, the error names the kind of project it found (from files such as `package.json` or `go.mod`) and suggests any Dockerfiles elsewhere in the repository. Building without a Dockerfile is on the [roadmap](/project/roadmap/).
+- Detection covers the projects above. Others need a Dockerfile, or `build.auto` with an explicit language and start command.
 - Builds run on the Hangar server's Docker daemon with BuildKit.

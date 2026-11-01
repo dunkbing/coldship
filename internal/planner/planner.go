@@ -146,6 +146,19 @@ func buildDiff(cs []Change, cur, des *spec.Build) []Change {
 	cs = scalar(cs, "build.commit", cur.Commit, des.Commit)
 	cs = scalar(cs, "build.context", cur.Context, des.Context)
 	cs = scalar(cs, "build.dockerfile", cur.Dockerfile, des.Dockerfile)
+	cs = scalar(cs, "build.builder", cur.Builder, des.Builder)
+	var ca, da spec.AutoBuild
+	if cur.Auto != nil {
+		ca = *cur.Auto
+	}
+	if des.Auto != nil {
+		da = *des.Auto
+	}
+	cs = scalar(cs, "build.auto.language", ca.Language, da.Language)
+	cs = scalar(cs, "build.auto.version", ca.Version, da.Version)
+	cs = scalar(cs, "build.auto.install", ca.Install, da.Install)
+	cs = scalar(cs, "build.auto.build", ca.Build, da.Build)
+	cs = scalar(cs, "build.auto.start", ca.Start, da.Start)
 	return mapDiff(cs, "build.args.", cur.Args, des.Args, false)
 }
 

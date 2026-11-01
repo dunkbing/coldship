@@ -48,6 +48,8 @@ volumes:
 | `context` | `.` | Build context directory, relative to the repository root |
 | `dockerfile` | `Dockerfile` | Dockerfile path, relative to `context` |
 | `args` | | `docker build --build-arg` values. They are visible in plans and image history, so never put secrets here. |
+| `builder` | empty | `dockerfile` (require it), `auto` (always generate), or empty (the Dockerfile if present, else generate one) |
+| `auto` | | Overrides for generated builds: `{language, version, install, build, start}`. See [Without a Dockerfile](/guides/build-from-git/#without-a-dockerfile). |
 
 See [Build from Git](/guides/build-from-git/).
 

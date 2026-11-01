@@ -36,7 +36,7 @@ func (f *Fake) Resolve(_ context.Context, b spec.Build) (string, error) {
 	return "", apierr.New(422, "git_ref_not_found", "ref %q was not found in %s", b.Ref, b.Git)
 }
 
-func (f *Fake) Build(_ context.Context, app string, b spec.Build, log io.Writer) (string, error) {
+func (f *Fake) Build(_ context.Context, app string, b spec.Build, log io.Writer) (*Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Builds++
@@ -44,7 +44,19 @@ func (f *Fake) Build(_ context.Context, app string, b spec.Build, log io.Writer)
 	if err := f.FailNext; err != nil {
 		f.FailNext = nil
 		fmt.Fprintln(log, "step 3/5: RUN make: exit code 2")
-		return "", err
+		return nil, err
 	}
-	return ImageTag(app, b), nil
+	// Builder "auto" stands in for a project without a Dockerfile.
+	if b.Builder == spec.BuilderAuto {
+		return &Result{Image: ImageTag(app, b), Auto: true, Summary: "node 22 · npm · npm start"}, nil
+	}
+	return &Result{Image: ImageTag(app, b), Summary: "the repository's Dockerfile"}, nil
+}
+
+func (f *Fake) Detect(_ context.Context, b spec.Build, _ io.Writer) (*Detection, error) {
+	if b.Builder == spec.BuilderAuto {
+		return &Detection{Mode: "auto", Language: "node", Version: "22", PackageManager: "npm", Start: "npm start",
+			Notes: []string{"language node: found package.json"}, Dockerfile: "FROM node:22-alpine\n"}, nil
+	}
+	return &Detection{Mode: "dockerfile", Notes: []string{"uses Dockerfile from the repository"}}, nil
 }

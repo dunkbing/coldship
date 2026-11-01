@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -684,13 +685,24 @@ func (e *Engine) build(ctx context.Context, d *store.Deployment, run *spec.App, 
 	if err := e.st.SaveDeployment(ctx, d); err != nil {
 		return err
 	}
-	img, err := e.bd.Build(ctx, run.Name, *run.Build, log)
+	res, err := e.bd.Build(ctx, run.Name, *run.Build, log)
 	if err != nil {
 		d.FailedIn = store.PhaseBuild
 		return err
 	}
-	run.Image, run.Build = img, nil
-	d.Image, d.Status = img, store.DeployInProgress
+	run.Image, run.Build = res.Image, nil
+	d.Image, d.Status = res.Image, store.DeployInProgress
+	if res.Auto {
+		d.Detected = res.Summary
+		// Generated images listen on $PORT; point it at the spec's port.
+		if run.Port > 0 && run.Env["PORT"] == "" {
+			if run.Env == nil {
+				run.Env = map[string]string{}
+			}
+			run.Env["PORT"] = strconv.Itoa(run.Port)
+			fmt.Fprintf(log, "hangar: PORT=%d set for the generated image\n", run.Port)
+		}
+	}
 	return e.st.SaveDeployment(ctx, d)
 }
 

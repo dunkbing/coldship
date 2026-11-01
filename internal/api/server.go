@@ -63,6 +63,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}/databases", store.ScopeRead, s.databases)
 	s.route("GET /v1/apps/{name}/snapshots", store.ScopeRead, s.snapshots)
 	s.route("POST /v1/apps/{name}/databases/{db}/snapshots", store.ScopeDeploy, s.createSnapshot)
+	s.route("POST /v1/build/detect", store.ScopeDeploy, s.detectBuild)
 	s.route("POST /v1/previews", store.ScopeDeploy, s.createPreview)
 	s.route("GET /v1/previews", store.ScopeRead, s.listPreviews)
 	s.route("DELETE /v1/previews/{name}", store.ScopeDeploy, s.deletePreview)
@@ -420,6 +421,14 @@ func (s *Server) rollback(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	return s.eng.Rollback(r.Context(), p.name, r.PathValue("name"), req.ToDeployment, req.Reason)
+}
+
+func (s *Server) detectBuild(r *http.Request, _ principal) (any, error) {
+	var req engine.DetectRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	return s.eng.DetectBuild(r.Context(), req)
 }
 
 func (s *Server) createPreview(r *http.Request, p principal) (any, error) {
