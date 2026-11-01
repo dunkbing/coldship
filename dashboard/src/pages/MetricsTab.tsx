@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api, type AppView } from '../api'
 import { useLoad } from '../hooks'
-import { ErrorBox } from '../components/ui'
+import { ErrorBox } from '@/components/common'
 import { LineChart } from '../components/Chart'
 
 export function bytes(n: number): string {

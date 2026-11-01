@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api, type Plan } from '../api'
 import { useSession } from '../App'
 import { useLoad } from '../hooks'
-import { ChangeList, Empty, ErrorBox, Mono, PlanMeta } from '../components/ui'
+import { ChangeList, Empty, ErrorBox, Mono, PlanMeta } from '@/components/common'
 
 export default function Approvals() {
   const plans = useLoad(() => api.plans('pending'), [], 5000)

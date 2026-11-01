@@ -2,7 +2,7 @@ import { LiveLog } from '../components/LiveLog'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type Patch, type Plan } from '../api'
-import { ErrorBox } from '../components/ui'
+import { ErrorBox } from '@/components/common'
 
 // nameFrom suggests an app name: https://github.com/acme/web-shop.git ->
 // web-shop, ghcr.io/acme/api:1.2 -> api.

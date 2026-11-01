@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { api } from '../api'
 import { useLoad } from '../hooks'
-import { Empty, ErrorBox, Mono, Time } from '../components/ui'
+import { Empty, ErrorBox, Mono, Time } from '@/components/common'
 
 export default function Audit() {
   const audit = useLoad(() => api.audit(500), [], 10000)

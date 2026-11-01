@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { useLoad } from '../hooks'
-import { ErrorBox, Time } from '../components/ui'
+import { ErrorBox, Time } from '@/components/common'
 import { DataMark, dataKinds, envSummary } from '../components/data'
 import { useSession } from '../App'
 

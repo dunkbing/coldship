@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, type DataEngine } from '../api'
-import { ErrorBox } from '../components/ui'
+import { ErrorBox } from '@/components/common'
 import { DataMark, dataKinds } from '../components/data'
 
 export default function NewData() {

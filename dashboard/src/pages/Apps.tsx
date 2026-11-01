@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { api, type AppView } from '../api'
 import { timeUntil, useLoad } from '../hooks'
-import { DeployStatus, Empty, ErrorBox, HealthPill, healthOf, Source, StageBadge, Time } from '../components/ui'
+import { DeployStatus, Empty, ErrorBox, HealthPill, healthOf, Source, StageBadge, Time } from '@/components/common'
 
 async function loadApps(): Promise<AppView[]> {
   const apps = await api.apps()

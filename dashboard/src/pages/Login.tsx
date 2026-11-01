@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { api, type WhoAmI } from '../api'
-import { ErrorBox } from '../components/ui'
+import { ErrorBox } from '@/components/common'
 
 export default function Login({ onLogin, initialError }: { onLogin: (w: WhoAmI) => void; initialError?: Error }) {
   const [token, setTok] = useState('')

@@ -1,6 +1,6 @@
 import { api, type Usage } from '../api'
 import { useLoad } from '../hooks'
-import { ErrorBox } from '../components/ui'
+import { ErrorBox } from '@/components/common'
 
 function bytes(n: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']

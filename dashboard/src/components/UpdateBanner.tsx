@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type SystemStatus } from '../api'
 import { useSession } from '../App'
-import { ErrorBox } from './ui'
+import { ErrorBox } from '@/components/common'
 
 const DISMISS_KEY = 'coldship.dismissed-update'
 

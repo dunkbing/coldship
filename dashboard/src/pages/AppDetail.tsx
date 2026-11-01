@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, type AppView, type Deployment } from '../api'
 import { useSession } from '../App'
 import { fmtTime, timeUntil, useLoad } from '../hooks'
-import { DeployStatus, ErrorBox, GitIcon, HealthPill, healthOf, Mono, shortRepo, StageBadge, Time } from '../components/ui'
+import { DeployStatus, ErrorBox, GitIcon, HealthPill, healthOf, Mono, shortRepo, StageBadge, Time } from '@/components/common'
 
 type Tab = 'diagnose' | 'metrics' | 'deployments' | 'logs' | 'databases' | 'webhook'
 

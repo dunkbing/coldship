@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { api, type DataView } from '../api'
 import { useLoad } from '../hooks'
-import { Empty, ErrorBox, Time } from '../components/ui'
+import { Empty, ErrorBox, Time } from '@/components/common'
 import { DataMark, dataKinds, envSummary } from '../components/data'
 
 function Status({ d }: { d: DataView }) {

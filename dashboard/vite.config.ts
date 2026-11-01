@@ -1,10 +1,13 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 // The production build is embedded into the Go binary (internal/web/dist),
 // which serves it on the same origin as the API.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   // No data: URLs: the dashboard's CSP only allows files from its own origin.
   build: { outDir: '../internal/web/dist', emptyOutDir: true, assetsInlineLimit: 0 },
   server: {
