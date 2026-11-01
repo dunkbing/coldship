@@ -93,6 +93,9 @@ func (r *keyRotator) rotate(ctx context.Context) (map[string]any, error) {
 		return nil, apierr.New(409, "key_from_environment", "the secret key comes from COLDSHIP_SECRET_KEY, which Coldship can't rewrite").
 			WithHint("to rotate it: stop the server, run `coldship secrets decrypt`, set a new COLDSHIP_SECRET_KEY, and start the server again")
 	}
+	// Finish even if the caller disconnects: a half-done rotation is worse
+	// than a late answer.
+	ctx = context.WithoutCancel(ctx)
 	old := r.kr.CurrentID()
 	next := r.kr.WithNewKey()
 	if err := next.Save(r.keyFile); err != nil {
@@ -100,6 +103,10 @@ func (r *keyRotator) rotate(ctx context.Context) (map[string]any, error) {
 	}
 	n, err := r.st.RotateKey(ctx, next)
 	if err != nil {
+		// The store and the key file now hold next (old and new keys), and
+		// some values may already use the new key. Keep next, so a retry
+		// starts from it instead of dropping the new key.
+		r.kr = next
 		return nil, fmt.Errorf("re-encrypting failed; the key file still holds both keys, so nothing is lost: %w", err)
 	}
 	// Drop the old key only if nothing uses it any more.

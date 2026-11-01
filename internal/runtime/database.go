@@ -143,7 +143,7 @@ func (d *Docker) dbReady(ctx context.Context, db DB) bool {
 	c := dbContainer(db.App, db.Name)
 	switch db.Engine {
 	case spec.EngineRedis:
-		out, _, err := d.run(ctx, "exec", "-e", "REDISCLI_AUTH="+db.Password, c, "redis-cli", "ping")
+		out, _, err := d.runEnv(ctx, []string{"REDISCLI_AUTH=" + db.Password}, "exec", "-e", "REDISCLI_AUTH", c, "redis-cli", "ping")
 		return err == nil && strings.Contains(out, "PONG")
 	default:
 		// Over TCP: during first-time setup postgres only listens on its
@@ -185,7 +185,7 @@ func (d *Docker) SnapshotDatabase(ctx context.Context, db DB, w io.Writer) error
 	var args []string
 	switch db.Engine {
 	case spec.EngineRedis:
-		if _, se, err := d.run(ctx, "exec", "-e", "REDISCLI_AUTH="+db.Password, c, "redis-cli", "SAVE"); err != nil {
+		if _, se, err := d.runEnv(ctx, []string{"REDISCLI_AUTH=" + db.Password}, "exec", "-e", "REDISCLI_AUTH", c, "redis-cli", "SAVE"); err != nil {
 			return apierr.New(502, "snapshot_failed", "redis SAVE failed for %s: %s", db.Name, se)
 		}
 		args = []string{"exec", c, "cat", "/data/dump.rdb"}

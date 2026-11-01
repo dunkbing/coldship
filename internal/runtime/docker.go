@@ -62,7 +62,17 @@ var (
 )
 
 func (d *Docker) run(ctx context.Context, args ...string) (string, string, error) {
+	return d.runEnv(ctx, nil, args...)
+}
+
+// runEnv runs docker with extra environment variables. Pass secrets this way
+// with `-e NAME` (no value), never as `-e NAME=value`, which the process list
+// shows.
+func (d *Docker) runEnv(ctx context.Context, env []string, args ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, d.Bin, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
