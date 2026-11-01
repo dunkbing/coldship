@@ -57,3 +57,13 @@ func TestDeployFlagsInferFromGitRepo(t *testing.T) {
 		t.Fatal("--env without = must fail")
 	}
 }
+
+func TestEngineHostFromUnit(t *testing.T) {
+	unit := "[Service]\nEnvironment=DOCKER_HOST=unix:///run/podman/podman.sock\nExecStart=/usr/local/bin/coldship server --data /var/lib/coldship/coldship.db\n"
+	if m := engineHostRe.FindStringSubmatch(unit); m == nil || m[1] != "unix:///run/podman/podman.sock" {
+		t.Fatalf("engine host: %v", m)
+	}
+	if m := dataFlagRe.FindStringSubmatch(unit); m == nil || m[1] != "/var/lib/coldship/coldship.db" {
+		t.Fatalf("data: %v", m)
+	}
+}

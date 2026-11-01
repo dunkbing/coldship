@@ -75,6 +75,18 @@ WantedBy=multi-user.target
 
 `--admin-token-file` writes the first admin token to that file (mode 0600) instead of the log. Read it once, store it, and delete the file.
 
+## Docker or Podman
+
+Coldship runs apps with Docker or with Podman, through the same API. The installer uses Docker if it's installed, Podman if only Podman is, and otherwise installs Docker. To choose Podman explicitly (it installs it if needed):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | COLDSHIP_ENGINE=podman sh
+```
+
+With Podman, Coldship uses rootful Podman's API socket (`podman.socket`), builds images with `podman build`, and enables `podman-restart.service` so apps come back after a reboot. Rootless Podman isn't supported: Coldship checks an app's health by connecting to its container directly, which a rootless network doesn't allow.
+
+When you run `coldship server` by hand, it uses `DOCKER_HOST` if set, then Docker's socket, then Podman's, and logs which engine it found.
+
 ## Uninstalling
 
 ```sh

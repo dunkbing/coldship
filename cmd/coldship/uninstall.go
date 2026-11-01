@@ -85,7 +85,24 @@ func rerunAsRoot(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-var dataFlagRe = regexp.MustCompile(`--data\s+(\S+)`)
+var (
+	dataFlagRe   = regexp.MustCompile(`--data\s+(\S+)`)
+	engineHostRe = regexp.MustCompile(`(?m)^Environment=DOCKER_HOST=(\S+)`)
+)
+
+// useServiceEngine points the Docker client at the engine the installed
+// service uses (Podman's socket, say), so uninstall cleans up the right one
+// even when both Docker and Podman are installed.
+func useServiceEngine() {
+	if os.Getenv("DOCKER_HOST") != "" {
+		return
+	}
+	if b, err := os.ReadFile(unitPath); err == nil {
+		if m := engineHostRe.FindSubmatch(b); m != nil {
+			os.Setenv("DOCKER_HOST", string(m[1]))
+		}
+	}
+}
 
 // dataDir is where the installed service keeps its state.
 func dataDir() string {
@@ -124,6 +141,7 @@ func uninstall(ctx context.Context, yes, keepData bool) error {
 	hasData := dirErr == nil
 	cfg := invokingUserConfig()
 
+	useServiceEngine()
 	d := runtime.NewDocker()
 	plan, planErr := d.PlanPurge(ctx)
 	if planErr != nil {

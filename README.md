@@ -16,7 +16,7 @@ like deleting production data, waits for your approval.
 
 ## Install
 
-On a Linux server with [Docker](https://docs.docker.com/engine/install/):
+On a Linux server (Docker is installed for you if needed; [Podman](https://podman.io) works too):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
