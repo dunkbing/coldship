@@ -48,11 +48,11 @@ type PreviewRequest struct {
 	// InheritEnv copies the parent's env. Defaults to true, except for
 	// production apps, whose env (database URLs, API keys) a throwaway
 	// preview must not get by accident.
-	InheritEnv *bool  `json:"inherit_env,omitempty"`
+	InheritEnv *bool `json:"inherit_env,omitempty"`
 	// AdminCaller is set by the API, never from JSON: only admins may copy a
 	// production app's env (its secrets) into a preview.
-	AdminCaller bool `json:"-"`
-	Reason     string `json:"reason,omitempty"`
+	AdminCaller bool   `json:"-"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 type PreviewResult struct {
