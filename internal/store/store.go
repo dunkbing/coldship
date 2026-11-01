@@ -729,6 +729,9 @@ type Snapshot struct {
 	Reason    string    `json:"reason"`
 	Actor     string    `json:"actor"`
 	CreatedAt time.Time `json:"created_at"`
+	// Manual snapshots were asked for through the API. They are pruned
+	// separately, so asking for many can't push out automatic ones.
+	Manual bool `json:"manual,omitempty"`
 }
 
 func (s *Store) SaveSnapshot(ctx context.Context, sn *Snapshot) error {

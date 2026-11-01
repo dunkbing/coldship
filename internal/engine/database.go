@@ -79,6 +79,10 @@ func (e *Engine) ensureDatabases(ctx context.Context, run *spec.App, log io.Writ
 
 // Snapshot takes a snapshot of one database now.
 func (e *Engine) Snapshot(ctx context.Context, actor, app, database, reason string) (*store.Snapshot, error) {
+	return e.snapshotNamed(ctx, actor, app, database, reason, true)
+}
+
+func (e *Engine) snapshotNamed(ctx context.Context, actor, app, database, reason string, manual bool) (*store.Snapshot, error) {
 	defer e.lockApp(app)()
 	a, err := e.st.GetApp(ctx, app)
 	if err != nil {
@@ -92,19 +96,24 @@ func (e *Engine) Snapshot(ctx context.Context, actor, app, database, reason stri
 			if reason == "" {
 				reason = "manual"
 			}
-			return e.snapshot(ctx, actor, app, d, reason)
+			return e.takeSnapshot(ctx, actor, app, d, reason, manual)
 		}
 	}
 	return nil, apierr.NotFound("database", database)
 }
 
+// snapshot takes an automatic snapshot (before a destructive change).
 func (e *Engine) snapshot(ctx context.Context, actor, app string, d spec.Database, reason string) (*store.Snapshot, error) {
+	return e.takeSnapshot(ctx, actor, app, d, reason, false)
+}
+
+func (e *Engine) takeSnapshot(ctx context.Context, actor, app string, d spec.Database, reason string, manual bool) (*store.Snapshot, error) {
 	db, err := e.dbCreds(ctx, app, d)
 	if err != nil {
 		return nil, err
 	}
 	sn := &store.Snapshot{ID: store.NewID("snap"), App: app, Database: d.Name, Engine: d.Engine, Version: d.Version,
-		Reason: reason, Actor: actor, CreatedAt: e.Now()}
+		Reason: reason, Actor: actor, CreatedAt: e.Now(), Manual: manual}
 	dir := filepath.Join(e.SnapshotDir, app, d.Name)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -136,12 +145,14 @@ func (e *Engine) snapshot(ctx context.Context, actor, app string, d spec.Databas
 		return nil, err
 	}
 	e.audit(ctx, actor, "database.snapshot", app, reason, map[string]any{"database": d.Name, "snapshot": sn.ID, "size": sn.Size})
-	e.pruneSnapshots(ctx, app, d.Name)
+	e.pruneSnapshots(ctx, app, d.Name, manual)
 	return sn, nil
 }
 
-// pruneSnapshots keeps the newest SnapshotKeep snapshots of a database.
-func (e *Engine) pruneSnapshots(ctx context.Context, app, database string) {
+// pruneSnapshots keeps the newest SnapshotKeep manual, and separately the
+// newest SnapshotKeep automatic, snapshots of a database. Taking manual
+// snapshots never removes automatic ones.
+func (e *Engine) pruneSnapshots(ctx context.Context, app, database string, manual bool) {
 	if e.SnapshotKeep <= 0 {
 		return
 	}
@@ -149,9 +160,17 @@ func (e *Engine) pruneSnapshots(ctx context.Context, app, database string) {
 	if err != nil {
 		return
 	}
-	for _, sn := range snaps[min(len(snaps), e.SnapshotKeep):] {
+	kept := 0
+	for _, sn := range snaps {
+		if sn.Manual != manual {
+			continue
+		}
+		if kept++; kept <= e.SnapshotKeep {
+			continue
+		}
 		os.Remove(sn.Path)
 		e.st.DeleteSnapshot(ctx, sn.ID)
+		e.audit(ctx, "coldship", "database.snapshot_pruned", app, "retention", map[string]any{"database": database, "snapshot": sn.ID, "manual": manual})
 	}
 }
 
@@ -311,7 +330,7 @@ func (e *Engine) ScheduledSnapshots(ctx context.Context) (int, error) {
 			continue
 		}
 		for _, d := range a.Spec.Databases {
-			if _, err := e.Snapshot(ctx, "coldship", a.Name, d.Name, "scheduled"); err != nil {
+			if _, err := e.snapshotNamed(ctx, "coldship", a.Name, d.Name, "scheduled", false); err != nil {
 				return n, fmt.Errorf("%s/%s: %w", a.Name, d.Name, err)
 			}
 			n++

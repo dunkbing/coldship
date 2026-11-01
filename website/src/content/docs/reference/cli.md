@@ -43,7 +43,7 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--secret-key-file` | `COLDSHIP_SECRET_KEY_FILE` | `coldship.key` next to `--data` | Key that encrypts stored secrets. `COLDSHIP_SECRET_KEY` (base64 32 bytes) supplies the key directly instead. |
 | `--public-url` | `COLDSHIP_PUBLIC_URL` | | How Git hosts reach this server, for webhook URLs |
 | `--snapshot-dir` | `COLDSHIP_SNAPSHOT_DIR` | `coldship-snapshots` next to `--data` | Where database snapshots are stored |
-| `--snapshot-keep` | | `20` | Snapshots kept per database |
+| `--snapshot-keep` | | `20` | Snapshots kept per database, counted separately for manual and automatic ones (so manual snapshots never push out automatic ones) |
 | `--db-snapshot-interval` | | `24h` | Scheduled snapshots of every database (`0` disables) |
 | `--proxy-http-port` / `--proxy-https-port` | | `80` / `443` | Host ports for the proxy |
 | `--acme-email` | `COLDSHIP_ACME_EMAIL` | | Email for Let's Encrypt notices |

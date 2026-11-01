@@ -209,7 +209,7 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&keyFile, "secret-key-file", envOr("COLDSHIP_SECRET_KEY_FILE", ""), "key file that encrypts stored secrets (default: coldship.key next to --data; or set COLDSHIP_SECRET_KEY)")
 	cmd.Flags().StringVar(&publicURL, "public-url", envOr("COLDSHIP_PUBLIC_URL", ""), "URL Git hosts use to reach this server, for webhook URLs (e.g. https://coldship.example.com)")
 	cmd.Flags().StringVar(&snapshotDir, "snapshot-dir", envOr("COLDSHIP_SNAPSHOT_DIR", ""), "where database snapshots are kept (default: coldship-snapshots next to --data)")
-	cmd.Flags().IntVar(&snapshotKeep, "snapshot-keep", 20, "snapshots to keep per database (older ones are deleted)")
+	cmd.Flags().IntVar(&snapshotKeep, "snapshot-keep", 20, "snapshots to keep per database, manual and automatic counted separately (older ones are deleted)")
 	cmd.Flags().DurationVar(&snapshotInterval, "db-snapshot-interval", 24*time.Hour, "how often to snapshot every database (0 disables scheduled snapshots)")
 	cmd.Flags().BoolVar(&proxyOn, "proxy", true, "run the Caddy proxy that serves app domains with automatic HTTPS")
 	cmd.Flags().IntVar(&httpPort, "proxy-http-port", 80, "host port for the proxy's HTTP listener")

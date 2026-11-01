@@ -228,6 +228,11 @@ func TestPreviewGetsOwnDatabaseAndRetention(t *testing.T) {
 		t.Fatal("throwaway previews are not snapshotted")
 	}
 
+	// An automatic snapshot, then a flood of manual ones: the automatic one
+	// must survive.
+	if _, err := e.snapshotNamed(ctx, "coldship", "api", "main", "scheduled", false); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 4; i++ {
 		if _, err := e.Snapshot(ctx, "agent", "api", "main", ""); err != nil {
 			t.Fatal(err)
@@ -235,8 +240,11 @@ func TestPreviewGetsOwnDatabaseAndRetention(t *testing.T) {
 	}
 	snaps, _ := e.Snapshots(ctx, "api", "main")
 	files, _ := os.ReadDir(filepath.Join(e.SnapshotDir, "api", "main"))
-	if len(snaps) != 2 || len(files) != 2 {
-		t.Fatalf("retention should keep 2 snapshots, have %d rows and %d files", len(snaps), len(files))
+	if len(snaps) != 3 || len(files) != 3 {
+		t.Fatalf("retention should keep 2 manual and 1 automatic snapshot, have %d rows and %d files", len(snaps), len(files))
+	}
+	if last := snaps[len(snaps)-1]; last.Manual || last.Reason != "scheduled" {
+		t.Fatalf("manual snapshots pushed out the automatic one: %+v", snaps)
 	}
 	if n, err := e.ScheduledSnapshots(ctx); err != nil || n != 1 {
 		t.Fatalf("scheduled snapshots: %d %v", n, err)
