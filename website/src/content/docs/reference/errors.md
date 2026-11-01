@@ -77,6 +77,7 @@ Every error from every interface has the same shape:
 | `container_remove_failed`, `volume_remove_failed` | 502 | Docker failed to remove a resource |
 | `deploy_failed` | 502 | Another runtime failure during apply |
 | `runtime_unavailable`, `logs_unavailable` | 502 | Coldship couldn't talk to Docker |
+| `docker_not_installed`, `docker_not_running`, `docker_permission_denied` | 502 | At server start: Docker is missing, stopped, or not usable by this user. The hint has the fix, e.g. `sudo usermod -aG docker $USER`. |
 | `server_unreachable` | 503 | (CLI and MCP) The server isn't running at `COLDSHIP_URL` |
 | `secrets_unreadable` | 500 | A stored secret doesn't decrypt with the configured key (wrong key, corrupted, or copied from another row) |
 | `key_from_environment` | 409 | Keys from `COLDSHIP_SECRET_KEY` can't be rotated in place; see [rotation](/guides/secrets/#status-and-rotation) |

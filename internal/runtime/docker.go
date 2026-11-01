@@ -86,13 +86,42 @@ func (d *Docker) runEnv(ctx context.Context, env []string, args ...string) (stri
 	return out.String(), strings.TrimSpace(errb.String()), err
 }
 
+// Ping checks that Docker is installed, running and usable by this user,
+// and says how to fix it if not.
+func (d *Docker) Ping(ctx context.Context) error {
+	if _, err := exec.LookPath(d.Bin); err != nil {
+		return apierr.New(502, "docker_not_installed", "Docker isn't installed (no %q command found)", d.Bin).
+			WithHint("install Docker Engine: https://docs.docker.com/engine/install/, then start coldship server again")
+	}
+	if _, se, err := d.run(ctx, "version", "--format", "{{.Server.Version}}"); err != nil {
+		return dockerUnavailable("can't use Docker", se)
+	}
+	return nil
+}
+
+// dockerUnavailable explains a failed docker call with the usual fixes.
+func dockerUnavailable(what, stderr string) *apierr.Error {
+	e := apierr.New(502, "runtime_unavailable", "%s: %s", what, stderr)
+	s := strings.ToLower(stderr)
+	switch {
+	case strings.Contains(s, "permission denied"):
+		e.Code = "docker_permission_denied"
+		e.WithHint("this user isn't allowed to use Docker. Add it to the docker group: `sudo usermod -aG docker $USER`, " +
+			"then log out and back in (or run `newgrp docker`), check with `docker ps`, and start coldship server again")
+	case strings.Contains(s, "cannot connect") || strings.Contains(s, "is the docker daemon running") || strings.Contains(s, "no such file"):
+		e.Code = "docker_not_running"
+		e.WithHint("start Docker (`sudo systemctl enable --now docker`), check with `docker ps`, then start coldship server again")
+	}
+	return e
+}
+
 // EnsureNetwork creates the Coldship network if it doesn't exist.
 func (d *Docker) EnsureNetwork(ctx context.Context) error {
 	if _, _, err := d.run(ctx, "network", "inspect", Network); err == nil {
 		return nil
 	}
 	if _, se, err := d.run(ctx, "network", "create", "--label", "coldship=true", Network); err != nil && !strings.Contains(se, "already exists") {
-		return apierr.New(502, "runtime_unavailable", "could not create docker network %s: %s", Network, se)
+		return dockerUnavailable("could not create docker network "+Network, se)
 	}
 	return nil
 }

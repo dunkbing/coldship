@@ -7,7 +7,7 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 
 ## Requirements
 
-- A Linux server with Docker, and a user able to run `docker`
+- A Linux server with [Docker](https://docs.docker.com/engine/install/), and a user able to run `docker`. If `docker ps` says "permission denied", run `sudo usermod -aG docker $USER` and log in again.
 - To build from source only: Go 1.26+ and [Bun](https://bun.sh)
 
 ## Run it
@@ -34,7 +34,7 @@ import { Steps, Aside } from '@astrojs/starlight/components'
      cst_3f9c...
    ```
 
-   The server listens on `127.0.0.1:7070` and keeps its state in `./coldship.db`. Change these with `--addr` and `--data`.
+   The server listens on `127.0.0.1:7070` and keeps its state in `./coldship.db`. Change these with `--addr` and `--data`. If Docker isn't installed, running, or usable by your user, it stops and tells you how to fix it.
 
 3. **Point the CLI at it.**
 

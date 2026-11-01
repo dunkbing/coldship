@@ -46,6 +46,15 @@ func serverCmd() *cobra.Command {
 		Short: "Run the Coldship control plane (API server + Docker runtime)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			// Without Docker nothing can run: say so now, with the fix,
+			// before creating any files and instead of failing every deploy.
+			rt := runtime.NewDocker()
+			pingCtx, cancelPing := context.WithTimeout(cmd.Context(), 15*time.Second)
+			err := rt.Ping(pingCtx)
+			cancelPing()
+			if err != nil {
+				return err
+			}
 			if keyFile == "" {
 				keyFile = defaultKeyFile(data)
 			}
@@ -58,7 +67,6 @@ func serverCmd() *cobra.Command {
 				log.Warn("secrets are encrypted, but old plaintext copies may remain in free space; retrying on next start", "err", st.ScrubWarning)
 			}
 			rotator := &keyRotator{st: st, kr: kr, keyFile: keyFile, fromEnv: os.Getenv("COLDSHIP_SECRET_KEY") != ""}
-			rt := runtime.NewDocker()
 			rt.StartupGrace = grace
 			bd := builder.NewGit()
 			bd.CredentialsFile, bd.WorkDir, bd.Timeout = gitCreds, buildDir, buildTimeout

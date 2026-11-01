@@ -78,3 +78,28 @@ func TestMissingContainerIsNotAnError(t *testing.T) {
 		}
 	}
 }
+
+func TestPingExplainsTheFix(t *testing.T) {
+	cases := map[string]string{
+		"permission denied while trying to connect to the Docker daemon socket":                             "docker_permission_denied",
+		"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?": "docker_not_running",
+	}
+	for stderr, want := range cases {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "docker")
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\necho '"+stderr+"' >&2\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		d := NewDocker()
+		d.Bin = bin
+		ae, ok := apierr.As(d.Ping(context.Background()))
+		if !ok || ae.Code != want || ae.Hint == "" {
+			t.Fatalf("%q: want %s with a hint, got %+v", stderr, want, ae)
+		}
+	}
+	d := NewDocker()
+	d.Bin = "coldship-no-such-docker"
+	if ae, ok := apierr.As(d.Ping(context.Background())); !ok || ae.Code != "docker_not_installed" {
+		t.Fatalf("missing docker: got %+v", ae)
+	}
+}

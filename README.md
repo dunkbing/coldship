@@ -16,7 +16,8 @@ like deleting production data, waits for your approval.
 
 ## Install
 
-You need a Linux server with [Docker](https://docs.docker.com/engine/install/). Then:
+You need a Linux server with [Docker](https://docs.docker.com/engine/install/), and a user that can run
+`docker` (if `docker ps` says "permission denied": `sudo usermod -aG docker $USER`, then log in again). Then:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
