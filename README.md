@@ -16,14 +16,15 @@ like deleting production data, waits for your approval.
 
 ## Install
 
-You need a Linux server with [Docker](https://docs.docker.com/engine/install/), plus [Go](https://go.dev/dl/) and [Bun](https://bun.sh) to build.
+You need a Linux server with [Docker](https://docs.docker.com/engine/install/). Then:
 
 ```sh
-git clone https://github.com/dunkbing/coldship.git
-cd coldship
-make build
-sudo cp bin/coldship /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
 ```
+
+This installs the latest release to `/usr/local/bin`. Coldship keeps itself up to date after that.
+
+To build from source instead, you need [Go](https://go.dev/dl/) and [Bun](https://bun.sh): `git clone https://github.com/dunkbing/coldship.git && cd coldship && make build`.
 
 ## Start the server
 

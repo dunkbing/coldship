@@ -7,25 +7,25 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 
 ## Requirements
 
-- Docker, with your user able to run `docker`
-- Go 1.26 or newer (an older Go downloads the right toolchain automatically)
-- [Bun](https://bun.sh) to build the dashboard
+- A Linux server with Docker, and a user able to run `docker`
+- To build from source only: Go 1.26+ and [Bun](https://bun.sh)
 
 ## Run it
 
 <Steps>
 
-1. **Build the binary.** This builds the React dashboard and embeds it in the Go binary.
+1. **Install it.**
 
    ```sh
-   git clone https://github.com/dunkbing/coldship.git && cd coldship
-   make build
+   curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
    ```
+
+   Or build from source with `make build` (needs Go and Bun), which builds the dashboard and embeds it in the binary.
 
 2. **Start the server.** On first start it prints an admin token. It is shown only once, so save it.
 
    ```sh
-   ./bin/coldship server
+   coldship server
    ```
 
    ```txt
@@ -58,7 +58,7 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 5. **Plan it.** Planning is a dry run that changes nothing.
 
    ```sh
-   ./bin/coldship plan -f coldship.yaml
+   coldship plan -f coldship.yaml
    ```
 
    ```txt
@@ -71,7 +71,7 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 6. **Apply it.** Every apply needs a reason, which goes in the audit log.
 
    ```sh
-   ./bin/coldship apply plan_692da65cccbb --reason "first deploy"
+   coldship apply plan_692da65cccbb --reason "first deploy"
    curl http://127.0.0.1:8080
    ```
 

@@ -1,0 +1,77 @@
+name: Release
+
+# Push a tag like v0.2.0 to publish a release. Tags with a suffix
+# (v0.2.0-rc.1) become pre-releases, which servers never auto-install.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH"; exit 1
+          fi
+          git fetch --tags --force
+          NOTES="$(git for-each-ref "refs/tags/$GITHUB_REF_NAME" --format='%(contents:subject)')"
+          { echo "VERSION=$VERSION"; echo "NOTES=$NOTES"; } >> "$GITHUB_ENV"
+
+      - name: Tests
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.com
+          go test ./...
+
+      - name: Signing key
+        env:
+          KEY: ${{ secrets.COLDSHIP_RELEASE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "The COLDSHIP_RELEASE_KEY secret is not set"; exit 1; fi
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/release.key"
+
+      - name: Build and sign
+        run: |
+          make release VERSION="$VERSION" RELEASE_KEY="$RUNNER_TEMP/release.key" \
+            UPDATE_URL="https://github.com/${{ github.repository }}/releases/latest/download/latest.json" \
+            NOTES="$NOTES" NOTES_URL="https://github.com/${{ github.repository }}/releases/tag/$GITHUB_REF_NAME"
+          rm -f "$RUNNER_TEMP/release.key"
+          ls -l dist
+
+      # Gate: an older build must be able to verify and install this release
+      # through the real self-update path (signature, checksum, --version).
+      - name: Verify with a real self-update
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          mkdir -p "$RUNNER_TEMP/old"
+          go build -ldflags "-X main.version=0.0.0 -X main.updatePublicKey=$(cat release/coldship-release.pub)" \
+            -o "$RUNNER_TEMP/old/coldship" ./cmd/coldship
+          (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          for i in $(seq 20); do curl -sf -o /dev/null http://127.0.0.1:8765/latest.json && break; sleep 0.5; done
+          "$RUNNER_TEMP/old/coldship" self-update --manifest-url http://127.0.0.1:8765/latest.json
+          "$RUNNER_TEMP/old/coldship" --version | grep -F "$VERSION"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=""
+          case "$VERSION" in *-*) flags="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Coldship $VERSION" --generate-notes --verify-tag $flags

@@ -51,15 +51,23 @@ To roll back by hand, stop the server, move `coldship.old` back over `coldship`,
 
 ## Publishing a release (maintainers)
 
-```sh
-# once: create the signing key (keep coldship-release.key secret)
-./bin/coldship release keygen
+Releases are published to GitHub Releases by the `Release` workflow. To cut one, push a tag:
 
-# each release: build, sign, upload dist/ as-is
-make release VERSION=0.3.0 \
-  UPDATE_PUBLIC_KEY=<public key from keygen> \
-  UPDATE_URL=https://releases.example.com/coldship/latest.json \
-  NOTES="Zero-downtime deploys and automatic HTTPS"
+```sh
+git tag -a v0.2.0 -m "Zero-downtime deploys and automatic HTTPS"   # the message is the release note servers show
+git push origin v0.2.0
 ```
 
-`make release` cross-compiles `dist/coldship-linux-amd64` and `dist/coldship-linux-arm64` with the version, public key and update URL built in, and writes `dist/latest.json` signed with `coldship-release.key`. Upload the whole `dist/` directory to the update URL's location. The manifest refers to the binaries by relative paths.
+The workflow:
+
+1. runs the tests
+2. builds the dashboard and binaries for Linux and macOS (amd64 and arm64)
+3. writes `SHA256SUMS` and a `latest.json` manifest signed with the release key
+4. **verifies the release before publishing**: an older Coldship build must install it through the real `self-update` path (signature, checksum, `--version`)
+5. publishes the GitHub release with generated notes
+
+Tags with a suffix, like `v0.2.0-rc.1`, become pre-releases. Servers never install them automatically, because `releases/latest` skips pre-releases.
+
+**The signing key.** The private key is the `COLDSHIP_RELEASE_KEY` Actions secret. The public key is committed in `release/coldship-release.pub` and built into every binary. Keep an offline backup of the private key: if it's lost, existing installations can't verify new releases. If it leaks, someone could sign releases your servers would install.
+
+To build a release locally (for testing): `make release VERSION=0.2.0 RELEASE_KEY=path/to/key`, which writes `dist/`.
