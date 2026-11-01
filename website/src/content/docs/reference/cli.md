@@ -40,6 +40,7 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--preview-domain` | `HANGAR_PREVIEW_DOMAIN` | | Previews get `https://<name>.<domain>` (needs wildcard DNS) |
 | `--preview-ttl` / `--preview-max-ttl` | | `24h` / `168h` | Default and maximum preview lifetime |
 | `--max-previews` | | `20` | Most previews at once |
+| `--public-url` | `HANGAR_PUBLIC_URL` | | How Git hosts reach this server, for webhook URLs |
 | `--snapshot-dir` | `HANGAR_SNAPSHOT_DIR` | `hangar-snapshots` next to `--data` | Where database snapshots are stored |
 | `--snapshot-keep` | | `20` | Snapshots kept per database |
 | `--db-snapshot-interval` | | `24h` | Scheduled snapshots of every database (`0` disables) |
@@ -78,6 +79,14 @@ Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tool
 | `hangar diagnose <app>` | Findings and suggested fixes |
 | `hangar deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
 | `hangar version` | CLI and server versions, and whether an update is available |
+
+## Webhooks
+
+| Command | Description |
+|---|---|
+| `hangar webhook enable <app> [--rotate]` | Enable the app's Git webhook and print its URL and secret, shown once (admin) |
+| `hangar webhook status <app>` | Webhook settings and recent deliveries |
+| `hangar webhook disable <app>` | Turn the webhook off (admin) |
 
 ## Databases
 

@@ -418,6 +418,9 @@ func (e *Engine) usablePlan(ctx context.Context, id string) (*store.Plan, error)
 			return nil, err
 		}
 	}
+	if p.Status == store.PlanExpired && strings.HasPrefix(p.NextStep, "Superseded") {
+		return nil, apierr.New(409, "plan_superseded", "plan %s was replaced by a newer push. %s", p.ID, p.NextStep)
+	}
 	if p.Status == store.PlanExpired {
 		return nil, apierr.New(409, "plan_expired", "plan %s expired at %s", p.ID, p.ExpiresAt.Format(time.RFC3339)).
 			WithHint("create a new plan from the same spec and review it again")
@@ -436,7 +439,7 @@ func (e *Engine) Apply(ctx context.Context, actor, planID, reason string) (*Appl
 
 // Busy reports whether any deployment is in progress. Self-upgrades wait for
 // it to become false.
-func (e *Engine) Busy() bool { return e.active.Load() > 0 }
+func (e *Engine) Busy() bool { return e.active.Load() > 0 || e.hooksBusy() }
 
 func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*ApplyResult, error) {
 	e.active.Add(1)

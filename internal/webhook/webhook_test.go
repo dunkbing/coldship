@@ -3,6 +3,7 @@ package webhook
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"testing"
 )
 
@@ -73,5 +74,19 @@ func TestRepoMatches(t *testing.T) {
 	}
 	if RepoMatches(want, []string{"https://github.com/acme/shop-fork.git", "https://evil.com/acme/shop.git"}) {
 		t.Error("other repositories must not match")
+	}
+}
+
+func TestGitHubFormEncoded(t *testing.T) {
+	form := []byte("payload=" + url.QueryEscape(string(ghBody)))
+	p, err := Parse(hdr("X-GitHub-Event", "push", "Content-Type", "application/x-www-form-urlencoded",
+		"X-Hub-Signature-256", "sha256="+Sign(form, secret)), form, secret)
+	if err != nil || p.Branch != "main" || p.Pusher != "alice" {
+		t.Fatalf("form-encoded GitHub payload: %+v %v", p, err)
+	}
+	// The signature covers the raw form body, not the extracted JSON.
+	if _, err := Parse(hdr("X-GitHub-Event", "push", "Content-Type", "application/x-www-form-urlencoded",
+		"X-Hub-Signature-256", "sha256="+Sign(ghBody, secret)), form, secret); !errors.Is(err, ErrBadSignature) {
+		t.Fatal("a signature over the JSON alone must not verify a form body")
 	}
 }

@@ -26,6 +26,7 @@ export interface Spec {
   host_port?: number
   domains?: string[]
   databases?: { name: string; engine: 'postgres' | 'redis'; version?: string; env?: string }[]
+  on_push?: OnPush
   health?: { path?: string; timeout?: string }
   memory?: string
   env?: Record<string, string>
@@ -71,6 +72,39 @@ export interface Deployment {
   reason: string
   created_at: string
   finished_at?: string
+}
+
+export interface OnPush {
+  action: 'plan' | 'deploy'
+  previews?: boolean
+  preview_ttl?: string
+}
+
+export interface Delivery {
+  id: string
+  provider: string
+  event: string
+  ref?: string
+  commit?: string
+  pusher?: string
+  message?: string
+  result: string
+  detail?: string
+  plan?: string
+  preview?: string
+  created_at: string
+}
+
+export interface WebhookInfo {
+  url: string
+  secret?: string
+  app: string
+  enabled: boolean
+  enabled_at?: string
+  on_push?: OnPush
+  ref?: string
+  deliveries: Delivery[]
+  note: string
 }
 
 export interface Snapshot {
@@ -264,6 +298,9 @@ export const api = {
   snapshots: (app: string, database = '') => req<Snapshot[]>('GET', `/v1/apps/${enc(app)}/snapshots?database=${enc(database)}`),
   snapshot: (app: string, database: string, reason = 'manual, from the dashboard') =>
     req<Snapshot>('POST', `/v1/apps/${enc(app)}/databases/${enc(database)}/snapshots`, { reason }),
+  webhook: (app: string) => req<WebhookInfo>('GET', `/v1/apps/${enc(app)}/webhook`),
+  enableWebhook: (app: string, rotate = false) => req<WebhookInfo>('POST', `/v1/apps/${enc(app)}/webhook`, { rotate }),
+  disableWebhook: (app: string) => req<{ disabled: boolean }>('DELETE', `/v1/apps/${enc(app)}/webhook`),
   previews: () => req<App[]>('GET', '/v1/previews'),
   deletePreview: (name: string, reason = 'deleted from the dashboard') =>
     req<ApplyResult>('DELETE', `/v1/previews/${enc(name)}?reason=${enc(reason)}`),

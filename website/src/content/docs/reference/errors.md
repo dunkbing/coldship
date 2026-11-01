@@ -39,6 +39,7 @@ Every error from every interface has the same shape:
 | `route_not_found` | 404 | Unknown API path |
 | `plan_stale` | 409 | The app changed since planning. Plan again. CLI exit code 4. |
 | `plan_expired` | 409 | Plans live 30 minutes. Plan again. CLI exit code 4. |
+| `plan_superseded` | 409 | A newer push replaced this webhook plan; the message names the new one. CLI exit code 4. |
 | `no_rollback_target` | 409 | There is no earlier successful deployment |
 | `token_exists` | 409 | A token with that name exists |
 | `image_pull_failed` | 422 | Check the image name, tag and registry access. The running app is untouched. |
@@ -56,6 +57,10 @@ Every error from every interface has the same shape:
 | `snapshot_failed` | 502 | A snapshot failed. Nothing was deleted. |
 | `snapshot_not_found`, `snapshot_missing`, `snapshot_corrupt` | 404/500 | The snapshot doesn't exist, its file is gone, or it doesn't match its checksum. Nothing is restored. |
 | `restore_failed` | 502 | The restore itself failed. The data from before is saved as a snapshot. |
+| `bad_signature` | 401 | A webhook request's signature or token doesn't match the app's secret |
+| `webhook_not_enabled` | 404 | No webhook is enabled for the app |
+| `webhook_exists` | 409 | The webhook is already enabled; pass `rotate` to replace the secret |
+| `payload_too_large` | 413 | Webhook payloads are limited to 5 MB |
 | `preview_limit` | 409 | All preview slots are used. `details.previews` lists them, soonest-expiring first. |
 | `not_a_preview` | 400 | Preview commands only delete previews; delete regular apps with a plan |
 | `name_in_use` | 409 | A regular app already has the preview's name; pass another `--name` |

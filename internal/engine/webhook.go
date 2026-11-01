@@ -181,8 +181,6 @@ func (e *Engine) HandlePush(ctx context.Context, app string, p *webhook.Push) (*
 		return ignore("the app's own branch was deleted; the app keeps running")
 	case own && !spec.IsCommitSHA(p.After):
 		return ignore("the push has no valid commit SHA")
-	case own && s.Build.Commit == p.After:
-		return ignore("the app already runs this commit")
 	case own:
 		d.Result, d.Detail = "queued", fmt.Sprintf("building %s in the background; hangar webhook status %s shows the result", p.After[:12], app)
 		if err := e.saveDelivery(ctx, d); err != nil {
@@ -233,6 +231,62 @@ type hookQueue struct {
 	pending map[string]hookJob
 	running map[string]bool
 	idle    *sync.Cond
+	closed  bool // shutting down: no new work
+}
+
+func (e *Engine) hooksBusy() bool {
+	q := &e.hooks
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.pending) > 0 || len(q.running) > 0
+}
+
+// StopHooks stops accepting webhook work and waits up to timeout for
+// queued and running jobs to finish. It reports whether everything
+// finished. Work still running is recorded as interrupted on next start.
+func (e *Engine) StopHooks(timeout time.Duration) bool {
+	q := &e.hooks
+	q.mu.Lock()
+	q.closed = true
+	q.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		e.WaitHooks()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// RecoverHooks marks deliveries a restart interrupted, so they don't sit at
+// "queued" forever. The Git host already got its 202 and won't resend.
+func (e *Engine) RecoverHooks(ctx context.Context) (int, error) {
+	apps, err := e.st.ListApps(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, a := range apps {
+		ds, err := e.st.ListDeliveries(ctx, a.Name, 200)
+		if err != nil {
+			return n, err
+		}
+		for i := range ds {
+			if d := &ds[i]; d.Result == "queued" || d.Result == "deploying" {
+				d.Result = "failed"
+				d.Detail = "interrupted by a server restart: push again, or deploy by hand"
+				if err := e.st.SaveDelivery(ctx, d); err != nil {
+					return n, err
+				}
+				n++
+			}
+		}
+	}
+	return n, nil
 }
 
 func (e *Engine) enqueue(key string, job hookJob) {
@@ -242,6 +296,11 @@ func (e *Engine) enqueue(key string, job hookJob) {
 	if q.pending == nil {
 		q.pending, q.running = map[string]hookJob{}, map[string]bool{}
 		q.idle = sync.NewCond(&q.mu)
+	}
+	if q.closed {
+		job.delivery.Result, job.delivery.Detail = "failed", "the server is restarting: push again in a minute"
+		e.saveDelivery(context.Background(), job.delivery)
+		return
 	}
 	if old, ok := q.pending[key]; ok {
 		old.delivery.Result, old.delivery.Detail = "superseded", "a newer push replaced it before it started"
@@ -282,6 +341,40 @@ func (e *Engine) WaitHooks() {
 	}
 }
 
+// branchGone checks the app's repository for a branch. It is true only when
+// the repository says the branch doesn't exist; any other error is returned.
+func (e *Engine) branchGone(ctx context.Context, app, branch string) (bool, error) {
+	a, err := e.st.GetApp(ctx, app)
+	if err != nil || a == nil || a.Spec == nil || a.Spec.Build == nil {
+		return false, fmt.Errorf("the app changed or was deleted before the push could be handled")
+	}
+	_, err = e.bd.Resolve(ctx, spec.Build{Git: a.Spec.Build.Git, Ref: branch})
+	if err == nil {
+		return false, nil
+	}
+	if ae, ok := apierr.As(err); ok && ae.Code == "git_ref_not_found" {
+		return true, nil
+	}
+	return false, err
+}
+
+// supersedeWebhookPlans expires an app's older pending plans from pushes,
+// so a reviewer can't apply one and deploy an older commit by mistake.
+func (e *Engine) supersedeWebhookPlans(ctx context.Context, app, newest string) {
+	plans, err := e.st.ListPlans(ctx, store.PlanPending, 500)
+	if err != nil {
+		return
+	}
+	for i := range plans {
+		p := &plans[i]
+		if p.App == app && p.CreatedBy == "webhook" && p.ID != newest {
+			p.Status = store.PlanExpired
+			p.NextStep = fmt.Sprintf("Superseded by %s from a newer push; review that plan instead.", newest)
+			e.st.SavePlan(ctx, p)
+		}
+	}
+}
+
 func (e *Engine) processHook(ctx context.Context, j hookJob) {
 	d := j.delivery
 	fail := func(err error) {
@@ -296,6 +389,16 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 	if j.branch != "" {
 		name := previewName(j.app, j.branch)
 		if j.deleteBranch {
+			// The payload is only a trigger: a replayed or late "deleted"
+			// event must not remove the preview of a branch that exists.
+			if gone, err := e.branchGone(ctx, j.app, j.branch); err != nil {
+				fail(err)
+				return
+			} else if !gone {
+				d.Result, d.Detail = "ignored", fmt.Sprintf("branch %s still exists, so its preview is kept (a late or replayed delete event?)", j.branch)
+				e.saveDelivery(ctx, d)
+				return
+			}
 			if _, err := e.DeletePreview(ctx, "webhook", name, fmt.Sprintf("branch %s deleted%s", j.branch, by)); err != nil {
 				if ae, ok := apierr.As(err); ok && ae.Code == "app_not_found" {
 					d.Result, d.Detail = "ignored", "the branch had no preview"
@@ -326,7 +429,10 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 		return
 	}
 
-	// A push to the app's own ref: plan exactly the pushed commit.
+	// A push to the app's own ref. The payload is only a trigger: plan the
+	// branch's current tip, resolved from the app's own repository. A
+	// replayed old push, or one delivered out of order, then can't move the
+	// app back to an older commit.
 	unlock := e.lockApp(j.app)
 	defer unlock()
 	a, err := e.st.GetApp(ctx, j.app)
@@ -335,25 +441,31 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 		return
 	}
 	desired := a.Spec.Clone()
-	desired.Build.Commit = j.commit
+	desired.Build.Commit = ""
 	p, err := e.plan(ctx, "webhook", PlanRequest{Spec: desired})
 	if err != nil {
 		fail(err)
 		return
 	}
-	d.Plan = p.ID
+	tip := p.Desired.Build.Commit
+	moved := ""
+	if tip != j.commit {
+		moved = fmt.Sprintf(" (%s is now at %s, not the pushed %s)", j.ref, tip[:12], j.commit[:12])
+	}
 	if p.Action == "noop" {
-		d.Result, d.Detail = "ignored", "the app already runs this commit"
+		d.Result, d.Detail = "ignored", "the app already runs the tip of "+j.ref+moved
 		e.saveDelivery(ctx, d)
 		return
 	}
-	reason := fmt.Sprintf("git push to %s (%s)%s", j.ref, j.commit[:12], by)
+	d.Plan = p.ID
+	e.supersedeWebhookPlans(ctx, j.app, p.ID)
+	reason := fmt.Sprintf("git push to %s (%s)%s", j.ref, tip[:12], by)
 	if a.Spec.OnPush == nil || a.Spec.OnPush.Action != spec.OnPushDeploy || p.RequiresApproval {
 		p.ExpiresAt = e.Now().Add(WebhookPlanTTL)
 		p.NextStep = nextStep(p)
 		e.st.SavePlan(ctx, p)
 		d.Result = "planned"
-		d.Detail = fmt.Sprintf("plan %s is waiting for review: hangar apply %s --reason ...", p.ID, p.ID)
+		d.Detail = fmt.Sprintf("plan %s is waiting for review: hangar apply %s --reason ...%s", p.ID, p.ID, moved)
 		if p.RequiresApproval {
 			d.Detail = fmt.Sprintf("plan %s needs approval first: hangar approve %s", p.ID, p.ID)
 		}
@@ -367,6 +479,6 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 		fail(err)
 		return
 	}
-	d.Result, d.Detail = "deployed", "deployment "+res.Deployment.ID
+	d.Result, d.Detail = "deployed", "deployment "+res.Deployment.ID+moved
 	e.saveDelivery(ctx, d)
 }

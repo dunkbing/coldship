@@ -5,7 +5,7 @@ import { useSession } from '../App'
 import { fmtTime, timeUntil, useLoad } from '../hooks'
 import { DeployStatus, ErrorBox, GitIcon, HealthPill, healthOf, Mono, shortRepo, StageBadge, Time } from '../components/ui'
 
-type Tab = 'diagnose' | 'deployments' | 'logs' | 'databases'
+type Tab = 'diagnose' | 'deployments' | 'logs' | 'databases' | 'webhook'
 
 export default function AppDetail() {
   const { name = '' } = useParams()
@@ -51,7 +51,7 @@ export default function AppDetail() {
       </div>
 
       <div className="tabs" role="tablist">
-        {(['diagnose', 'deployments', 'logs', ...(a.databases?.length ? ['databases'] : [])] as Tab[]).map((t) => (
+        {(['diagnose', 'deployments', 'logs', ...(a.databases?.length ? ['databases'] : []), ...(a.spec?.build && !a.preview_of ? ['webhook'] : [])] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setParams({ tab: t })}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
@@ -61,6 +61,7 @@ export default function AppDetail() {
       {tab === 'deployments' && <DeploymentsTab name={name} />}
       {tab === 'logs' && <LogsTab name={name} />}
       {tab === 'databases' && <DatabasesTab app={a} onChange={app.reload} />}
+      {tab === 'webhook' && <WebhookTab name={name} />}
     </>
   )
 }
@@ -420,6 +421,156 @@ function DeployLogView({ deployment }: { deployment: string }) {
       <div className="small muted">{l.data?.note}</div>
       <TailLog lines={l.data?.lines} />
     </div>
+  )
+}
+
+const resultClass: Record<string, string> = {
+  deployed: 'dep-running',
+  preview: 'dep-running',
+  preview_deleted: '',
+  planned: 'warn',
+  queued: 'warn',
+  deploying: 'dep-deploying',
+  failed: 'danger',
+  superseded: '',
+  ignored: '',
+}
+
+function WebhookTab({ name }: { name: string }) {
+  const me = useSession()
+  const w = useLoad(() => api.webhook(name), [name], 5000)
+  const [secret, setSecret] = useState<string>()
+  const [error, setError] = useState<Error>()
+  const [confirm, setConfirm] = useState<'rotate' | 'disable'>()
+  async function run(fn: () => Promise<{ secret?: string } | unknown>) {
+    setError(undefined)
+    try {
+      const r = (await fn()) as { secret?: string }
+      setSecret(r?.secret)
+      setConfirm(undefined)
+      w.reload()
+    } catch (e) {
+      setError(e as Error)
+    }
+  }
+  if (w.error) return <ErrorBox error={w.error} />
+  if (!w.data) return <div className="muted">Loading…</div>
+  const info = w.data
+  const admin = me.scope === 'admin'
+  return (
+    <>
+      <section className="card webhook-card">
+        <div className="webhook-head">
+          <div>
+            <h2>Git webhook {info.enabled ? <span className="badge ok">enabled</span> : <span className="badge">off</span>}</h2>
+            {info.enabled && (
+              <div className="small">
+                Payload URL <Mono>{info.url}</Mono>
+              </div>
+            )}
+            <div className="small muted">
+              {info.on_push ? (
+                <>
+                  Pushes to <Mono>{info.ref || 'the default branch'}</Mono>{' '}
+                  {info.on_push.action === 'deploy' ? 'deploy automatically' : 'create a plan to review'}
+                  {info.on_push.previews ? '; other branches get previews' : ''}.
+                </>
+              ) : (
+                <>The spec has no on_push section, so pushes are recorded but do nothing.</>
+              )}
+            </div>
+          </div>
+          {admin && (
+            <div className="inline">
+              {!info.enabled && (
+                <button className="btn btn-primary btn-sm" onClick={() => run(() => api.enableWebhook(name))}>
+                  Enable
+                </button>
+              )}
+              {info.enabled && !confirm && (
+                <>
+                  <button className="btn btn-sm" onClick={() => setConfirm('rotate')}>
+                    Rotate secret…
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setConfirm('disable')}>
+                    Disable…
+                  </button>
+                </>
+              )}
+              {confirm === 'rotate' && (
+                <button className="btn btn-danger btn-sm" onClick={() => run(() => api.enableWebhook(name, true))}>
+                  Yes, rotate (the old secret stops working)
+                </button>
+              )}
+              {confirm === 'disable' && (
+                <button className="btn btn-danger btn-sm" onClick={() => run(() => api.disableWebhook(name))}>
+                  Yes, disable
+                </button>
+              )}
+              {confirm && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setConfirm(undefined)}>
+                  Cancel
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        {secret && (
+          <div className="callout secret-callout">
+            <strong>Secret (shown once):</strong> <Mono>{secret}</Mono>
+            <div className="small muted">
+              Add the payload URL and this secret to your Git host's webhook settings, with content type application/json and push
+              events.
+            </div>
+          </div>
+        )}
+        {error && <ErrorBox error={error} />}
+      </section>
+
+      <h2 className="section-title">Deliveries</h2>
+      {info.deliveries.length === 0 ? (
+        <div className="muted">No pushes received yet.</div>
+      ) : (
+        <div className="card table-card">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Ref</th>
+                <th>Commit</th>
+                <th>By</th>
+                <th>Result</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {info.deliveries.map((d) => (
+                <tr key={d.id}>
+                  <td>
+                    <Time iso={d.created_at} />
+                  </td>
+                  <td>{d.ref || '—'}</td>
+                  <td>{d.commit ? <Mono>{d.commit.slice(0, 7)}</Mono> : '—'}</td>
+                  <td>{d.pusher || '—'}</td>
+                  <td>
+                    <span className={`badge ${resultClass[d.result] ?? ''}`}>{d.result.replace('_', ' ')}</span>
+                  </td>
+                  <td className="reason small">
+                    {d.detail}
+                    {d.result === 'planned' && d.plan && (
+                      <div>
+                        <Link to="/approvals">Review plan</Link>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="small muted section-note">{info.note}</p>
+    </>
   )
 }
 

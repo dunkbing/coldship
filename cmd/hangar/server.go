@@ -84,6 +84,11 @@ func serverCmd() *cobra.Command {
 					"Give agents their own deploy-scoped token instead:\n  HANGAR_TOKEN=%s hangar token create --name my-agent --scope deploy\n\n", tok, tok)
 			}
 
+			if n, err := eng.RecoverHooks(ctx); err != nil {
+				return err
+			} else if n > 0 {
+				log.Warn("marked webhook deliveries interrupted by the last shutdown as failed", "count", n)
+			}
 			if proxyOn {
 				if err := eng.StartProxy(ctx); err != nil {
 					// Keep serving: apps without domains still work, and
@@ -107,6 +112,8 @@ func serverCmd() *cobra.Command {
 				shCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 				defer cancel()
 				srv.Shutdown(shCtx)
+				// Webhook builds run outside requests; let them finish too.
+				eng.StopHooks(30 * time.Minute)
 				close(drained)
 			}
 			checker := &update.Checker{URL: updURL, Current: version, Interval: updInterval, Auto: autoUpgrade,
@@ -166,6 +173,13 @@ func serverCmd() *cobra.Command {
 			log.Info("hangar listening", "addr", addr, "data", data, "version", version)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				return err
+			}
+			if restartTo == "" {
+				// Plain shutdown: give webhook builds a minute to finish;
+				// unfinished ones are marked interrupted on the next start.
+				if !eng.StopHooks(time.Minute) {
+					log.Warn("shutting down with webhook work still running")
+				}
 			}
 			if restartTo != "" {
 				<-drained

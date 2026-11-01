@@ -57,7 +57,8 @@ func handle(t *testing.T, e *Engine, p *webhook.Push) *store.Delivery {
 }
 
 func TestPushPlansByDefault(t *testing.T) {
-	e, rt, _ := hookSetup(t, &spec.OnPush{})
+	e, rt, bd := hookSetup(t, &spec.OnPush{})
+	bd.Refs[repo+"@main"] = sha("b")
 	d := handle(t, e, push("main", sha("b")))
 	if d.Result != "planned" || d.Plan == "" {
 		t.Fatalf("on_push plan should leave a plan: %+v", d)
@@ -75,7 +76,8 @@ func TestPushPlansByDefault(t *testing.T) {
 }
 
 func TestPushDeploys(t *testing.T) {
-	e, _, _ := hookSetup(t, &spec.OnPush{Action: spec.OnPushDeploy})
+	e, _, bd := hookSetup(t, &spec.OnPush{Action: spec.OnPushDeploy})
+	bd.Refs[repo+"@main"] = sha("c")
 	d := handle(t, e, push("main", sha("c")))
 	if d.Result != "deployed" {
 		t.Fatalf("want deployed, got %+v", d)
@@ -107,7 +109,7 @@ func TestPushIgnored(t *testing.T) {
 }
 
 func TestPushPreviews(t *testing.T) {
-	e, rt, _ := hookSetup(t, &spec.OnPush{Previews: true, PreviewTTL: "3h"})
+	e, rt, bd := hookSetup(t, &spec.OnPush{Previews: true, PreviewTTL: "3h"})
 	d := handle(t, e, push("feat/login", sha("f")))
 	if d.Result != "preview" || d.Preview != "shop-feat-login" {
 		t.Fatalf("want a preview, got %+v", d)
@@ -118,6 +120,14 @@ func TestPushPreviews(t *testing.T) {
 	if v, _ := e.GetApp(context.Background(), "shop-feat-login"); time.Until(*v.ExpiresAt) > 3*time.Hour+time.Minute {
 		t.Fatal("preview_ttl should apply")
 	}
+	// A replayed delete while the branch still exists keeps the preview.
+	if d := handle(t, e, push("feat/login", "")); d.Result != "ignored" || !strings.Contains(d.Detail, "still exists") {
+		t.Fatalf("a delete event for an existing branch must be ignored: %+v", d)
+	}
+	if _, ok := rt.Containers["shop-feat-login"]; !ok {
+		t.Fatal("the preview must survive a bogus delete event")
+	}
+	delete(bd.Refs, repo+"@feat/login")
 	if d := handle(t, e, push("feat/login", "")); d.Result != "preview_deleted" {
 		t.Fatalf("deleting the branch should delete the preview: %+v", d)
 	}
@@ -127,13 +137,14 @@ func TestPushPreviews(t *testing.T) {
 }
 
 func TestPushesCoalesce(t *testing.T) {
-	e, _, _ := hookSetup(t, &spec.OnPush{Action: spec.OnPushDeploy})
+	e, _, bd := hookSetup(t, &spec.OnPush{Action: spec.OnPushDeploy})
 	ctx := context.Background()
 	unlock := e.lockApp("shop") // hold the app so the first job blocks
 	d1, _ := e.HandlePush(ctx, "shop", push("main", sha("1")))
 	time.Sleep(50 * time.Millisecond)
 	d2, _ := e.HandlePush(ctx, "shop", push("main", sha("2")))
 	d3, _ := e.HandlePush(ctx, "shop", push("main", sha("3")))
+	bd.Refs[repo+"@main"] = sha("3")
 	unlock()
 	e.WaitHooks()
 	results := map[string]string{}
@@ -141,11 +152,87 @@ func TestPushesCoalesce(t *testing.T) {
 	for _, d := range ds {
 		results[d.ID] = d.Result
 	}
-	if results[d1.ID] != "deployed" || results[d2.ID] != "superseded" || results[d3.ID] != "deployed" {
-		t.Fatalf("want deployed/superseded/deployed, got %s %s %s", results[d1.ID], results[d2.ID], results[d3.ID])
+	// The first job runs after the burst and deploys the branch tip (3);
+	// the second was replaced; the third finds the tip already deployed.
+	if results[d1.ID] != "deployed" || results[d2.ID] != "superseded" || results[d3.ID] != "ignored" {
+		t.Fatalf("want deployed/superseded/ignored, got %s %s %s", results[d1.ID], results[d2.ID], results[d3.ID])
 	}
 	app, _ := e.GetApp(ctx, "shop")
 	if app.Spec.Build.Commit != sha("3") {
 		t.Fatal("the newest push must win")
 	}
+}
+
+func TestReplayedOrLatePushCannotRollBack(t *testing.T) {
+	e, _, bd := hookSetup(t, &spec.OnPush{Action: spec.OnPushDeploy})
+	ctx := context.Background()
+	bd.Refs[repo+"@main"] = sha("c")
+	handle(t, e, push("main", sha("c")))
+
+	// An old push (b) replayed, or delivered late: the branch is at c.
+	d := handle(t, e, push("main", sha("b")))
+	if d.Result != "ignored" || !strings.Contains(d.Detail, "not the pushed") {
+		t.Fatalf("an old push must not deploy: %+v", d)
+	}
+	if app, _ := e.GetApp(ctx, "shop"); app.Spec.Build.Commit != sha("c") {
+		t.Fatal("the app must stay on the branch tip")
+	}
+
+	// A delayed push for c arrives after the branch moved on to d: deploy
+	// the tip, and say so.
+	bd.Refs[repo+"@main"] = sha("d")
+	d = handle(t, e, push("main", sha("c")))
+	if d.Result != "deployed" || !strings.Contains(d.Detail, "now at dddddddddddd") {
+		t.Fatalf("want the tip deployed with a note: %+v", d)
+	}
+}
+
+func TestNewerPushSupersedesPendingPlan(t *testing.T) {
+	e, _, bd := hookSetup(t, &spec.OnPush{})
+	ctx := context.Background()
+	bd.Refs[repo+"@main"] = sha("b")
+	first := handle(t, e, push("main", sha("b")))
+	bd.Refs[repo+"@main"] = sha("c")
+	second := handle(t, e, push("main", sha("c")))
+	if _, err := e.Apply(ctx, "human", first.Plan, "old"); code(err) != "plan_superseded" {
+		t.Fatalf("applying the older push's plan must fail with plan_superseded, got %v", err)
+	}
+	if _, err := e.Apply(ctx, "human", second.Plan, "new"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShutdownAndRecovery(t *testing.T) {
+	e, _, bd := hookSetup(t, &spec.OnPush{Action: spec.OnPushDeploy})
+	ctx := context.Background()
+	unlock := e.lockApp("shop")
+	bd.Refs[repo+"@main"] = sha("b")
+	d, _ := e.HandlePush(ctx, "shop", push("main", sha("b")))
+	time.Sleep(50 * time.Millisecond)
+	if !e.Busy() {
+		t.Fatal("queued webhook work must count as busy, so upgrades wait for it")
+	}
+	if e.StopHooks(100 * time.Millisecond) {
+		t.Fatal("StopHooks should time out while a job is blocked")
+	}
+	late, _ := e.HandlePush(ctx, "shop", push("main", sha("c")))
+	ds, _ := e.st.ListDeliveries(ctx, "shop", 10)
+	for _, x := range ds {
+		if x.ID == late.ID && (x.Result != "failed" || !strings.Contains(x.Detail, "restarting")) {
+			t.Fatalf("pushes during shutdown must be rejected visibly: %+v", x)
+		}
+	}
+	// Simulate the process dying with d still recorded as queued.
+	n, err := e.RecoverHooks(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("recover: %d %v", n, err)
+	}
+	ds, _ = e.st.ListDeliveries(ctx, "shop", 10)
+	for _, x := range ds {
+		if x.ID == d.ID && x.Result != "failed" {
+			t.Fatalf("interrupted delivery should be marked failed: %+v", x)
+		}
+	}
+	unlock()
+	e.WaitHooks()
 }

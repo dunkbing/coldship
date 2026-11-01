@@ -815,3 +815,24 @@ select:focus,
 .section-note {
   margin: 10px 2px 0;
 }
+
+.webhook-card {
+  margin-bottom: 8px;
+}
+.webhook-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.webhook-head h2 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.secret-callout {
+  background: var(--warn-soft);
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}

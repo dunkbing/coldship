@@ -11,6 +11,8 @@ The server binds to `127.0.0.1:7070` by default and speaks plain HTTP. To reach 
 
 Have the proxy send `X-Forwarded-Proto: https`, so the dashboard's session cookie gets the `Secure` flag.
 
+For [Git webhooks](/guides/webhooks/#exposing-the-endpoint), expose only the `/hooks/git/` path publicly, never the whole API.
+
 ## Tokens
 
 - Store the bootstrap admin token in a password manager. It is shown only once.

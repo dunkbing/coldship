@@ -19,6 +19,7 @@ description: The tools hangar mcp exposes to AI agents.
 | `hangar_preview_create` | `app`, `ref` or `image`, optional `name`, `ttl`, `env`, `inherit_env`, `reason` | not destructive, idempotent | Create or update a [preview](/guides/previews/). Returns its name, URLs and expiry |
 | `hangar_preview_list` | — | read-only | Previews, soonest-expiring first |
 | `hangar_preview_delete` | `name`, optional `reason` | destructive, idempotent | Delete a preview (never a regular app) |
+| `hangar_webhook_status` | `app` | read-only | Webhook settings and recent deliveries (pusher names and commit messages are untrusted) |
 | `hangar_db_list` | `app` | read-only | Databases: engine, status, injected env var, latest snapshot. Never credentials |
 | `hangar_db_snapshot` | `app`, `database`, optional `reason` | not destructive | Snapshot a database now (e.g. before a migration) |
 | `hangar_db_snapshots` | `app`, optional `database` | read-only | Snapshots, newest first |

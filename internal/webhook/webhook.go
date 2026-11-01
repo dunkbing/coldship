@@ -45,13 +45,13 @@ func Parse(h http.Header, body []byte, secret string) (*Push, error) {
 		if !equal(h.Get("X-Gitlab-Token"), secret) {
 			return nil, sigErr(h.Get("X-Gitlab-Token"))
 		}
-		p, err = parseGitLab(h, body)
+		p, err = parseGitLab(h, jsonBody(h, body))
 	case h.Get("X-Gitea-Event") != "" || h.Get("X-Forgejo-Event") != "":
 		sig := first(h.Get("X-Forgejo-Signature"), h.Get("X-Gitea-Signature"))
 		if !validHMAC(body, secret, sig) {
 			return nil, sigErr(sig)
 		}
-		p, err = parseGitHubShaped(body)
+		p, err = parseGitHubShaped(jsonBody(h, body))
 		p.Provider = "gitea"
 		p.Event = normEvent(first(h.Get("X-Forgejo-Event"), h.Get("X-Gitea-Event")))
 		p.Delivery = first(h.Get("X-Forgejo-Delivery"), h.Get("X-Gitea-Delivery"))
@@ -60,7 +60,7 @@ func Parse(h http.Header, body []byte, secret string) (*Push, error) {
 		if !validHMAC(body, secret, sig) {
 			return nil, sigErr(sig)
 		}
-		p, err = parseGitHubShaped(body)
+		p, err = parseGitHubShaped(jsonBody(h, body))
 		p.Provider = "github"
 		p.Event = normEvent(h.Get("X-GitHub-Event"))
 		p.Delivery = h.Get("X-GitHub-Delivery")
@@ -69,7 +69,7 @@ func Parse(h http.Header, body []byte, secret string) (*Push, error) {
 		if !validHMAC(body, secret, sig) {
 			return nil, ErrBadSignature
 		}
-		p, err = parseGitHubShaped(body)
+		p, err = parseGitHubShaped(jsonBody(h, body))
 		p.Provider = "generic"
 		p.Event = normEvent(first(h.Get("X-Hangar-Event"), "push"))
 		p.Delivery = h.Get("X-Hangar-Delivery")
@@ -80,6 +80,18 @@ func Parse(h http.Header, body []byte, secret string) (*Push, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// jsonBody returns the JSON payload. GitHub's default content type is
+// form-encoded, with the JSON in a "payload" field; the signature covers the
+// raw body, so this runs only after verification.
+func jsonBody(h http.Header, body []byte) []byte {
+	if strings.HasPrefix(h.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		if v, err := url.ParseQuery(string(body)); err == nil && v.Get("payload") != "" {
+			return []byte(v.Get("payload"))
+		}
+	}
+	return body
 }
 
 func sigErr(got string) error {

@@ -115,7 +115,7 @@ func reportError(err error) int {
 	switch ae.Code {
 	case "approval_required":
 		return exitApprovalRequired
-	case "plan_stale", "plan_expired":
+	case "plan_stale", "plan_expired", "plan_superseded":
 		return exitStale
 	}
 	return exitError

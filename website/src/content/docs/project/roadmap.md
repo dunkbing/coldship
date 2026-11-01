@@ -3,10 +3,9 @@ title: Roadmap
 description: What is planned next for Hangar.
 ---
 
-Hangar today deploys container images, or builds them from Git repositories with a Dockerfile, on a single Docker host, with domains, automatic HTTPS, zero-downtime deploys, preview environments, managed Postgres and Redis, and self-upgrades. Planned next, roughly in order:
+Hangar today deploys container images, or builds them from Git repositories with a Dockerfile, on a single Docker host, with domains, automatic HTTPS, zero-downtime deploys, preview environments, managed Postgres and Redis, Git webhooks, and self-upgrades. Planned next, roughly in order:
 
 - **Builds without a Dockerfile.** Detect and build a repository Nixpacks/Buildpacks-style, explaining the detected build so an agent can correct it.
-- **Git webhooks.** Plan automatically on push, so a human or agent only has to review and apply.
 - **Seeded previews.** Start a preview's volumes from a sanitized snapshot of the parent's data instead of empty.
 - **Database upgrades.** Major version changes by dump and restore, and off-server snapshot storage (S3-compatible).
 - **Policies.** Spend and instance caps per token, and per-app permissions.

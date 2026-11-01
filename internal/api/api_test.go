@@ -217,6 +217,7 @@ func TestGitHookEndpoint(t *testing.T) {
 		t.Fatalf("want webhook_exists, got %v", err)
 	}
 
+	bd.Refs["https://github.com/acme/shop.git@main"] = strings.Repeat("b", 40) // the pushed commit is the branch tip
 	sig := "sha256=" + webhook.Sign(body, info.Secret)
 	if c := post(body, map[string]string{"X-GitHub-Event": "push", "X-Hub-Signature-256": "sha256=" + webhook.Sign(body, "guess")}); c != 401 {
 		t.Fatalf("bad signature: want 401, got %d", c)
