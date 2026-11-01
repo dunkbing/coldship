@@ -1,0 +1,8 @@
+name: hello
+stage: staging
+image: nginx:1.27-alpine
+port: 80
+host_port: 8080
+memory: 128m
+env:
+  GREETING: hello from hangar

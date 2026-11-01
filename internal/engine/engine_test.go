@@ -1,0 +1,228 @@
+package engine
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"hangar/internal/apierr"
+	"hangar/internal/runtime"
+	"hangar/internal/spec"
+	"hangar/internal/store"
+)
+
+func setup(t *testing.T) (*Engine, *runtime.Fake) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	rt := runtime.NewFake()
+	return New(st, rt), rt
+}
+
+func web(stage spec.Stage, image string, vols ...string) *spec.App {
+	a := &spec.App{Name: "web", Stage: stage, Image: image, Port: 80, Env: map[string]string{"SECRET": "hunter2"}}
+	for _, v := range vols {
+		a.Volumes = append(a.Volumes, spec.Volume{Name: v, Path: "/" + v})
+	}
+	return a
+}
+
+func code(err error) string {
+	if ae, ok := apierr.As(err); ok {
+		return ae.Code
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func deploy(t *testing.T, e *Engine, a *spec.App) *ApplyResult {
+	t.Helper()
+	ctx := context.Background()
+	p, err := e.Plan(ctx, "agent", PlanRequest{Spec: a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.Apply(ctx, "agent", p.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func TestPlanApplyAndIdempotency(t *testing.T) {
+	e, rt := setup(t)
+	ctx := context.Background()
+	p, err := e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageStaging, "nginx:1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Action != "create" || p.Desired.Env["SECRET"] != spec.RedactedValue {
+		t.Fatalf("unexpected plan: action=%s env=%v", p.Action, p.Desired.Env)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, ""); code(err) != "reason_required" {
+		t.Fatalf("want reason_required, got %v", err)
+	}
+	r1, err := e.Apply(ctx, "agent", p.ID, "first deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := e.Apply(ctx, "agent", p.ID, "retry")
+	if err != nil || r2.Deployment.ID != r1.Deployment.ID || rt.Deploys != 1 {
+		t.Fatalf("re-apply should be idempotent: err=%v deploys=%d", err, rt.Deploys)
+	}
+	if rt.Containers["web"].Env["SECRET"] != "hunter2" {
+		t.Fatal("runtime must receive the real secret")
+	}
+	p2, _ := e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageStaging, "nginx:1")})
+	if p2.Action != "noop" {
+		t.Fatalf("want noop, got %s", p2.Action)
+	}
+}
+
+func TestStalePlan(t *testing.T) {
+	e, _ := setup(t)
+	ctx := context.Background()
+	deploy(t, e, web(spec.StageStaging, "nginx:1"))
+	a, _ := e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageStaging, "nginx:2")})
+	deploy(t, e, web(spec.StageStaging, "nginx:3"))
+	if _, err := e.Apply(ctx, "agent", a.ID, "x"); code(err) != "plan_stale" {
+		t.Fatalf("want plan_stale, got %v", err)
+	}
+}
+
+func TestExpiredPlan(t *testing.T) {
+	e, _ := setup(t)
+	ctx := context.Background()
+	p, _ := e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageStaging, "nginx:1")})
+	e.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	if _, err := e.Apply(ctx, "agent", p.ID, "x"); code(err) != "plan_expired" {
+		t.Fatalf("want plan_expired, got %v", err)
+	}
+}
+
+func TestProductionDestructiveNeedsApproval(t *testing.T) {
+	e, rt := setup(t)
+	ctx := context.Background()
+	deploy(t, e, web(spec.StageProduction, "postgres:16", "data"))
+
+	// Non-destructive production change: no approval needed.
+	p, _ := e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageProduction, "postgres:16.1", "data")})
+	if p.RequiresApproval || p.Destructive {
+		t.Fatal("image bump should not need approval")
+	}
+
+	// Dropping the volume is destructive.
+	p, _ = e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageProduction, "postgres:16")})
+	if !p.Destructive || !p.RequiresApproval {
+		t.Fatalf("volume removal on prod must need approval: %+v", p)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "cleanup"); code(err) != "approval_required" {
+		t.Fatalf("want approval_required, got %v", err)
+	}
+	if !rt.Volumes["web/data"] {
+		t.Fatal("volume must survive a refused apply")
+	}
+	if _, err := e.Approve(ctx, "alice", p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "cleanup"); err != nil {
+		t.Fatal(err)
+	}
+	if rt.Volumes["web/data"] {
+		t.Fatal("volume should be deleted after approved apply")
+	}
+
+	// Demoting prod to staging while deleting a volume still needs approval.
+	deploy(t, e, web(spec.StageProduction, "postgres:16", "data"))
+	p, _ = e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageStaging, "postgres:16")})
+	if !p.RequiresApproval {
+		t.Fatal("stage demotion must not bypass approval")
+	}
+}
+
+func TestFailedDeployAndRollback(t *testing.T) {
+	e, rt := setup(t)
+	ctx := context.Background()
+	first := deploy(t, e, web(spec.StageStaging, "app:1"))
+	deploy(t, e, web(spec.StageStaging, "app:2"))
+
+	// A failed deploy keeps the last good spec as current.
+	rt.FailNext = apierr.New(502, "container_exited", "boom")
+	p, _ := e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageStaging, "app:3")})
+	_, err := e.Apply(ctx, "agent", p.ID, "upgrade")
+	if code(err) != "container_exited" {
+		t.Fatalf("want container_exited, got %v", err)
+	}
+	ae, _ := apierr.As(err)
+	if ae.Details["deployment"] == nil || ae.SuggestedFix == nil {
+		t.Fatal("failure should point at the deployment and suggest a fix")
+	}
+	diag, err := e.Diagnose(ctx, "web")
+	if err != nil || diag.Healthy || diag.Findings[0].Code != "last_deploy_failed" {
+		t.Fatalf("diagnose should flag the failed deploy: %+v %v", diag, err)
+	}
+
+	// Rollback after a failure restores the current good deployment (app:2).
+	if _, err := e.Rollback(ctx, "agent", "web", "", "fix outage"); err != nil {
+		t.Fatal(err)
+	}
+	if rt.Containers["web"].Image != "app:2" {
+		t.Fatalf("want app:2 after rollback, got %s", rt.Containers["web"].Image)
+	}
+	// Rollback when healthy goes to the previous good deployment.
+	if _, err := e.Rollback(ctx, "agent", "web", first.Deployment.ID, "go back to v1"); err != nil {
+		t.Fatal(err)
+	}
+	if rt.Containers["web"].Image != "app:1" {
+		t.Fatalf("want app:1, got %s", rt.Containers["web"].Image)
+	}
+}
+
+func TestDeleteApp(t *testing.T) {
+	e, rt := setup(t)
+	ctx := context.Background()
+	deploy(t, e, web(spec.StageStaging, "nginx:1", "data"))
+	p, err := e.Plan(ctx, "agent", PlanRequest{Delete: "web"})
+	if err != nil || !p.Destructive || p.RequiresApproval {
+		t.Fatalf("staging delete: destructive but no approval; got %+v %v", p, err)
+	}
+	if !strings.Contains(p.Changes[0].Reason, "data") {
+		t.Fatalf("delete reason should name the volume: %q", p.Changes[0].Reason)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "decommission"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rt.Containers) != 0 || len(rt.Volumes) != 0 {
+		t.Fatal("container and volumes should be gone")
+	}
+	if _, err := e.GetApp(ctx, "web"); code(err) != "app_not_found" {
+		t.Fatalf("want app_not_found, got %v", err)
+	}
+}
+
+func TestDiagnosePortMismatch(t *testing.T) {
+	e, rt := setup(t)
+	ctx := context.Background()
+	deploy(t, e, web(spec.StageStaging, "node:22"))
+	rt.LogLines["web"] = []string{"booting", "Server listening on port 3000"}
+	d, err := e.Diagnose(ctx, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range d.Findings {
+		if f.Code == "port_mismatch" && f.SuggestedFix.(map[string]any)["port"] == 3000 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected port_mismatch finding, got %+v", d.Findings)
+	}
+}
