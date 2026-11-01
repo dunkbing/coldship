@@ -28,6 +28,8 @@ type Patch struct {
 	RemoveDomains []string          `json:"remove_domains,omitempty"`
 	AddVolumes    []Volume          `json:"add_volumes,omitempty"`
 	AddDatabases  []Database        `json:"add_databases,omitempty" jsonschema:"databases to add, e.g. {engine: postgres}. Name defaults to main"`
+	AddUses       []string          `json:"add_uses,omitempty" jsonschema:"data services to connect, e.g. maindb or reports=REPORTS_URL (see coldship data list)"`
+	RemoveUses    []string          `json:"remove_uses,omitempty" jsonschema:"data services to disconnect (their data stays)"`
 }
 
 // Apply returns cur (nil for a new app) with the patch applied. cur is not
@@ -96,6 +98,15 @@ func (p *Patch) Apply(cur *App) (*App, error) {
 			a.Volumes = append(a.Volumes, v)
 		}
 	}
+	for _, u := range p.AddUses {
+		name, _ := ParseUse(u)
+		a.Uses = slices.DeleteFunc(a.Uses, func(x string) bool { n, _ := ParseUse(x); return n == name })
+		a.Uses = append(a.Uses, u)
+	}
+	a.Uses = slices.DeleteFunc(a.Uses, func(x string) bool {
+		n, _ := ParseUse(x)
+		return slices.ContainsFunc(p.RemoveUses, func(r string) bool { rn, _ := ParseUse(r); return rn == n })
+	})
 	for _, d := range p.AddDatabases {
 		if d.Name == "" {
 			d.Name = "main"

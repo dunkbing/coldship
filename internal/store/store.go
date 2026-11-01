@@ -790,6 +790,27 @@ func (s *Store) SaveDatabase(ctx context.Context, d *Database) error {
 	return err
 }
 
+// AllDatabases lists every managed database: standalone data services
+// (App == "") first, then apps' databases, by name. Passwords are left out.
+func (s *Store) AllDatabases(ctx context.Context) ([]Database, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT app, name, engine, version, created_at FROM databases ORDER BY app != '', app, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Database{}
+	for rows.Next() {
+		var d Database
+		var created string
+		if err := rows.Scan(&d.App, &d.Name, &d.Engine, &d.Version, &created); err != nil {
+			return nil, err
+		}
+		d.CreatedAt, _ = time.Parse(tsFormat, created)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) DeleteDatabase(ctx context.Context, app, name string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM databases WHERE app = ? AND name = ?`, app, name)
 	return err

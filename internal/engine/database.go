@@ -114,7 +114,11 @@ func (e *Engine) takeSnapshot(ctx context.Context, actor, app string, d spec.Dat
 	}
 	sn := &store.Snapshot{ID: store.NewID("snap"), App: app, Database: d.Name, Engine: d.Engine, Version: d.Version,
 		Reason: reason, Actor: actor, CreatedAt: e.Now(), Manual: manual}
-	dir := filepath.Join(e.SnapshotDir, app, d.Name)
+	owner := app
+	if owner == "" {
+		owner = "_data" // data services; app names can't start with _
+	}
+	dir := filepath.Join(e.SnapshotDir, owner, d.Name)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -257,6 +261,12 @@ func (e *Engine) restore(ctx context.Context, actor string, p *store.Plan, reaso
 			db = d
 		}
 	}
+	return e.restoreFrom(ctx, actor, p.App, db, sn, reason)
+}
+
+// restoreFrom verifies a snapshot, saves the current data as a snapshot, and
+// restores db (owned by app, or a data service when app is "").
+func (e *Engine) restoreFrom(ctx context.Context, actor, app string, db spec.Database, sn *store.Snapshot, reason string) (string, error) {
 	f, err := os.Open(sn.Path)
 	if err != nil {
 		return "", apierr.New(500, "snapshot_missing", "snapshot file %s is missing: %v", sn.Path, err)
@@ -272,18 +282,22 @@ func (e *Engine) restore(ctx context.Context, actor string, p *store.Plan, reaso
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
-	before, err := e.snapshot(ctx, actor, p.App, db, "before restoring "+sn.ID)
+	before, err := e.snapshot(ctx, actor, app, db, "before restoring "+sn.ID)
 	if err != nil {
 		return "", apierr.New(502, "snapshot_failed", "not restoring: the safety snapshot of the current data failed: %v", err)
 	}
-	creds, err := e.dbCreds(ctx, p.App, db)
+	creds, err := e.dbCreds(ctx, app, db)
 	if err != nil {
 		return "", err
 	}
 	if err := e.rt.RestoreDatabase(ctx, creds, f, io.Discard); err != nil {
 		return "", err
 	}
-	e.audit(ctx, actor, "database.restore", p.App, reason, map[string]any{"database": db.Name, "snapshot": sn.ID, "saved_before": before.ID})
+	target := app
+	if app == "" {
+		target = db.Name
+	}
+	e.audit(ctx, actor, "database.restore", target, reason, map[string]any{"database": db.Name, "snapshot": sn.ID, "saved_before": before.ID})
 	return fmt.Sprintf("restored database %s from snapshot %s (%s); the data from before the restore is saved as snapshot %s",
 		db.Name, sn.ID, sn.CreatedAt.UTC().Format(time.RFC3339), before.ID), nil
 }
@@ -335,6 +349,20 @@ func (e *Engine) ScheduledSnapshots(ctx context.Context) (int, error) {
 			}
 			n++
 		}
+	}
+	// Data services, except S3 storage, which can't be snapshotted yet.
+	recs, err := e.st.AllDatabases(ctx)
+	if err != nil {
+		return n, err
+	}
+	for _, r := range recs {
+		if r.App != "" || r.Engine == spec.EngineS3 {
+			continue
+		}
+		if _, err := e.takeSnapshot(ctx, "coldship", "", spec.Database{Name: r.Name, Engine: r.Engine, Version: r.Version}, "scheduled", false); err != nil {
+			return n, fmt.Errorf("data service %s: %w", r.Name, err)
+		}
+		n++
 	}
 	return n, nil
 }

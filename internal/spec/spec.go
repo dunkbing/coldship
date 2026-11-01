@@ -123,6 +123,7 @@ type App struct {
 	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"environment variables; values are write-only and redacted in all output"`
 	Volumes   []Volume          `json:"volumes,omitempty" yaml:"volumes,omitempty" jsonschema:"persistent volumes. Removing one from the spec deletes its data"`
 	Databases []Database        `json:"databases,omitempty" yaml:"databases,omitempty" jsonschema:"managed databases. Their connection URLs are injected into env. Removing one deletes its data (after a snapshot)"`
+	Uses      []string          `json:"uses,omitempty" yaml:"uses,omitempty" jsonschema:"data services the app connects to (see coldship data list). Each injects its connection env: DATABASE_URL for postgres and mysql, REDIS_URL for redis, AWS_* and S3_* variables for s3 storage. Write name=ENV_VAR to inject a database's URL under another name"`
 }
 
 var (
@@ -137,6 +138,13 @@ var (
 	domainRe = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 	gitURLRe = regexp.MustCompile(`^(?:(?:https?|ssh)://[A-Za-z0-9._~%!$&'()*+,;=:@-]+(?:/\S*)?|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:\S+)$`)
 )
+
+// ParseUse splits a uses entry, "maindb" or "reports=REPORTS_URL", into the
+// data service's name and the env var override (or "").
+func ParseUse(u string) (name, env string) {
+	name, env, _ = strings.Cut(strings.TrimSpace(u), "=")
+	return name, env
+}
 
 // IsCommitSHA reports whether s is a full 40-character commit SHA.
 func IsCommitSHA(s string) bool { return shaRe.MatchString(s) }
@@ -287,6 +295,20 @@ func (a *App) Validate() error {
 				return apierr.Invalid("on_push.preview_ttl", "on_push.preview_ttl %q must be a duration of at least 1m, e.g. 72h", op.PreviewTTL)
 			}
 		}
+	}
+	seenUses := map[string]bool{}
+	for i, u := range a.Uses {
+		f := fmt.Sprintf("uses[%d]", i)
+		name, env := ParseUse(u)
+		switch {
+		case !nameRe.MatchString(name):
+			return apierr.Invalid(f, "data service %q must be a name like maindb, optionally with =ENV_VAR", u)
+		case env != "" && !envKeyRe.MatchString(env):
+			return apierr.Invalid(f, "env %q in %q must match [A-Za-z_][A-Za-z0-9_]*", env, u)
+		case seenUses[name]:
+			return apierr.Invalid(f, "data service %q is listed twice", name)
+		}
+		seenUses[name] = true
 	}
 	dbNames, dbEnvs := map[string]bool{}, map[string]bool{}
 	for i, d := range a.Databases {
@@ -536,6 +558,7 @@ func (a *App) Redacted() *App {
 	c.Volumes = append([]Volume(nil), a.Volumes...)
 	c.Domains = append([]string(nil), a.Domains...)
 	c.Databases = append([]Database(nil), a.Databases...)
+	c.Uses = append([]string(nil), a.Uses...)
 	if a.OnPush != nil {
 		op := *a.OnPush
 		c.OnPush = &op
@@ -563,6 +586,7 @@ func (a *App) Clone() *App {
 	c.Volumes = append([]Volume(nil), a.Volumes...)
 	c.Domains = append([]string(nil), a.Domains...)
 	c.Databases = append([]Database(nil), a.Databases...)
+	c.Uses = append([]string(nil), a.Uses...)
 	if a.OnPush != nil {
 		op := *a.OnPush
 		c.OnPush = &op

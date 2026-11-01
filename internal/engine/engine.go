@@ -152,7 +152,7 @@ func siteRoot(app, deployment string) string { return app + "/" + deployment }
 // nothing that needs a running process.
 func (e *Engine) staticEligible(run *spec.App) bool {
 	return e.px != nil && e.px.SitesDir() != "" && run.Build != nil && len(run.Domains) > 0 &&
-		run.HostPort == 0 && len(run.Volumes) == 0 && len(run.Databases) == 0 &&
+		run.HostPort == 0 && len(run.Volumes) == 0 && len(run.Databases) == 0 && len(run.Uses) == 0 &&
 		(run.Build.Builder == "" || run.Build.Builder == spec.BuilderAuto)
 }
 
@@ -291,6 +291,13 @@ func (e *Engine) checkNames(ctx context.Context, a *spec.App) error {
 	}
 	for _, v := range runtime.ReservedVolumes {
 		vols[v] = owner{"coldship", "the proxy"}
+	}
+	if recs, err := e.st.AllDatabases(ctx); err == nil {
+		for _, r := range recs {
+			if r.App == "" {
+				hosts[runtime.ServiceHost(r.Name)] = owner{r.Name, "data service " + r.Name}
+			}
+		}
 	}
 	apps, err := e.st.ListApps(ctx)
 	if err != nil {
@@ -464,6 +471,9 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 			return nil, err
 		}
 		if err := e.checkNames(ctx, desired); err != nil {
+			return nil, err
+		}
+		if err := e.checkUses(ctx, desired); err != nil {
 			return nil, err
 		}
 		// Pin the build to a commit now, so the plan shows exactly what will
@@ -878,7 +888,10 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 		if runErr == nil && !d.Static {
 			// Databases start before the app, which needs their URLs. A
 			// failure here hasn't touched the running app.
-			if runErr = e.ensureDatabases(ctx, run, deployLog); runErr != nil {
+			if runErr = e.ensureDatabases(ctx, run, deployLog); runErr == nil {
+				runErr = e.ensureUses(ctx, run, deployLog)
+			}
+			if runErr != nil {
 				d.FailedIn, d.KeptPrevious = store.PhaseDeploy, current != nil
 			}
 		}

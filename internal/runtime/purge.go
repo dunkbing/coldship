@@ -13,7 +13,7 @@ import (
 
 // PurgePlan lists what Coldship created in Docker.
 type PurgePlan struct {
-	Containers []string // app, database and proxy containers
+	Containers []string // app, database, data service and proxy containers
 	Volumes    []string // volumes those containers use, and the proxy's
 	Images     []string // images built from Git (coldship-build/*)
 }
@@ -34,6 +34,7 @@ func (d *Docker) PlanPurge(ctx context.Context) (PurgePlan, error) {
 	vols := map[string]bool{"coldship-proxy-data": true, "coldship-proxy-config": true}
 	for _, f := range []client.Filters{
 		client.Filters{}.Add("label", "coldship.app"),
+		client.Filters{}.Add("label", "coldship.data"),
 		client.Filters{}.Add("name", "^/?"+proxyContainer+"$"),
 	} {
 		res, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
