@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { api, ApiError, type WhoAmI } from './api'
 import { useLoad } from './hooks'
 import Login from './pages/Login'
+import NewApp from './pages/NewApp'
 import Apps from './pages/Apps'
 import AppDetail from './pages/AppDetail'
 import Approvals from './pages/Approvals'
@@ -54,6 +55,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Navigate to="/apps" replace />} />
             <Route path="/apps" element={<Apps />} />
+            <Route path="/apps/new" element={<NewApp />} />
             <Route path="/apps/:name" element={<AppDetail />} />
             <Route path="/approvals" element={<Approvals />} />
             <Route path="/audit" element={<Audit />} />

@@ -25,8 +25,11 @@ export default function Apps() {
       <header className="page-head">
         <div>
           <h1>Apps</h1>
-          <p className="muted">Everything Coldship runs on this node. Agents change apps through plans; this view is live.</p>
+          <p className="muted">Everything Coldship runs on this node. This view is live.</p>
         </div>
+        <Link className="btn btn-primary" to="/apps/new">
+          New app
+        </Link>
       </header>
 
       {data && data.length > 0 && (
@@ -50,7 +53,7 @@ export default function Apps() {
       {loading && !data && <div className="muted">Loading…</div>}
       {data?.length === 0 && previews.length === 0 && (
         <Empty title="No apps yet">
-          Deploy one with <code>coldship deploy -f coldship.yaml --reason "first deploy"</code>, or ask your agent to.
+          <Link to="/apps/new">Create one here</Link>, run <code>coldship deploy</code> inside a Git repository, or ask your agent to.
         </Empty>
       )}
 

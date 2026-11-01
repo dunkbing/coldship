@@ -836,3 +836,50 @@ select:focus,
   margin-top: 12px;
   overflow-wrap: anywhere;
 }
+
+.form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 640px;
+  padding: 20px;
+}
+.form-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.form-row .grow {
+  flex: 1 1 240px;
+}
+textarea {
+  font: 13px/1.5 var(--mono, ui-monospace, monospace);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  resize: vertical;
+}
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.checks {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.checks legend {
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.checks label,
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

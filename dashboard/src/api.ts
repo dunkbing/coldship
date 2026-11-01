@@ -214,6 +214,19 @@ export interface AuditEntry {
   detail?: Record<string, unknown>
 }
 
+// Patch changes only the fields it names; the server keeps the rest of the
+// app, secrets included.
+export interface Patch {
+  name: string
+  image?: string
+  build?: { git: string; ref?: string }
+  stage?: Stage
+  port?: number
+  env?: Record<string, string>
+  add_domains?: string[]
+  add_databases?: { engine: 'postgres' | 'redis'; name?: string }[]
+}
+
 export interface ApplyResult {
   plan: Plan
   deployment?: Deployment
@@ -298,6 +311,8 @@ export const api = {
   plans: (status?: string, limit = 100) =>
     req<Plan[]>('GET', `/v1/plans?limit=${limit}${status ? `&status=${enc(status)}` : ''}`),
   approve: (id: string) => req<Plan>('POST', `/v1/plans/${enc(id)}/approve`),
+  planPatch: (patch: Patch) => req<Plan>('POST', '/v1/plans', { patch }),
+  apply: (id: string, reason: string) => req<ApplyResult>('POST', `/v1/plans/${enc(id)}/apply`, { reason }),
   snapshots: (app: string, database = '') => req<Snapshot[]>('GET', `/v1/apps/${enc(app)}/snapshots?database=${enc(database)}`),
   snapshot: (app: string, database: string, reason = 'manual, from the dashboard') =>
     req<Snapshot>('POST', `/v1/apps/${enc(app)}/databases/${enc(database)}/snapshots`, { reason }),
