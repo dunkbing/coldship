@@ -798,3 +798,16 @@ select:focus,
     transform: rotate(360deg);
   }
 }
+
+.preview-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}

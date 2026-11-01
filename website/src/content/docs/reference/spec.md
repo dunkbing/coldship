@@ -25,7 +25,7 @@ volumes:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | 1–40 characters: lowercase letters, digits and dashes, starting with a letter. The app's identity; changing it creates a different app. |
-| `stage` | string | no | `production`, `staging` (default) or `preview`. Destructive changes to `production` apps need [approval](/concepts/guardrails/). |
+| `stage` | string | no | `production`, `staging` (default) or `preview`. Destructive changes to `production` apps need [approval](/concepts/guardrails/). Apps created with `hangar preview create` always have stage `preview`. |
 | `image` | string | one of `image`, `build` | Container image reference. It is pulled if not present locally. |
 | `build` | object | one of `image`, `build` | Build the image from a Git repository. See below. |
 | `port` | int | no | Port the app listens on inside the container. Used to publish `host_port` and to detect port mismatches. |

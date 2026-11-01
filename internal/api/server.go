@@ -50,6 +50,9 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
 	s.route("GET /v1/deployments/{id}/log", store.ScopeRead, s.deployLog)
+	s.route("POST /v1/previews", store.ScopeDeploy, s.createPreview)
+	s.route("GET /v1/previews", store.ScopeRead, s.listPreviews)
+	s.route("DELETE /v1/previews/{name}", store.ScopeDeploy, s.deletePreview)
 	s.route("POST /v1/plans", store.ScopeDeploy, s.createPlan)
 	s.route("GET /v1/plans", store.ScopeRead, s.listPlans)
 	s.route("GET /v1/plans/{id}", store.ScopeRead, s.getPlan)
@@ -289,6 +292,22 @@ func (s *Server) rollback(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	return s.eng.Rollback(r.Context(), p.name, r.PathValue("name"), req.ToDeployment, req.Reason)
+}
+
+func (s *Server) createPreview(r *http.Request, p principal) (any, error) {
+	var req engine.PreviewRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	return s.eng.CreatePreview(r.Context(), p.name, req)
+}
+
+func (s *Server) listPreviews(r *http.Request, _ principal) (any, error) {
+	return s.eng.ListPreviews(r.Context())
+}
+
+func (s *Server) deletePreview(r *http.Request, p principal) (any, error) {
+	return s.eng.DeletePreview(r.Context(), p.name, r.PathValue("name"), r.URL.Query().Get("reason"))
 }
 
 func (s *Server) createPlan(r *http.Request, p principal) (any, error) {

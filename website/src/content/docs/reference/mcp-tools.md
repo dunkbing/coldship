@@ -16,6 +16,9 @@ description: The tools hangar mcp exposes to AI agents.
 | `hangar_logs` | `app`, optional `tail`, `since` | read-only | Recent logs, marked untrusted |
 | `hangar_diagnose` | `app` | read-only | Findings with suggested fixes, plus state and logs |
 | `hangar_deployments` | `app` | read-only | Deployment history, with the commit and `failed_in` |
+| `hangar_preview_create` | `app`, `ref` or `image`, optional `name`, `ttl`, `env`, `inherit_env`, `reason` | not destructive, idempotent | Create or update a [preview](/guides/previews/). Returns its name, URLs and expiry |
+| `hangar_preview_list` | — | read-only | Previews, soonest-expiring first |
+| `hangar_preview_delete` | `name`, optional `reason` | destructive, idempotent | Delete a preview (never a regular app) |
 | `hangar_deploy_log` | `deployment` | read-only | What happened during a deployment: build output, start, health checks, a failed container's output. Untrusted |
 
 There is intentionally **no approve tool**. Approving destructive production changes is a human step.

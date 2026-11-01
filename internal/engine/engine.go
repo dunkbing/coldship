@@ -21,23 +21,24 @@ import (
 )
 
 type Engine struct {
-	st      *store.Store
-	rt      runtime.Runtime
-	bd      builder.Builder
-	px      proxy.Proxy // nil when the proxy is disabled
-	proxyMu sync.Mutex
-	routes  map[string]proxy.Route // live route table, by app
-	locksMu sync.Mutex
-	locks   map[string]*sync.Mutex // one per app: mutations of an app are serialized
-	active  atomic.Int64           // applies in progress
-	PlanTTL time.Duration
-	Now     func() time.Time
+	st       *store.Store
+	rt       runtime.Runtime
+	bd       builder.Builder
+	px       proxy.Proxy // nil when the proxy is disabled
+	proxyMu  sync.Mutex
+	routes   map[string]proxy.Route // live route table, by app
+	locksMu  sync.Mutex
+	locks    map[string]*sync.Mutex // one per app: mutations of an app are serialized
+	active   atomic.Int64           // applies in progress
+	PlanTTL  time.Duration
+	Previews PreviewConfig
+	Now      func() time.Time
 }
 
 // New creates an engine. px may be nil, which disables domains.
 func New(st *store.Store, rt runtime.Runtime, bd builder.Builder, px proxy.Proxy) *Engine {
 	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{},
-		PlanTTL: 30 * time.Minute, Now: time.Now}
+		PlanTTL: 30 * time.Minute, Previews: defaultPreviewConfig(), Now: time.Now}
 }
 
 // StartProxy starts the proxy and loads routes for every deployed app with
@@ -231,6 +232,10 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 	base := ""
 	if app != nil {
 		current, base = app.Spec, app.CurrentDeployment
+		if app.PreviewOf != "" && desired != nil && desired.Stage != spec.StagePreview {
+			return nil, apierr.New(400, "invalid_spec", "%s is a preview of %s and must keep stage: preview", name, app.PreviewOf).
+				WithField("stage").WithFix(map[string]any{"stage": "preview"})
+		}
 	}
 
 	diff := planner.Diff(current, desired)

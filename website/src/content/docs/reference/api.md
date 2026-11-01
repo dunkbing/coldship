@@ -26,6 +26,9 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/system/check` | admin | Check for a new version now |
 | `POST` | `/v1/system/upgrade` | admin | Start an upgrade: waits for deployments, installs, restarts |
 | `GET` | `/v1/system/manifest` | read | The latest signed release manifest and its URL, for `hangar self-update` |
+| `POST` | `/v1/previews` | deploy | Create or update a preview: `{app, ref?, image?, name?, ttl?, env?, inherit_env?, reason?}` |
+| `GET` | `/v1/previews` | read | List previews |
+| `DELETE` | `/v1/previews/{name}?reason=...` | deploy | Delete a preview |
 | `POST` | `/v1/plans` | deploy | Body `{spec}`, `{delete: "<app>"}`, optionally `redeploy: true` |
 | `GET` | `/v1/plans?status=pending&limit=50` | read | List plans. `status` is `pending`, `applied` or `expired` |
 | `GET` | `/v1/plans/{id}` | read | One plan |

@@ -51,6 +51,9 @@ Every error from every interface has the same shape:
 | `build_failed` | 422 | `docker build` failed. Read the build log. The running app is untouched (`failed_in: build`). |
 | `build_timeout` | 504 | The build exceeded the server's `--build-timeout` |
 | `health_check_failed` | 502 | The new container never became healthy. With zero-downtime deploys the previous version keeps serving (`details.previous_version_running`). |
+| `preview_limit` | 409 | All preview slots are used. `details.previews` lists them, soonest-expiring first. |
+| `not_a_preview` | 400 | Preview commands only delete previews; delete regular apps with a plan |
+| `name_in_use` | 409 | A regular app already has the preview's name; pass another `--name` |
 | `domain_in_use` | 409 | Another app already has this domain (`details.app`) |
 | `proxy_disabled` | 400 | The app has domains but the server runs with `--proxy=false` |
 | `proxy_unavailable`, `proxy_reload_failed` | 502 | The proxy container couldn't start or reload its config |

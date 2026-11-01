@@ -51,8 +51,12 @@ type App struct {
 	Name              string    `json:"name"`
 	Spec              *spec.App `json:"spec,omitempty"` // last successfully deployed spec
 	CurrentDeployment string    `json:"current_deployment,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// PreviewOf names the app this is a preview of; previews are deleted
+	// automatically at ExpiresAt.
+	PreviewOf string     `json:"preview_of,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // Plan statuses.
@@ -167,6 +171,17 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// Columns added after the first release. SQLite has no ADD COLUMN IF
+	// NOT EXISTS, so "duplicate column" means already migrated.
+	for _, stmt := range []string{
+		`ALTER TABLE apps ADD COLUMN preview_of TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE apps ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, fmt.Errorf("migrate: %w", err)
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -298,7 +313,7 @@ func (s *Store) GetDeployLog(ctx context.Context, deployment string) ([]string, 
 // --- apps ---
 
 func (s *Store) GetApp(ctx context.Context, name string) (*App, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT name, spec, current_deployment, created_at, updated_at FROM apps WHERE name = ?`, name)
+	row := s.db.QueryRowContext(ctx, `SELECT name, spec, current_deployment, preview_of, expires_at, created_at, updated_at FROM apps WHERE name = ?`, name)
 	a, err := scanApp(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -307,7 +322,7 @@ func (s *Store) GetApp(ctx context.Context, name string) (*App, error) {
 }
 
 func (s *Store) ListApps(ctx context.Context) ([]App, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, spec, current_deployment, created_at, updated_at FROM apps ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, spec, current_deployment, preview_of, expires_at, created_at, updated_at FROM apps ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -328,9 +343,14 @@ type scanner interface{ Scan(...any) error }
 func scanApp(r scanner) (*App, error) {
 	var a App
 	var specJSON sql.NullString
-	var created, updated string
-	if err := r.Scan(&a.Name, &specJSON, &a.CurrentDeployment, &created, &updated); err != nil {
+	var created, updated, expires string
+	if err := r.Scan(&a.Name, &specJSON, &a.CurrentDeployment, &a.PreviewOf, &expires, &created, &updated); err != nil {
 		return nil, err
+	}
+	if expires != "" {
+		if t, err := time.Parse(tsFormat, expires); err == nil {
+			a.ExpiresAt = &t
+		}
 	}
 	if specJSON.Valid {
 		a.Spec = &spec.App{}
@@ -352,9 +372,20 @@ func (s *Store) UpsertApp(ctx context.Context, a *App) error {
 		}
 		specJSON = sql.NullString{String: string(b), Valid: true}
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO apps(name, spec, current_deployment, created_at, updated_at) VALUES(?,?,?,?,?)
-		ON CONFLICT(name) DO UPDATE SET spec=excluded.spec, current_deployment=excluded.current_deployment, updated_at=excluded.updated_at`,
-		a.Name, specJSON, a.CurrentDeployment, ts(a.CreatedAt), ts(a.UpdatedAt))
+	expires := ""
+	if a.ExpiresAt != nil {
+		expires = ts(*a.ExpiresAt)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO apps(name, spec, current_deployment, preview_of, expires_at, created_at, updated_at) VALUES(?,?,?,?,?,?,?)
+		ON CONFLICT(name) DO UPDATE SET spec=excluded.spec, current_deployment=excluded.current_deployment,
+		preview_of=excluded.preview_of, expires_at=excluded.expires_at, updated_at=excluded.updated_at`,
+		a.Name, specJSON, a.CurrentDeployment, a.PreviewOf, expires, ts(a.CreatedAt), ts(a.UpdatedAt))
+	return err
+}
+
+// SetPreview marks an app as a preview of parent that expires at expires.
+func (s *Store) SetPreview(ctx context.Context, name, parent string, expires time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE apps SET preview_of = ?, expires_at = ? WHERE name = ?`, parent, ts(expires), name)
 	return err
 }
 

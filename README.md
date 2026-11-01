@@ -19,6 +19,7 @@ and a web dashboard embedded in the binary.
 | Rollback | `rollback` redeploys the last good deployment. A failed deploy never replaces the "current" spec. |
 | Domains + HTTPS | `domains: [...]` routes through a managed Caddy proxy with automatic certificates. |
 | Zero-downtime deploys | New version starts next to the old, must pass its health check, then traffic switches. If it fails, the old one keeps serving. |
+| Preview environments | `hangar preview create web --ref feat/x --ttl 2h`: a throwaway copy with fresh volumes and no production secrets by default, deleted automatically. |
 | Self-upgrades | Signed releases (Ed25519 + SHA-256), installed automatically when idle; "new version available" in the dashboard and CLI. |
 | Build from Git | `build: {git, ref}` instead of `image`. Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
 | No secret leaks | Env values are redacted in all output. The runtime gets them through a 0600 env file, never argv. |
@@ -125,7 +126,7 @@ Private repos: `hangar server --git-credentials <git-credential-store file>`, or
 - [x] Reverse proxy + automatic TLS (managed Caddy) with domains in the spec
 - [x] Zero-downtime deploys (start new container, health check, then swap)
 - [x] Signed self-upgrades
-- [ ] Ephemeral preview environments with a TTL (`stage: preview`, `ttl: 2h`)
+- [x] Ephemeral preview environments with a TTL
 - [ ] Managed databases (Postgres/Redis) with snapshots taken before destructive ops
 - [ ] Policies: spend/instance caps per token, per-app permissions
 - [ ] Approval notifications (Slack/webhook) and event webhooks to wake agents on failures

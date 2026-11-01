@@ -37,6 +37,9 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--git-credentials` | `HANGAR_GIT_CREDENTIALS` | | git-credential-store file for private HTTPS repositories |
 | `--build-dir` | `HANGAR_BUILD_DIR` | system temp dir | Where temporary build checkouts go |
 | `--proxy` | | `true` | Run the Caddy proxy for app domains |
+| `--preview-domain` | `HANGAR_PREVIEW_DOMAIN` | | Previews get `https://<name>.<domain>` (needs wildcard DNS) |
+| `--preview-ttl` / `--preview-max-ttl` | | `24h` / `168h` | Default and maximum preview lifetime |
+| `--max-previews` | | `20` | Most previews at once |
 | `--proxy-http-port` / `--proxy-https-port` | | `80` / `443` | Host ports for the proxy |
 | `--acme-email` | `HANGAR_ACME_EMAIL` | | Email for Let's Encrypt notices |
 | `--update-url` | `HANGAR_UPDATE_URL` | built in | Signed release manifest to check |
@@ -72,6 +75,14 @@ Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tool
 | `hangar diagnose <app>` | Findings and suggested fixes |
 | `hangar deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
 | `hangar version` | CLI and server versions, and whether an update is available |
+
+## Previews
+
+| Command | Description |
+|---|---|
+| `hangar preview create <app> [--ref R \| --image I] [--name N] [--ttl 2h] [--env K=V] [--inherit-env \| --no-inherit-env] [--reason "..."]` | Create or update a preview. Safe to repeat. |
+| `hangar preview list` | Previews, soonest-expiring first |
+| `hangar preview delete <preview> [--reason "..."]` | Delete a preview and its volumes |
 
 ## Upgrades
 

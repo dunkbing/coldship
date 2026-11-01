@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { api, type AppView } from '../api'
-import { useLoad } from '../hooks'
+import { timeUntil, useLoad } from '../hooks'
 import { DeployStatus, Empty, ErrorBox, HealthPill, healthOf, Source, StageBadge, Time } from '../components/ui'
 
 async function loadApps(): Promise<AppView[]> {
@@ -9,7 +9,9 @@ async function loadApps(): Promise<AppView[]> {
 }
 
 export default function Apps() {
-  const { data, error, loading } = useLoad(loadApps, [], 5000)
+  const { data: all, error, loading } = useLoad(loadApps, [], 5000)
+  const data = all?.filter((a) => !a.preview_of)
+  const previews = all?.filter((a) => a.preview_of) ?? []
 
   const counts = { healthy: 0, failing: 0 }
   for (const a of data ?? []) {
@@ -46,7 +48,7 @@ export default function Apps() {
 
       {error && <ErrorBox error={error} />}
       {loading && !data && <div className="muted">Loading…</div>}
-      {data?.length === 0 && (
+      {data?.length === 0 && previews.length === 0 && (
         <Empty title="No apps yet">
           Deploy one with <code>hangar deploy -f hangar.yaml --reason "first deploy"</code>, or ask your agent to.
         </Empty>
@@ -106,6 +108,56 @@ export default function Apps() {
           </table>
         </div>
       )}
+      {previews.length > 0 && <PreviewTable previews={previews} />}
+    </>
+  )
+}
+
+function PreviewTable({ previews }: { previews: AppView[] }) {
+  return (
+    <>
+      <h2 className="section-title">Previews</h2>
+      <div className="card table-card">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Preview</th>
+              <th>Status</th>
+              <th>Of</th>
+              <th>Source</th>
+              <th>Expires</th>
+            </tr>
+          </thead>
+          <tbody>
+            {previews.map((a) => (
+              <tr key={a.name}>
+                <td>
+                  <Link className="row-link" to={`/apps/${a.name}`}>
+                    {a.name}
+                  </Link>
+                  {a.urls?.[0] && (
+                    <div className="small">
+                      <a href={a.urls[0]} target="_blank" rel="noreferrer" className="muted">
+                        {a.urls[0].replace(/^https:\/\//, '')}
+                      </a>
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <HealthPill health={healthOf(a)} />
+                </td>
+                <td>
+                  <Link to={`/apps/${a.preview_of}`}>{a.preview_of}</Link>
+                </td>
+                <td>
+                  <Source spec={a.spec} />
+                </td>
+                <td className="muted">{a.expires_at ? timeUntil(a.expires_at) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   )
 }

@@ -35,6 +35,8 @@ export interface App {
   name: string
   spec?: Spec
   current_deployment?: string
+  preview_of?: string
+  expires_at?: string
   created_at: string
   updated_at: string
 }
@@ -234,6 +236,9 @@ export const api = {
   plans: (status?: string, limit = 100) =>
     req<Plan[]>('GET', `/v1/plans?limit=${limit}${status ? `&status=${enc(status)}` : ''}`),
   approve: (id: string) => req<Plan>('POST', `/v1/plans/${enc(id)}/approve`),
+  previews: () => req<App[]>('GET', '/v1/previews'),
+  deletePreview: (name: string, reason = 'deleted from the dashboard') =>
+    req<ApplyResult>('DELETE', `/v1/previews/${enc(name)}?reason=${enc(reason)}`),
   system: () => req<SystemStatus>('GET', '/v1/system'),
   upgrade: () => req<SystemStatus>('POST', '/v1/system/upgrade'),
   audit: (limit = 200) => req<AuditEntry[]>('GET', `/v1/audit?limit=${limit}`),

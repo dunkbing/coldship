@@ -33,6 +33,9 @@ func serverCmd() *cobra.Command {
 	var proxyOn, autoUpgrade bool
 	var updURL, updKey string
 	var updInterval time.Duration
+	var previewDomain string
+	var previewTTL, previewMaxTTL time.Duration
+	var maxPreviews int
 	var httpPort, httpsPort int
 	cmd := &cobra.Command{
 		Use:   "server",
@@ -57,6 +60,7 @@ func serverCmd() *cobra.Command {
 				px = proxy.NewCaddy(filepath.Join(filepath.Dir(dataAbs), "hangar-proxy"), httpPort, httpsPort, acmeEmail)
 			}
 			eng := engine.New(st, rt, bd, px)
+			eng.Previews = engine.PreviewConfig{Domain: previewDomain, DefaultTTL: previewTTL, MaxTTL: previewMaxTTL, Max: maxPreviews}
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -104,6 +108,23 @@ func serverCmd() *cobra.Command {
 			}
 			apiSrv.SetUpdater(checker)
 			go checker.Run(ctx)
+			go func() {
+				// Delete previews whose time is up.
+				t := time.NewTicker(time.Minute)
+				defer t.Stop()
+				for {
+					if deleted, err := eng.ReapPreviews(ctx); err != nil {
+						log.Error("cleaning up previews", "err", err)
+					} else if len(deleted) > 0 {
+						log.Info("deleted expired previews", "previews", deleted)
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case <-t.C:
+					}
+				}
+			}()
 
 			go func() {
 				<-ctx.Done()
@@ -131,6 +152,10 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&updKey, "update-public-key", envOr("HANGAR_UPDATE_PUBLIC_KEY", updatePublicKey), "Ed25519 public key (base64) that release manifests must be signed with")
 	cmd.Flags().BoolVar(&autoUpgrade, "auto-upgrade", true, "install new minor and patch versions automatically when no deployment is running")
 	cmd.Flags().DurationVar(&updInterval, "update-interval", 6*time.Hour, "how often to check for new versions")
+	cmd.Flags().StringVar(&previewDomain, "preview-domain", envOr("HANGAR_PREVIEW_DOMAIN", ""), "give previews URLs under this domain (needs a wildcard DNS record *.<domain> pointing here)")
+	cmd.Flags().DurationVar(&previewTTL, "preview-ttl", 24*time.Hour, "default lifetime of a preview")
+	cmd.Flags().DurationVar(&previewMaxTTL, "preview-max-ttl", 7*24*time.Hour, "longest lifetime a preview may ask for")
+	cmd.Flags().IntVar(&maxPreviews, "max-previews", 20, "most previews that may exist at once")
 	cmd.Flags().BoolVar(&proxyOn, "proxy", true, "run the Caddy proxy that serves app domains with automatic HTTPS")
 	cmd.Flags().IntVar(&httpPort, "proxy-http-port", 80, "host port for the proxy's HTTP listener")
 	cmd.Flags().IntVar(&httpsPort, "proxy-https-port", 443, "host port for the proxy's HTTPS listener")

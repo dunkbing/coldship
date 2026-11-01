@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, type AppView, type Deployment } from '../api'
 import { useSession } from '../App'
-import { fmtTime, useLoad } from '../hooks'
+import { fmtTime, timeUntil, useLoad } from '../hooks'
 import { DeployStatus, ErrorBox, GitIcon, HealthPill, healthOf, Mono, shortRepo, StageBadge, Time } from '../components/ui'
 
 type Tab = 'diagnose' | 'deployments' | 'logs'
@@ -43,6 +43,8 @@ export default function AppDetail() {
         <RollbackButton app={a} onDone={app.reload} />
       </header>
 
+      {a.preview_of && <PreviewBanner a={a} />}
+
       <div className="grid-2">
         <SpecCard a={a} />
         <RuntimeCard a={a} />
@@ -59,6 +61,45 @@ export default function AppDetail() {
       {tab === 'deployments' && <DeploymentsTab name={name} />}
       {tab === 'logs' && <LogsTab name={name} />}
     </>
+  )
+}
+
+function PreviewBanner({ a }: { a: AppView }) {
+  const me = useSession()
+  const nav = useNavigate()
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState<Error>()
+  async function del() {
+    try {
+      await api.deletePreview(a.name)
+      nav('/apps')
+    } catch (e) {
+      setError(e as Error)
+    }
+  }
+  return (
+    <div className="preview-banner">
+      <div>
+        Preview of <Link to={`/apps/${a.preview_of}`}>{a.preview_of}</Link>. It is deleted automatically{' '}
+        <strong title={fmtTime(a.expires_at)}>{a.expires_at ? timeUntil(a.expires_at) : 'soon'}</strong>, with its volumes.
+        {error && <ErrorBox error={error} />}
+      </div>
+      {me.scope !== 'read' &&
+        (!confirming ? (
+          <button className="btn btn-sm" onClick={() => setConfirming(true)}>
+            Delete preview…
+          </button>
+        ) : (
+          <span className="inline">
+            <button className="btn btn-danger btn-sm" onClick={del}>
+              Delete {a.name}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </span>
+        ))}
+    </div>
   )
 }
 

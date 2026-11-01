@@ -139,6 +139,21 @@ func (c *Client) DeployLog(ctx context.Context, deployment string) (*engine.Depl
 	return &out, c.do(ctx, "GET", "/v1/deployments/"+esc(deployment)+"/log", nil, &out)
 }
 
+func (c *Client) CreatePreview(ctx context.Context, req engine.PreviewRequest) (*engine.PreviewResult, error) {
+	var out engine.PreviewResult
+	return &out, c.do(ctx, "POST", "/v1/previews", req, &out)
+}
+
+func (c *Client) ListPreviews(ctx context.Context) ([]store.App, error) {
+	var out []store.App
+	return out, c.do(ctx, "GET", "/v1/previews", nil, &out)
+}
+
+func (c *Client) DeletePreview(ctx context.Context, name, reason string) (*engine.ApplyResult, error) {
+	var out engine.ApplyResult
+	return &out, c.do(ctx, "DELETE", "/v1/previews/"+esc(name)+"?reason="+url.QueryEscape(reason), nil, &out)
+}
+
 func (c *Client) System(ctx context.Context) (*update.Status, error) {
 	var out update.Status
 	return &out, c.do(ctx, "GET", "/v1/system", nil, &out)
