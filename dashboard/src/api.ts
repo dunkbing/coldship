@@ -122,6 +122,22 @@ export interface Snapshot {
   created_at: string
 }
 
+export type DataEngine = 'postgres' | 'mysql' | 'redis' | 's3'
+
+// A data service (app === undefined) or a database an app owns.
+export interface DataView {
+  name: string
+  engine: DataEngine
+  version: string
+  app?: string
+  host: string
+  status: { exists: boolean; running: boolean; state?: string; image?: string }
+  used_by: string[]
+  env: string[]
+  latest_snapshot?: Snapshot
+  created_at: string
+}
+
 export interface DatabaseView {
   name: string
   engine: string
@@ -324,6 +340,18 @@ export const api = {
   previews: () => req<App[]>('GET', '/v1/previews'),
   deletePreview: (name: string, reason = 'deleted from the dashboard') =>
     req<ApplyResult>('DELETE', `/v1/previews/${enc(name)}?reason=${enc(reason)}`),
+  data: () => req<DataView[]>('GET', '/v1/data'),
+  dataOne: (name: string) => req<DataView>('GET', `/v1/data/${enc(name)}`),
+  createData: (engine: DataEngine, name: string, version?: string) =>
+    req<DataView>('POST', '/v1/data', { engine, name, version: version || undefined }),
+  deleteData: (name: string, reason = 'deleted from the dashboard') =>
+    req<{ deleted: boolean }>('DELETE', `/v1/data/${enc(name)}?reason=${enc(reason)}`),
+  dataConnection: (name: string) => req<Record<string, string>>('POST', `/v1/data/${enc(name)}/connection`),
+  dataSnapshots: (name: string) => req<Snapshot[]>('GET', `/v1/data/${enc(name)}/snapshots`),
+  snapshotData: (name: string, reason = 'manual, from the dashboard') =>
+    req<Snapshot>('POST', `/v1/data/${enc(name)}/snapshots`, { reason }),
+  restoreData: (name: string, snapshot: string, reason: string) =>
+    req<{ message: string }>('POST', `/v1/data/${enc(name)}/restore`, { snapshot, reason }),
   system: () => req<SystemStatus>('GET', '/v1/system'),
   upgrade: () => req<SystemStatus>('POST', '/v1/system/upgrade'),
   audit: (limit = 200) => req<AuditEntry[]>('GET', `/v1/audit?limit=${limit}`),
