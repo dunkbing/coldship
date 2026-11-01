@@ -120,12 +120,18 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || die "download failed: $bas
   if command -v sha256sum >/dev/null; then sha256sum -c expected >/dev/null; else shasum -a 256 -c expected >/dev/null; fi
 ) || die "checksum mismatch, not installing"
 chmod +x "$tmp/$asset"
+# Copy rather than move: a moved file keeps its /tmp SELinux label, and
+# systemd may not run it (status 203/EXEC on Oracle Linux, RHEL, Fedora).
 if [ -w "$dir" ]; then
-  mv "$tmp/$asset" "$dir/coldship"
+  install -m 0755 "$tmp/$asset" "$dir/coldship"
 else
   as_root mkdir -p "$dir"
-  as_root mv "$tmp/$asset" "$dir/coldship"
+  as_root install -m 0755 "$tmp/$asset" "$dir/coldship"
 fi
+relabel() {
+  if command -v restorecon >/dev/null 2>&1; then as_root restorecon "$@" 2>/dev/null || true; fi
+}
+relabel "$dir/coldship"
 version=$("$dir/coldship" --version | awk '{print $NF}')
 ok "coldship $version installed to $dir/coldship"
 
@@ -162,15 +168,19 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-as_root mv "$tmp/coldship.service" /etc/systemd/system/coldship.service
-as_root chmod 644 /etc/systemd/system/coldship.service
+as_root install -m 0644 "$tmp/coldship.service" /etc/systemd/system/coldship.service
+relabel /etc/systemd/system/coldship.service
 as_root systemctl daemon-reload
 as_root systemctl enable coldship >/dev/null 2>&1
 as_root systemctl restart coldship
 i=0
 until as_root systemctl is-active --quiet coldship && curl -fsS "$url/healthz" >/dev/null 2>&1; do
   i=$((i + 1))
-  [ $i -lt 60 ] || die "the service didn't start. See: sudo journalctl -u coldship -n 50"
+  if [ $i -ge 60 ]; then
+    printf '\n  The service did not start. Its log:\n\n' >&2
+    as_root journalctl -u coldship -n 15 --no-pager >&2 || true
+    die "the service didn't start (full log: sudo journalctl -u coldship)"
+  fi
   sleep 0.5
 done
 ok "running, and starts on boot (sudo systemctl status coldship)"
