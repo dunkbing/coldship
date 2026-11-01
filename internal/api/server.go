@@ -862,6 +862,9 @@ func (s *Server) streamDeployLog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The stream outlives the server's read deadline for request bodies
+	// (it has none to read): clear it, or the connection drops after 30s.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
 	flusher, _ := w.(http.Flusher)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

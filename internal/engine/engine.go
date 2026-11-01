@@ -1005,12 +1005,18 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			if ae.Hint == "" {
 				ae.Hint = "read the deploy log, fix the problem, then deploy again"
 			}
-			return nil, ae.WithFix(map[string]any{"tool": "deploy_log", "deployment": d.ID})
+			if ae.SuggestedFix == nil { // keep a concrete fix, like the right port
+				ae.WithFix(map[string]any{"tool": "deploy_log", "deployment": d.ID})
+			}
+			return nil, ae
 		}
 		if ae.Hint == "" {
 			ae.Hint = "call diagnose for this app, or roll back to the last good deployment"
 		}
-		return nil, ae.WithFix(map[string]any{"tool": "rollback", "app": p.App})
+		if ae.SuggestedFix == nil {
+			ae.WithFix(map[string]any{"tool": "rollback", "app": p.App})
+		}
+		return nil, ae
 	}
 	return &ApplyResult{Plan: publicPlan(p), Deployment: publicDeployment(d), Message: "deployed"}, nil
 }
