@@ -17,6 +17,7 @@ import (
 	"hangar/internal/engine"
 	"hangar/internal/store"
 	"hangar/internal/update"
+	"hangar/internal/webhook"
 )
 
 type principal struct {
@@ -30,7 +31,12 @@ type Server struct {
 	mux *http.ServeMux
 	log *slog.Logger
 	upd *update.Checker
+	// publicURL is how Git hosts reach this server, for webhook URLs.
+	publicURL string
 }
+
+// SetPublicURL sets the externally reachable base URL (for webhook URLs).
+func (s *Server) SetPublicURL(u string) { s.publicURL = strings.TrimRight(u, "/") }
 
 // SetUpdater enables the /v1/system update endpoints.
 func (s *Server) SetUpdater(c *update.Checker) { s.upd = c }
@@ -50,6 +56,10 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
 	s.route("GET /v1/deployments/{id}/log", store.ScopeRead, s.deployLog)
+	s.mux.HandleFunc("POST /hooks/git/{app}", s.gitHook)
+	s.route("GET /v1/apps/{name}/webhook", store.ScopeRead, s.webhookStatus)
+	s.route("POST /v1/apps/{name}/webhook", store.ScopeAdmin, s.enableWebhook)
+	s.route("DELETE /v1/apps/{name}/webhook", store.ScopeAdmin, s.disableWebhook)
 	s.route("GET /v1/apps/{name}/databases", store.ScopeRead, s.databases)
 	s.route("GET /v1/apps/{name}/snapshots", store.ScopeRead, s.snapshots)
 	s.route("POST /v1/apps/{name}/databases/{db}/snapshots", store.ScopeDeploy, s.createSnapshot)
@@ -250,6 +260,101 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]bool{"signed_out": true})
+}
+
+// gitHook receives pushes from Git hosts. It is authenticated only by the
+// per-app webhook secret (HMAC signature or GitLab token), never by tokens.
+func (s *Server) gitHook(w http.ResponseWriter, r *http.Request) {
+	app := r.PathValue("app")
+	secret, err := s.eng.WebhookSecret(r.Context(), app)
+	if err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	if secret == "" {
+		writeErr(w, s.log, apierr.New(404, "webhook_not_enabled", "no webhook is enabled for %q", app))
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 5<<20))
+	if err != nil {
+		writeErr(w, s.log, apierr.New(413, "payload_too_large", "webhook payloads are limited to 5 MB"))
+		return
+	}
+	push, err := webhook.Parse(r.Header, body, secret)
+	if err != nil {
+		if errors.Is(err, webhook.ErrNoSignature) || errors.Is(err, webhook.ErrBadSignature) {
+			s.log.Warn("rejected webhook", "app", app, "err", err, "remote", r.RemoteAddr)
+			writeErr(w, s.log, apierr.New(401, "bad_signature", "%v", err))
+			return
+		}
+		writeErr(w, s.log, apierr.New(400, "invalid_request", "%v", err))
+		return
+	}
+	if seen, err := s.eng.SeenDelivery(r.Context(), app, push.Delivery); err == nil && seen {
+		writeJSON(w, http.StatusOK, map[string]string{"result": "duplicate", "detail": "this delivery was already handled"})
+		return
+	}
+	d, err := s.eng.HandlePush(r.Context(), app, push)
+	if err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	status := http.StatusOK
+	if d.Result == "queued" {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, map[string]string{"result": d.Result, "detail": d.Detail, "delivery": d.ID})
+}
+
+func (s *Server) hookURL(r *http.Request, app string) string {
+	base := s.publicURL
+	if base == "" {
+		scheme := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		base = scheme + "://" + r.Host
+	}
+	return base + "/hooks/git/" + app
+}
+
+type WebhookInfo struct {
+	URL    string `json:"url"`
+	Secret string `json:"secret,omitempty"`
+	*engine.WebhookStatus
+}
+
+func (s *Server) webhookStatus(r *http.Request, _ principal) (any, error) {
+	st, err := s.eng.WebhookStatus(r.Context(), r.PathValue("name"))
+	if err != nil {
+		return nil, err
+	}
+	return WebhookInfo{URL: s.hookURL(r, st.App), WebhookStatus: st}, nil
+}
+
+type EnableWebhookRequest struct {
+	Rotate bool `json:"rotate,omitempty"`
+}
+
+func (s *Server) enableWebhook(r *http.Request, p principal) (any, error) {
+	var req EnableWebhookRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	name := r.PathValue("name")
+	secret, err := s.eng.EnableWebhook(r.Context(), p.name, name, req.Rotate)
+	if err != nil {
+		return nil, err
+	}
+	st, err := s.eng.WebhookStatus(r.Context(), name)
+	if err != nil {
+		return nil, err
+	}
+	return WebhookInfo{URL: s.hookURL(r, name), Secret: secret, WebhookStatus: st}, nil
+}
+
+func (s *Server) disableWebhook(r *http.Request, p principal) (any, error) {
+	return map[string]bool{"disabled": true}, s.eng.DisableWebhook(r.Context(), p.name, r.PathValue("name"))
 }
 
 func (s *Server) databases(r *http.Request, _ principal) (any, error) {

@@ -139,6 +139,20 @@ func (c *Client) DeployLog(ctx context.Context, deployment string) (*engine.Depl
 	return &out, c.do(ctx, "GET", "/v1/deployments/"+esc(deployment)+"/log", nil, &out)
 }
 
+func (c *Client) WebhookStatus(ctx context.Context, app string) (*api.WebhookInfo, error) {
+	var out api.WebhookInfo
+	return &out, c.do(ctx, "GET", "/v1/apps/"+esc(app)+"/webhook", nil, &out)
+}
+
+func (c *Client) EnableWebhook(ctx context.Context, app string, rotate bool) (*api.WebhookInfo, error) {
+	var out api.WebhookInfo
+	return &out, c.do(ctx, "POST", "/v1/apps/"+esc(app)+"/webhook", api.EnableWebhookRequest{Rotate: rotate}, &out)
+}
+
+func (c *Client) DisableWebhook(ctx context.Context, app string) error {
+	return c.do(ctx, "DELETE", "/v1/apps/"+esc(app)+"/webhook", nil, nil)
+}
+
 func (c *Client) Databases(ctx context.Context, app string) ([]engine.DatabaseView, error) {
 	var out []engine.DatabaseView
 	return out, c.do(ctx, "GET", "/v1/apps/"+esc(app)+"/databases", nil, &out)

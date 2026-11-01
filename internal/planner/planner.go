@@ -61,6 +61,16 @@ func Diff(cur, des *spec.App) Result {
 		cs = scalar(cs, "host_port", cur.HostPort, des.HostPort)
 		cs = scalar(cs, "memory", cur.Memory, des.Memory)
 		cs = setDiff(cs, "domains.", cur.Domains, des.Domains)
+		var co, do spec.OnPush
+		if cur.OnPush != nil {
+			co = *cur.OnPush
+		}
+		if des.OnPush != nil {
+			do = *des.OnPush
+		}
+		cs = scalar(cs, "on_push.action", co.Action, do.Action)
+		cs = scalar(cs, "on_push.previews", co.Previews, do.Previews)
+		cs = scalar(cs, "on_push.preview_ttl", co.PreviewTTL, do.PreviewTTL)
 		var ch, dh spec.Health
 		if cur.Health != nil {
 			ch = *cur.Health

@@ -162,6 +162,11 @@ CREATE TABLE IF NOT EXISTS databases (
 CREATE TABLE IF NOT EXISTS snapshots (
   id TEXT PRIMARY KEY, app TEXT NOT NULL, database TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS snapshots_by_db ON snapshots(app, database, created_at);
+CREATE TABLE IF NOT EXISTS webhooks (
+  app TEXT PRIMARY KEY, secret TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT PRIMARY KEY, app TEXT NOT NULL, delivery TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS deliveries_by_app ON webhook_deliveries(app, created_at);
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY, token_name TEXT NOT NULL, scope TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (
@@ -404,6 +409,107 @@ func (s *Store) ListSnapshots(ctx context.Context, app, database string) ([]Snap
 
 func (s *Store) DeleteSnapshot(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM snapshots WHERE id = ?`, id)
+	return err
+}
+
+// --- git webhooks ---
+
+type Webhook struct {
+	App       string
+	Secret    string
+	CreatedAt time.Time
+}
+
+func (s *Store) GetWebhook(ctx context.Context, app string) (*Webhook, error) {
+	var w Webhook
+	var created string
+	err := s.db.QueryRowContext(ctx, `SELECT app, secret, created_at FROM webhooks WHERE app = ?`, app).Scan(&w.App, &w.Secret, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	w.CreatedAt, _ = time.Parse(tsFormat, created)
+	return &w, nil
+}
+
+func (s *Store) SaveWebhook(ctx context.Context, w *Webhook) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO webhooks(app, secret, created_at) VALUES(?,?,?)
+		ON CONFLICT(app) DO UPDATE SET secret=excluded.secret, created_at=excluded.created_at`, w.App, w.Secret, ts(w.CreatedAt))
+	return err
+}
+
+func (s *Store) DeleteWebhook(ctx context.Context, app string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM webhooks WHERE app = ?`, app)
+	return err
+}
+
+// Delivery is one received webhook request and what Hangar did with it.
+type Delivery struct {
+	ID        string    `json:"id"`
+	App       string    `json:"app"`
+	Delivery  string    `json:"delivery,omitempty"` // provider's delivery id
+	Provider  string    `json:"provider"`
+	Event     string    `json:"event"`
+	Ref       string    `json:"ref,omitempty"`
+	Commit    string    `json:"commit,omitempty"`
+	Pusher    string    `json:"pusher,omitempty"`
+	Message   string    `json:"message,omitempty"` // commit message: untrusted
+	Result    string    `json:"result"`            // ignored | planned | deploying | deployed | preview | preview_deleted | failed | queued
+	Detail    string    `json:"detail,omitempty"`
+	Plan      string    `json:"plan,omitempty"`
+	Preview   string    `json:"preview,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *Store) SaveDelivery(ctx context.Context, d *Delivery) error {
+	b, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO webhook_deliveries(id, app, delivery, body, created_at) VALUES(?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET body=excluded.body`, d.ID, d.App, d.Delivery, string(b), ts(d.CreatedAt))
+	return err
+}
+
+// SeenDelivery reports whether a provider delivery id was already received
+// for app (providers redeliver on timeouts).
+func (s *Store) SeenDelivery(ctx context.Context, app, delivery string) (bool, error) {
+	if delivery == "" {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM webhook_deliveries WHERE app = ? AND delivery = ?`, app, delivery).Scan(&n)
+	return n > 0, err
+}
+
+// ListDeliveries returns an app's newest deliveries and prunes old ones.
+func (s *Store) ListDeliveries(ctx context.Context, app string, limit int) ([]Delivery, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT body FROM webhook_deliveries WHERE app = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, app, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Delivery{}
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var d Delivery
+		if err := json.Unmarshal([]byte(body), &d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// PruneDeliveries keeps the newest keep deliveries of an app.
+func (s *Store) PruneDeliveries(ctx context.Context, app string, keep int) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE app = ? AND id NOT IN (
+		SELECT id FROM webhook_deliveries WHERE app = ? ORDER BY created_at DESC, rowid DESC LIMIT ?)`, app, app, keep)
 	return err
 }
 

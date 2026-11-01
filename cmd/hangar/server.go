@@ -39,6 +39,7 @@ func serverCmd() *cobra.Command {
 	var snapshotDir string
 	var snapshotKeep int
 	var snapshotInterval time.Duration
+	var publicURL string
 	var httpPort, httpsPort int
 	cmd := &cobra.Command{
 		Use:   "server",
@@ -118,6 +119,7 @@ func serverCmd() *cobra.Command {
 				checker.PublicKey = pub
 			}
 			apiSrv.SetUpdater(checker)
+			apiSrv.SetPublicURL(publicURL)
 			go checker.Run(ctx)
 			if snapshotInterval > 0 {
 				go func() {
@@ -185,6 +187,7 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&previewTTL, "preview-ttl", 24*time.Hour, "default lifetime of a preview")
 	cmd.Flags().DurationVar(&previewMaxTTL, "preview-max-ttl", 7*24*time.Hour, "longest lifetime a preview may ask for")
 	cmd.Flags().IntVar(&maxPreviews, "max-previews", 20, "most previews that may exist at once")
+	cmd.Flags().StringVar(&publicURL, "public-url", envOr("HANGAR_PUBLIC_URL", ""), "URL Git hosts use to reach this server, for webhook URLs (e.g. https://hangar.example.com)")
 	cmd.Flags().StringVar(&snapshotDir, "snapshot-dir", envOr("HANGAR_SNAPSHOT_DIR", ""), "where database snapshots are kept (default: hangar-snapshots next to --data)")
 	cmd.Flags().IntVar(&snapshotKeep, "snapshot-keep", 20, "snapshots to keep per database (older ones are deleted)")
 	cmd.Flags().DurationVar(&snapshotInterval, "db-snapshot-interval", 24*time.Hour, "how often to snapshot every database (0 disables scheduled snapshots)")

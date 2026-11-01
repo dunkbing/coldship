@@ -30,6 +30,7 @@ type Engine struct {
 	locksMu  sync.Mutex
 	locks    map[string]*sync.Mutex // one per app: mutations of an app are serialized
 	active   atomic.Int64           // applies in progress
+	hooks    hookQueue              // background work from Git webhooks
 	PlanTTL  time.Duration
 	Previews PreviewConfig
 	// SnapshotDir holds database snapshots; SnapshotKeep is how many to
