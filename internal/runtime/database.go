@@ -227,7 +227,7 @@ func (d *Docker) EnsureDatabase(ctx context.Context, db DB, log io.Writer) error
 		}
 	}
 	switch {
-	case st.Exists && st.Image != image:
+	case st.Exists && normalizeImage(st.Image) != normalizeImage(image):
 		return apierr.New(409, "database_version_change", "database %s runs %s, not %s", db.Name, st.Image, image).
 			WithField("databases").WithHint("changing a database's engine or major version needs a migration, which Coldship doesn't do yet; keep the current version")
 	case st.Exists && !st.Running:
@@ -464,4 +464,15 @@ func errText(stderr string, err error) string {
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+// normalizeImage makes Docker Hub references comparable: Podman reports
+// docker.io/library/postgres:17-alpine where Docker says postgres:17-alpine.
+func normalizeImage(ref string) string {
+	for _, p := range []string{"docker.io/library/", "index.docker.io/library/", "docker.io/", "index.docker.io/"} {
+		if strings.HasPrefix(ref, p) {
+			return strings.TrimPrefix(ref, p)
+		}
+	}
+	return ref
 }

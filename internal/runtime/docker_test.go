@@ -154,3 +154,16 @@ func TestParseMemory(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeImage(t *testing.T) {
+	for in, want := range map[string]string{
+		"docker.io/library/postgres:17-alpine": "postgres:17-alpine",
+		"postgres:17-alpine":                   "postgres:17-alpine",
+		"docker.io/chrislusf/seaweedfs:4.51":   "chrislusf/seaweedfs:4.51",
+		"ghcr.io/acme/app:1":                   "ghcr.io/acme/app:1",
+	} {
+		if got := normalizeImage(in); got != want {
+			t.Errorf("%s: got %s", in, got)
+		}
+	}
+}

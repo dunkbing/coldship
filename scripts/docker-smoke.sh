@@ -58,6 +58,7 @@ curl -sf http://127.0.0.1:18080/ >/dev/null || fail "smoke-hp not serving on its
 echo "==> postgres and redis, snapshots"
 DB=$(spec db $'name: smoke-db\nimage: nginx:1.27-alpine\nport: 80\ndatabases:\n  - name: main\n    engine: postgres\n  - name: cache\n    engine: redis\n')
 "$H" deploy -f "$DB" --reason smoke >/dev/null || fail "deploy smoke-db"
+"$H" deploy -f "$DB" --reason smoke --redeploy >/dev/null || fail "redeploy an app with databases"
 "$H" db snapshot smoke-db main --reason smoke >/dev/null || fail "postgres snapshot"
 "$H" db snapshot smoke-db cache --reason smoke >/dev/null || fail "redis snapshot"
 ps -eo args | grep -v grep | grep -q 'REDISCLI_AUTH=' && fail "redis password visible in the process list"
