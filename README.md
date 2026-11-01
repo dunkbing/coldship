@@ -1,7 +1,10 @@
 # Hangar
 
 A self-hosted app platform designed for **AI agents as first-class users**.
-Agents work through MCP or a JSON CLI. Humans keep control through scoped tokens, approvals, and an audit log.
+Agents work through MCP or a JSON CLI. Humans keep control through scoped tokens, approvals, an audit log,
+and a web dashboard embedded in the binary.
+
+📖 Full documentation lives in [`website/`](website/) (Astro + Starlight): `make website-dev` to browse it locally.
 
 ## Agent-native by design
 
@@ -42,15 +45,20 @@ internal/api/        HTTP API + auth/scopes
 internal/client/     Go API client (used by the CLI and MCP)
 internal/mcpserver/  MCP tools for agents
 internal/apierr/     structured errors
+internal/web/        embeds and serves the dashboard build (go:embed)
+dashboard/           React + Vite dashboard (bun)
+website/             documentation site (Astro + Starlight, bun)
+scripts/             screenshots.sh: regenerates the docs screenshots
 ```
 
 ## Quick start
 
-Requires Go 1.26+ (older Go downloads it automatically) and Docker.
+Requires Go 1.26+ (older Go downloads it automatically), [Bun](https://bun.sh), and Docker.
 
 ```sh
-make build
+make build                     # builds the dashboard, embeds it, builds bin/hangar
 ./bin/hangar server            # prints a one-time admin token on first start
+                               # dashboard: http://127.0.0.1:7070
 export HANGAR_TOKEN=hgr_...    # the admin token
 
 ./bin/hangar plan   -f examples/hello/hangar.yaml
@@ -103,4 +111,14 @@ volumes:
 - [ ] Approval notifications (Slack/webhook) and event webhooks to wake agents on failures
 - [ ] Multi-node: a separate node agent; Postgres as the state store
 - [ ] Secrets encrypted at rest
-- [ ] Read-only web dashboard of agent activity
+
+## Development
+
+| Target | |
+|---|---|
+| `make build` | Dashboard + Go binary |
+| `make test` | Go tests |
+| `make website-dev` / `make website` | Docs site dev server / static build |
+| `make screenshots` | Regenerate docs screenshots (Docker; uses the Playwright image) |
+
+Use `bun add` to add JS dependencies rather than editing `package.json` by hand.

@@ -28,9 +28,12 @@ type Server struct {
 	log *slog.Logger
 }
 
-func New(eng *engine.Engine, st *store.Store, log *slog.Logger) *Server {
+// New builds the API server. ui, if non-nil, serves the web dashboard for
+// every path outside /v1/ and /healthz.
+func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler) *Server {
 	s := &Server{eng: eng, st: st, mux: http.NewServeMux(), log: log}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
+	s.route("GET /v1/whoami", store.ScopeRead, s.whoami)
 	s.route("GET /v1/apps", store.ScopeRead, s.listApps)
 	s.route("GET /v1/apps/{name}", store.ScopeRead, s.getApp)
 	s.route("GET /v1/apps/{name}/logs", store.ScopeRead, s.logs)
@@ -38,14 +41,21 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger) *Server {
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
 	s.route("POST /v1/plans", store.ScopeDeploy, s.createPlan)
+	s.route("GET /v1/plans", store.ScopeRead, s.listPlans)
 	s.route("GET /v1/plans/{id}", store.ScopeRead, s.getPlan)
 	s.route("POST /v1/plans/{id}/apply", store.ScopeDeploy, s.applyPlan)
 	s.route("POST /v1/plans/{id}/approve", store.ScopeAdmin, s.approvePlan)
 	s.route("GET /v1/audit", store.ScopeRead, s.audit)
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
-	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	notFound := func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, s.log, apierr.New(404, "route_not_found", "no route for %s %s", r.Method, r.URL.Path))
-	})
+	}
+	s.mux.HandleFunc("/v1/", notFound)
+	if ui != nil {
+		s.mux.Handle("/", ui)
+	} else {
+		s.mux.HandleFunc("/", notFound)
+	}
 	return s
 }
 
@@ -126,6 +136,23 @@ func intQuery(r *http.Request, key string, def, max int) (int, error) {
 }
 
 // --- handlers ---
+
+type WhoAmI struct {
+	Name  string      `json:"name"`
+	Scope store.Scope `json:"scope"`
+}
+
+func (s *Server) whoami(_ *http.Request, p principal) (any, error) {
+	return WhoAmI{Name: p.name, Scope: p.scope}, nil
+}
+
+func (s *Server) listPlans(r *http.Request, _ principal) (any, error) {
+	limit, err := intQuery(r, "limit", 50, 500)
+	if err != nil {
+		return nil, err
+	}
+	return s.eng.ListPlans(r.Context(), r.URL.Query().Get("status"), limit)
+}
 
 func (s *Server) listApps(r *http.Request, _ principal) (any, error) {
 	return s.eng.ListApps(r.Context())

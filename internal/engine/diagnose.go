@@ -37,7 +37,9 @@ var (
 	listenRe     = regexp.MustCompile(`(?i)\b(?:listening|running|started|serving|bound)\b.*?(?:port\s*|:)(\d{2,5})\b`)
 	addrInUseRe  = regexp.MustCompile(`(?i)address already in use|EADDRINUSE`)
 	permissionRe = regexp.MustCompile(`(?i)permission denied|EACCES`)
-	missingEnvRe = regexp.MustCompile(`(?i)(?:missing|required|not set|undefined).{0,40}?\b([A-Z][A-Z0-9_]{2,})\b`)
+	missingKwRe  = regexp.MustCompile(`(?i)\b(?:missing|required|not set|undefined|unset)\b`)
+	envNameRe    = regexp.MustCompile(`\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\b[A-Z]{3,}\b`) // case-sensitive on purpose
+	logWords     = map[string]bool{"ERROR": true, "FATAL": true, "WARN": true, "WARNING": true, "INFO": true, "DEBUG": true, "PANIC": true}
 )
 
 func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) {
@@ -61,6 +63,15 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 		d.LatestDeployment = publicDeployment(&deps[0])
 	}
 
+	// The container that produced the logs runs the latest deployment's spec,
+	// which differs from the last good spec when the latest deploy failed.
+	running := app.Spec
+	if ld := d.LatestDeployment; ld != nil && ld.Status == store.DeployFailed {
+		if deps, err := e.st.ListDeployments(ctx, name, 1); err == nil && len(deps) > 0 && deps[0].Spec != nil {
+			running = deps[0].Spec
+		}
+	}
+
 	add := func(sev, code, msg string, fix any) {
 		d.Findings = append(d.Findings, Finding{Severity: sev, Code: code, Message: msg, SuggestedFix: fix})
 	}
@@ -74,8 +85,8 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 		add("error", "not_running", "no container exists for this app", map[string]any{"tool": "plan", "redeploy": true})
 	case st.OOMKilled:
 		fix := map[string]any{"memory": "512m"}
-		if app.Spec != nil && app.Spec.Memory != "" {
-			fix["memory"] = doubleMemory(app.Spec.Memory)
+		if running != nil && running.Memory != "" {
+			fix["memory"] = doubleMemory(running.Memory)
 		}
 		add("error", "oom_killed", "the container was killed for running out of memory", fix)
 	case st.RestartCount > 2:
@@ -84,11 +95,11 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 		add("error", "exited", fmt.Sprintf("the container is %s with exit code %d", st.State, st.ExitCode), nil)
 	}
 
-	if app.Spec != nil && app.Spec.Port > 0 {
+	if running != nil && running.Port > 0 {
 		for i := len(logs) - 1; i >= 0; i-- {
 			if m := listenRe.FindStringSubmatch(logs[i]); m != nil {
-				if p, _ := strconv.Atoi(m[1]); p > 0 && p != app.Spec.Port {
-					add("warning", "port_mismatch", fmt.Sprintf("the app seems to listen on port %d but the spec says port %d", p, app.Spec.Port),
+				if p, _ := strconv.Atoi(m[1]); p > 0 && p != running.Port {
+					add("warning", "port_mismatch", fmt.Sprintf("the app seems to listen on port %d but the spec says port %d", p, running.Port),
 						map[string]any{"port": p})
 				}
 				break
@@ -102,11 +113,9 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 	if permissionRe.MatchString(joined) {
 		add("warning", "permission_denied", "the logs mention permission errors; check volume paths and the image's user", nil)
 	}
-	if m := missingEnvRe.FindStringSubmatch(joined); m != nil && app.Spec != nil {
-		if _, ok := app.Spec.Env[m[1]]; !ok {
-			add("warning", "missing_env", fmt.Sprintf("the logs mention %s, which is not set in the spec's env", m[1]),
-				map[string]any{"env": map[string]string{m[1]: "<value>"}})
-		}
+	if name := missingEnvVar(logs, running); name != "" {
+		add("warning", "missing_env", fmt.Sprintf("the logs say %s is missing, and it is not set in the spec's env", name),
+			map[string]any{"env": map[string]string{name: "<value>"}})
 	}
 
 	d.Healthy = st.Running && st.RestartCount == 0
@@ -127,4 +136,23 @@ func doubleMemory(m string) string {
 		return m
 	}
 	return strconv.Itoa(n*2) + m[len(m)-1:]
+}
+
+// missingEnvVar finds an UPPER_CASE name on a log line that complains about
+// something missing, which is not set in the spec's env.
+func missingEnvVar(logs []string, running *spec.App) string {
+	if running == nil {
+		return ""
+	}
+	for _, line := range logs {
+		if !missingKwRe.MatchString(line) {
+			continue
+		}
+		for _, name := range envNameRe.FindAllString(line, -1) {
+			if _, set := running.Env[name]; !set && !logWords[name] {
+				return name
+			}
+		}
+	}
+	return ""
 }

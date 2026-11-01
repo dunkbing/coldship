@@ -2,3 +2,9 @@
 *.db
 *.db-shm
 *.db-wal
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+node_modules/
+/website/dist/
+/website/.astro/
+/dashboard/test-results/

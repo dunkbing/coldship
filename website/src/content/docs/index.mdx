@@ -1,0 +1,51 @@
+---
+title: Hangar
+description: A self-hosted app platform built for AI agents, with humans in control.
+template: splash
+hero:
+  tagline: A self-hosted app platform that AI agents can drive directly, through MCP or a JSON CLI, while humans keep control with approvals, scoped tokens and an audit log.
+  actions:
+    - text: Quick start
+      link: /getting-started/quick-start/
+      icon: right-arrow
+    - text: Connect an agent
+      link: /guides/ai-agents/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components'
+import { Image } from 'astro:assets'
+import apps from '../../assets/screenshots/apps.png'
+
+<Image src={apps} alt="The Hangar dashboard listing three apps: two healthy, one failing after a deploy" />
+
+## Why Hangar
+
+Most self-hosting platforms are built for people clicking through a dashboard. Agents work differently. They can't see a UI, they retry blindly, they get confused by vague errors, and they will occasionally do something destructive with total confidence. Hangar is designed around that.
+
+<CardGrid>
+  <Card title="Plan, then apply" icon="list-format">
+    Every change starts as a dry-run plan with a diff that marks what is destructive. Agents apply by plan id, so they
+    can only apply what they reviewed. [Learn more](/concepts/plan-and-apply/)
+  </Card>
+  <Card title="Humans approve the dangerous parts" icon="approve-check">
+    Destructive changes to production apps wait for a human with an admin token. Agents get no approve tool.
+    [Guardrails](/concepts/guardrails/)
+  </Card>
+  <Card title="Errors written for LLMs" icon="comment-alt">
+    Every error has a stable code, a hint and often a concrete suggested fix such as `{"port": 3000}`.
+    [Error reference](/reference/errors/)
+  </Card>
+  <Card title="One-call debugging" icon="magnifier">
+    `diagnose` returns container state, the last deploy, recent logs and likely causes, all sized to fit in an agent's
+    context. [Debugging](/concepts/debugging-and-rollback/)
+  </Card>
+  <Card title="MCP built in" icon="puzzle">
+    `hangar mcp` exposes nine tools to Claude Code and other MCP clients, acting under the agent's own scoped token.
+    [MCP tools](/reference/mcp-tools/)
+  </Card>
+  <Card title="One binary, self-hosted" icon="laptop">
+    Server, CLI, MCP server and dashboard ship as a single Go binary. State lives in one SQLite file next to Docker.
+    [Architecture](/project/architecture/)
+  </Card>
+</CardGrid>

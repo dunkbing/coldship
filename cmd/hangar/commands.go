@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -233,7 +234,8 @@ func diagnoseCmd() *cobra.Command {
 				for _, f := range d.Findings {
 					fmt.Printf("  [%s] %s: %s\n", f.Severity, f.Code, f.Message)
 					if f.SuggestedFix != nil {
-						fmt.Printf("      suggested fix: %v\n", f.SuggestedFix)
+						b, _ := json.Marshal(f.SuggestedFix)
+						fmt.Printf("      suggested fix: %s\n", b)
 					}
 				}
 				if len(d.RecentLogs) > 0 {

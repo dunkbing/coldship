@@ -1,0 +1,94 @@
+---
+title: Quick start
+description: Build Hangar, start the server, deploy your first app and open the dashboard.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components'
+
+## Requirements
+
+- Docker, with your user able to run `docker`
+- Go 1.26 or newer (an older Go downloads the right toolchain automatically)
+- [Bun](https://bun.sh) to build the dashboard
+
+## Run it
+
+<Steps>
+
+1. **Build the binary.** This builds the React dashboard and embeds it in the Go binary.
+
+   ```sh
+   git clone <your-repo-url> hangar && cd hangar
+   make build
+   ```
+
+2. **Start the server.** On first start it prints an admin token. It is shown only once, so save it.
+
+   ```sh
+   ./bin/hangar server
+   ```
+
+   ```txt
+   Created admin token (shown once, store it safely):
+
+     hgr_3f9c...
+   ```
+
+   The server listens on `127.0.0.1:7070` and keeps its state in `./hangar.db`. Change these with `--addr` and `--data`.
+
+3. **Point the CLI at it.**
+
+   ```sh
+   export HANGAR_URL=http://127.0.0.1:7070
+   export HANGAR_TOKEN=hgr_3f9c...
+   ```
+
+4. **Write a spec.** Save this as `hangar.yaml`:
+
+   ```yaml
+   name: hello
+   stage: staging
+   image: nginx:1.27-alpine
+   port: 80
+   host_port: 8080
+   env:
+     GREETING: hello from hangar
+   ```
+
+5. **Plan it.** Planning is a dry run that changes nothing.
+
+   ```sh
+   ./bin/hangar plan -f hangar.yaml
+   ```
+
+   ```txt
+   Plan plan_692da65cccbb for app "hello" (create)
+     + app: hello
+   Destructive: no  Downtime: no  Requires approval: no
+   Next: Review the changes, then apply plan plan_692da65cccbb with a reason.
+   ```
+
+6. **Apply it.** Every apply needs a reason, which goes in the audit log.
+
+   ```sh
+   ./bin/hangar apply plan_692da65cccbb --reason "first deploy"
+   curl http://127.0.0.1:8080
+   ```
+
+   `hangar deploy -f hangar.yaml --reason "..."` does plan and apply in one step. It stops if the plan needs approval.
+
+7. **Open the dashboard** at [http://127.0.0.1:7070](http://127.0.0.1:7070) and sign in with the admin token.
+
+</Steps>
+
+![The dashboard sign-in screen asking for an API token](../../../assets/screenshots/login.png)
+
+## Next steps
+
+- [Connect an AI agent](/guides/ai-agents/) with its own deploy-scoped token.
+- Learn how [plans and approvals](/concepts/plan-and-apply/) work.
+- Read the [spec reference](/reference/spec/).
+
+<Aside type="caution">
+  The server binds to localhost by default. Before exposing it on a network, read [Running in production](/guides/production/).
+</Aside>

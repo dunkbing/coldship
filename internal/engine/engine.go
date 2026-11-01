@@ -154,6 +154,36 @@ func (e *Engine) GetPlan(ctx context.Context, id string) (*store.Plan, error) {
 	return publicPlan(p), nil
 }
 
+// ListPlans lists plans newest first. Pending plans past their expiry are
+// reported as expired.
+func (e *Engine) ListPlans(ctx context.Context, status string, limit int) ([]*store.Plan, error) {
+	switch status {
+	case "", store.PlanPending, store.PlanApplied, store.PlanExpired:
+	default:
+		return nil, apierr.New(400, "invalid_request", "status must be pending, applied or expired").WithField("status")
+	}
+	q := status
+	if status == store.PlanExpired {
+		q = "" // includes pending plans whose time ran out
+	}
+	plans, err := e.st.ListPlans(ctx, q, limit)
+	if err != nil {
+		return nil, err
+	}
+	now := e.Now()
+	out := []*store.Plan{}
+	for i := range plans {
+		p := &plans[i]
+		if p.Status == store.PlanPending && now.After(p.ExpiresAt) {
+			p.Status = store.PlanExpired
+		}
+		if status == "" || p.Status == status {
+			out = append(out, publicPlan(p))
+		}
+	}
+	return out, nil
+}
+
 // Approve marks a plan approved. The HTTP layer restricts this to admin
 // tokens, which are meant for humans, never agents.
 func (e *Engine) Approve(ctx context.Context, actor, id string) (*store.Plan, error) {

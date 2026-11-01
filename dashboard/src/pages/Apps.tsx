@@ -1,0 +1,104 @@
+import { Link } from 'react-router-dom'
+import { api, type AppView } from '../api'
+import { useLoad } from '../hooks'
+import { DeployStatus, Empty, ErrorBox, HealthPill, healthOf, Mono, StageBadge, Time } from '../components/ui'
+
+async function loadApps(): Promise<AppView[]> {
+  const apps = await api.apps()
+  return Promise.all(apps.map((a) => api.app(a.name).catch(() => a as AppView)))
+}
+
+export default function Apps() {
+  const { data, error, loading } = useLoad(loadApps, [], 5000)
+
+  const counts = { healthy: 0, failing: 0 }
+  for (const a of data ?? []) {
+    const h = healthOf(a)
+    if (h === 'healthy') counts.healthy++
+    else if (h === 'failing' || h === 'stopped') counts.failing++
+  }
+
+  return (
+    <>
+      <header className="page-head">
+        <div>
+          <h1>Apps</h1>
+          <p className="muted">Everything Hangar runs on this node. Agents change apps through plans; this view is live.</p>
+        </div>
+      </header>
+
+      {data && data.length > 0 && (
+        <div className="stats">
+          <div className="stat">
+            <div className="stat-label">Apps</div>
+            <div className="stat-value">{data.length}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Healthy</div>
+            <div className="stat-value ok-text">{counts.healthy}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Need attention</div>
+            <div className={`stat-value${counts.failing ? ' danger-text' : ''}`}>{counts.failing}</div>
+          </div>
+        </div>
+      )}
+
+      {error && <ErrorBox error={error} />}
+      {loading && !data && <div className="muted">Loading…</div>}
+      {data?.length === 0 && (
+        <Empty title="No apps yet">
+          Deploy one with <code>hangar deploy -f hangar.yaml --reason "first deploy"</code>, or ask your agent to.
+        </Empty>
+      )}
+
+      {data && data.length > 0 && (
+        <div className="card table-card">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>App</th>
+                <th>Status</th>
+                <th>Stage</th>
+                <th>Image</th>
+                <th>Last deployment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((a) => (
+                <tr key={a.name}>
+                  <td>
+                    <Link className="row-link" to={`/apps/${a.name}`}>
+                      {a.name}
+                    </Link>
+                  </td>
+                  <td>
+                    <HealthPill health={healthOf(a)} />
+                  </td>
+                  <td>
+                    <StageBadge stage={a.spec?.stage} />
+                  </td>
+                  <td>
+                    <Mono>{a.spec?.image ?? '—'}</Mono>
+                  </td>
+                  <td>
+                    {a.latest_deployment ? (
+                      <span className="inline">
+                        <DeployStatus status={a.latest_deployment.status} />
+                        <span className="muted small">
+                          {a.latest_deployment.actor} · <Time iso={a.latest_deployment.created_at} />
+                        </span>
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
+}

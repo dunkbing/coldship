@@ -169,6 +169,13 @@ func TestFailedDeployAndRollback(t *testing.T) {
 		t.Fatalf("diagnose should flag the failed deploy: %+v %v", diag, err)
 	}
 
+	// Diagnose checks logs against the failed deployment's spec, not the last good one.
+	rt.LogLines["web"] = []string{"listening on port 9000"}
+	diag, _ = e.Diagnose(ctx, "web")
+	if !hasFinding(diag, "port_mismatch") {
+		t.Fatalf("want port_mismatch vs failed spec port 80, got %+v", diag.Findings)
+	}
+
 	// Rollback after a failure restores the current good deployment (app:2).
 	if _, err := e.Rollback(ctx, "agent", "web", "", "fix outage"); err != nil {
 		t.Fatal(err)
@@ -224,5 +231,30 @@ func TestDiagnosePortMismatch(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected port_mismatch finding, got %+v", d.Findings)
+	}
+}
+
+func hasFinding(d *Diagnosis, code string) bool {
+	for _, f := range d.Findings {
+		if f.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMissingEnvVar(t *testing.T) {
+	a := &spec.App{Env: map[string]string{"QUEUE": "x"}}
+	cases := map[string]string{
+		"fatal: DATABASE_URL is required but not set":   "DATABASE_URL",
+		"ERROR missing environment variable REDIS_HOST": "REDIS_HOST",
+		"QUEUE is required":                             "",
+		"server started, nothing missing here":          "",
+		"Error: required value not set":                 "",
+	}
+	for line, want := range cases {
+		if got := missingEnvVar([]string{line}, a); got != want {
+			t.Errorf("%q: got %q, want %q", line, got, want)
+		}
 	}
 }

@@ -132,6 +132,20 @@ func (c *Client) Deployments(ctx context.Context, app string, limit int) ([]stor
 	return out, c.do(ctx, "GET", fmt.Sprintf("/v1/apps/%s/deployments?limit=%d", esc(app), limit), nil, &out)
 }
 
+func (c *Client) WhoAmI(ctx context.Context) (*api.WhoAmI, error) {
+	var out api.WhoAmI
+	return &out, c.do(ctx, "GET", "/v1/whoami", nil, &out)
+}
+
+func (c *Client) ListPlans(ctx context.Context, status string, limit int) ([]store.Plan, error) {
+	var out []store.Plan
+	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	if status != "" {
+		q.Set("status", status)
+	}
+	return out, c.do(ctx, "GET", "/v1/plans?"+q.Encode(), nil, &out)
+}
+
 func (c *Client) Audit(ctx context.Context, limit int) ([]store.AuditEntry, error) {
 	var out []store.AuditEntry
 	return out, c.do(ctx, "GET", fmt.Sprintf("/v1/audit?limit=%d", limit), nil, &out)

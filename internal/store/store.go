@@ -289,6 +289,34 @@ func (s *Store) GetPlan(ctx context.Context, id string) (*Plan, error) {
 	return &p, nil
 }
 
+// ListPlans returns plans newest first, optionally filtered by status.
+func (s *Store) ListPlans(ctx context.Context, status string, limit int) ([]Plan, error) {
+	q, args := `SELECT body FROM plans`, []any{}
+	if status != "" {
+		q += ` WHERE status = ?`
+		args = append(args, status)
+	}
+	q += ` ORDER BY created_at DESC, rowid DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, q, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Plan{}
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var p Plan
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SaveDeployment(ctx context.Context, d *Deployment) error {
 	return s.saveDoc(ctx, "deployments", d.ID, d.App, d.Status, d.CreatedAt, d)
 }

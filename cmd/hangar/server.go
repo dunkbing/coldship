@@ -18,6 +18,7 @@ import (
 	"hangar/internal/mcpserver"
 	"hangar/internal/runtime"
 	"hangar/internal/store"
+	"hangar/internal/web"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -49,7 +50,7 @@ func serverCmd() *cobra.Command {
 					"Give agents their own deploy-scoped token instead:\n  HANGAR_TOKEN=%s hangar token create --name my-agent --scope deploy\n\n", tok, tok)
 			}
 
-			srv := &http.Server{Addr: addr, Handler: api.New(eng, st, log), ReadHeaderTimeout: 10 * time.Second}
+			srv := &http.Server{Addr: addr, Handler: api.New(eng, st, log, web.Handler()), ReadHeaderTimeout: 10 * time.Second}
 			go func() {
 				<-ctx.Done()
 				shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

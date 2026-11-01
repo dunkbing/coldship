@@ -26,7 +26,7 @@ func TestAPIEndToEnd(t *testing.T) {
 	}
 	defer st.Close()
 	eng := engine.New(st, runtime.NewFake())
-	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 
 	adminTok, err := eng.EnsureAdminToken(ctx)
