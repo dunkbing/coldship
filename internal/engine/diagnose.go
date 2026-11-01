@@ -181,7 +181,11 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 		}
 	}
 	if d.Healthy && len(d.Findings) == 0 {
-		add("info", "healthy", "the container is running and no problems were found", nil)
+		if static {
+			add("info", "healthy", "served as static files by the proxy (no container) and no problems were found", nil)
+		} else {
+			add("info", "healthy", "the container is running and no problems were found", nil)
+		}
 	}
 	return d, nil
 }

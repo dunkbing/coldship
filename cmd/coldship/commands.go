@@ -417,6 +417,9 @@ func printApply(r *engine.ApplyResult) {
 	fmt.Println(r.Message)
 	if d := r.Deployment; d != nil {
 		fmt.Printf("Deployment %s: %s\n", d.ID, d.Status)
+		if d.Static {
+			fmt.Println("Served as static files by the proxy, with no container.")
+		}
 	}
 }
 
@@ -442,7 +445,8 @@ func printStatus(v *engine.AppView) {
 	fmt.Println()
 	if s := v.Spec; s != nil {
 		fmt.Printf("  Stage:    %s\n  Source:   %s\n", s.Stage, s.Source())
-		if s.Port > 0 {
+		static := v.Runtime != nil && v.Runtime.State == "static"
+		if s.Port > 0 && !static {
 			fmt.Printf("  Port:     %d", s.Port)
 			if s.HostPort > 0 {
 				fmt.Printf(" (published on the server's port %d)", s.HostPort)
@@ -467,7 +471,9 @@ func printStatus(v *engine.AppView) {
 	for _, u := range v.URLs {
 		fmt.Printf("  URL:      %s\n", u)
 	}
-	if rt := v.Runtime; rt != nil {
+	if rt := v.Runtime; rt != nil && rt.State == "static" {
+		fmt.Println("  Served:   as static files by the proxy (no container)")
+	} else if rt != nil {
 		state := "not running"
 		switch {
 		case rt.Running:
