@@ -236,3 +236,30 @@ func TestShutdownAndRecovery(t *testing.T) {
 	unlock()
 	e.WaitHooks()
 }
+
+func TestNoopPushLeavesNoPendingPlan(t *testing.T) {
+	e, _, _ := hookSetup(t, &spec.OnPush{})
+	handle(t, e, push("main", sha("a"))) // the tip is already deployed
+	pending, _ := e.ListPlans(context.Background(), store.PlanPending, 50)
+	if len(pending) != 0 {
+		t.Fatalf("a no-op push must not leave a pending plan: %+v", pending)
+	}
+}
+
+func TestRecoverInterruptedDeployment(t *testing.T) {
+	e, _, _ := hookSetup(t, nil)
+	ctx := context.Background()
+	app, _ := e.st.GetApp(ctx, "shop")
+	stuck := &store.Deployment{ID: store.NewID("dep"), App: "shop", Status: store.DeployBuilding, CreatedAt: time.Now()}
+	e.st.SaveDeployment(ctx, stuck)
+	if n, err := e.RecoverDeployments(ctx); err != nil || n != 1 {
+		t.Fatalf("recover: %d %v", n, err)
+	}
+	v, _ := e.GetApp(ctx, "shop")
+	if v.LatestDeployment.Status != store.DeployFailed || v.LatestDeployment.ErrorCode != "interrupted" || !v.LatestDeployment.KeptPrevious {
+		t.Fatalf("interrupted build should be failed and keep the previous version: %+v", v.LatestDeployment)
+	}
+	if v.CurrentDeployment != app.CurrentDeployment {
+		t.Fatal("the current deployment must not change")
+	}
+}

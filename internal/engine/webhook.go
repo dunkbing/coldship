@@ -262,6 +262,41 @@ func (e *Engine) StopHooks(timeout time.Duration) bool {
 	}
 }
 
+// RecoverDeployments marks deployments that a shutdown interrupted as
+// failed, so apps don't show as "deploying" forever. A build that was cut
+// off never touched the running container.
+func (e *Engine) RecoverDeployments(ctx context.Context) (int, error) {
+	apps, err := e.st.ListApps(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, a := range apps {
+		deps, err := e.st.ListDeployments(ctx, a.Name, 1)
+		if err != nil {
+			return n, err
+		}
+		if len(deps) == 0 {
+			continue
+		}
+		d := &deps[0]
+		if d.Status != store.DeployBuilding && d.Status != store.DeployInProgress {
+			continue
+		}
+		d.FailedIn = store.PhaseDeploy
+		if d.Status == store.DeployBuilding {
+			d.FailedIn, d.KeptPrevious = store.PhaseBuild, a.CurrentDeployment != ""
+		}
+		now := e.Now()
+		d.Status, d.ErrorCode, d.Error, d.FinishedAt = store.DeployFailed, "interrupted", "interrupted by a server restart; deploy again", &now
+		if err := e.st.SaveDeployment(ctx, d); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 // RecoverHooks marks deliveries a restart interrupted, so they don't sit at
 // "queued" forever. The Git host already got its 202 and won't resend.
 func (e *Engine) RecoverHooks(ctx context.Context) (int, error) {
@@ -453,6 +488,10 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 		moved = fmt.Sprintf(" (%s is now at %s, not the pushed %s)", j.ref, tip[:12], j.commit[:12])
 	}
 	if p.Action == "noop" {
+		// Close it right away so replayed or duplicate pushes don't fill
+		// the review queue with empty plans.
+		p.Status, p.NextStep = store.PlanExpired, "Nothing to do: the app already runs this commit."
+		e.st.SavePlan(ctx, p)
 		d.Result, d.Detail = "ignored", "the app already runs the tip of "+j.ref+moved
 		e.saveDelivery(ctx, d)
 		return

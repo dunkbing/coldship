@@ -84,6 +84,11 @@ func serverCmd() *cobra.Command {
 					"Give agents their own deploy-scoped token instead:\n  HANGAR_TOKEN=%s hangar token create --name my-agent --scope deploy\n\n", tok, tok)
 			}
 
+			if n, err := eng.RecoverDeployments(ctx); err != nil {
+				return err
+			} else if n > 0 {
+				log.Warn("marked deployments interrupted by the last shutdown as failed", "count", n)
+			}
 			if n, err := eng.RecoverHooks(ctx); err != nil {
 				return err
 			} else if n > 0 {
