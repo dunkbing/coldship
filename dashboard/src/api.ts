@@ -284,15 +284,24 @@ export interface AuditEntry {
 
 // Patch changes only the fields it names; the server keeps the rest of the
 // app, secrets included.
+// Patch changes only the fields it names; the server keeps the rest.
 export interface Patch {
   name: string
   image?: string
   build?: { git: string; ref?: string }
   stage?: Stage
   port?: number
+  host_port?: number
+  remove_host_port?: boolean
+  memory?: string
+  remove_memory?: boolean
   env?: Record<string, string>
+  unset_env?: string[]
   add_domains?: string[]
-  add_databases?: { engine: 'postgres' | 'redis'; name?: string }[]
+  remove_domains?: string[]
+  add_databases?: { engine: 'postgres' | 'mysql' | 'redis'; name?: string }[]
+  add_uses?: string[]
+  remove_uses?: string[]
 }
 
 export interface ApplyResult {
@@ -382,6 +391,7 @@ export const api = {
     req<Plan[]>('GET', `/v1/plans?limit=${limit}${status ? `&status=${enc(status)}` : ''}`),
   approve: (id: string) => req<Plan>('POST', `/v1/plans/${enc(id)}/approve`),
   planPatch: (patch: Patch) => req<Plan>('POST', '/v1/plans', { patch }),
+  planDelete: (name: string) => req<Plan>('POST', '/v1/plans', { delete: name }),
   plan: (id: string) => req<Plan>('GET', `/v1/plans/${enc(id)}`),
   apply: (id: string, reason: string) => req<ApplyResult>('POST', `/v1/plans/${enc(id)}/apply`, { reason }),
   snapshots: (app: string, database = '') => req<Snapshot[]>('GET', `/v1/apps/${enc(app)}/snapshots?database=${enc(database)}`),

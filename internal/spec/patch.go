@@ -21,6 +21,9 @@ type Patch struct {
 	Port     int    `json:"port,omitempty" jsonschema:"port the app listens on. Detected for apps built from Git when omitted"`
 	HostPort int    `json:"host_port,omitempty"`
 	Memory   string `json:"memory,omitempty"`
+	// RemoveHostPort and RemoveMemory clear those settings.
+	RemoveHostPort bool `json:"remove_host_port,omitempty"`
+	RemoveMemory   bool `json:"remove_memory,omitempty"`
 
 	Env           map[string]string `json:"env,omitempty" jsonschema:"environment variables to set or change"`
 	UnsetEnv      []string          `json:"unset_env,omitempty" jsonschema:"environment variables to remove"`
@@ -79,8 +82,14 @@ func (p *Patch) Apply(cur *App) (*App, error) {
 	if p.HostPort != 0 {
 		a.HostPort = p.HostPort
 	}
+	if p.RemoveHostPort {
+		a.HostPort = 0
+	}
 	if p.Memory != "" {
 		a.Memory = p.Memory
+	}
+	if p.RemoveMemory {
+		a.Memory = ""
 	}
 	if len(p.Env) > 0 && a.Env == nil {
 		a.Env = map[string]string{}
