@@ -36,7 +36,9 @@ type Engine struct {
 	routes  map[string]proxy.Route // live route table, by app
 	// DataDir is where Coldship keeps its state, for the server page.
 	DataDir string
-	started time.Time
+	// GitHubAPI overrides https://api.github.com (tests).
+	GitHubAPI string
+	started   time.Time
 	// live holds the logs of deployments in progress, for following.
 	metrics  metricsStore
 	liveMu   sync.Mutex

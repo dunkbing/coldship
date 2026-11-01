@@ -215,6 +215,7 @@ var sealedColumns = []struct {
 	{"databases", "password", []string{"app", "name"}, func(k []string) string { return "databases.password:" + k[0] + "/" + k[1] }},
 	{"webhooks", "secret", []string{"app"}, func(k []string) string { return "webhooks.secret:" + k[0] }},
 	{"deploy_logs", "lines", []string{"deployment"}, func(k []string) string { return "deploy_logs.lines:" + k[0] }},
+	{"integrations", "secret", []string{"name"}, func(k []string) string { return "integrations.secret:" + k[0] }},
 }
 
 func (s *Store) seal(plain []byte, aad string) (string, error) { return s.kr.Load().Seal(plain, aad) }
@@ -258,6 +259,8 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   id TEXT PRIMARY KEY, app TEXT NOT NULL, delivery TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS deliveries_by_app ON webhook_deliveries(app, created_at);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS integrations (
+  name TEXT PRIMARY KEY, secret TEXT NOT NULL, account TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY, token_name TEXT NOT NULL, scope TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (
@@ -1285,4 +1288,51 @@ func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) 
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// Integration is a connected outside service, like GitHub. Secret (a token)
+// is encrypted at rest.
+type Integration struct {
+	Name      string
+	Secret    string
+	Account   string // who the token belongs to, for display
+	CreatedAt time.Time
+}
+
+func (s *Store) SaveIntegration(ctx context.Context, in *Integration) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sealed, err := s.seal([]byte(in.Secret), "integrations.secret:"+in.Name)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO integrations(name, secret, account, created_at) VALUES(?,?,?,?)
+		ON CONFLICT(name) DO UPDATE SET secret=excluded.secret, account=excluded.account, created_at=excluded.created_at`,
+		in.Name, sealed, in.Account, ts(in.CreatedAt))
+	return err
+}
+
+func (s *Store) GetIntegration(ctx context.Context, name string) (*Integration, error) {
+	var in Integration
+	var sealed, created string
+	err := s.db.QueryRowContext(ctx, `SELECT name, secret, account, created_at FROM integrations WHERE name = ?`, name).
+		Scan(&in.Name, &sealed, &in.Account, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	plain, err := s.open(sealed, "integrations.secret:"+name)
+	if err != nil {
+		return nil, err
+	}
+	in.Secret = string(plain)
+	in.CreatedAt, _ = time.Parse(tsFormat, created)
+	return &in, nil
+}
+
+func (s *Store) DeleteIntegration(ctx context.Context, name string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM integrations WHERE name = ?`, name)
+	return err
 }

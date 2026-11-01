@@ -117,6 +117,11 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/data/{name}/snapshots", store.ScopeRead, s.dataSnapshots)
 	s.route("POST /v1/data/{name}/snapshots", store.ScopeDeploy, s.snapshotData)
 	s.route("POST /v1/data/{name}/restore", store.ScopeAdmin, s.restoreData)
+	s.route("GET /v1/integrations/github", store.ScopeRead, s.githubStatus)
+	s.route("PUT /v1/integrations/github", store.ScopeAdmin, s.connectGitHub)
+	s.route("DELETE /v1/integrations/github", store.ScopeAdmin, s.disconnectGitHub)
+	s.route("GET /v1/integrations/github/repos", store.ScopeDeploy, s.githubRepos)
+	s.route("GET /v1/integrations/github/repos/{owner}/{repo}/branches", store.ScopeDeploy, s.githubBranches)
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
 	s.route("GET /v1/tokens", store.ScopeAdmin, s.listTokens)
 	s.route("DELETE /v1/tokens/{name}", store.ScopeAdmin, s.revokeToken)
@@ -931,4 +936,51 @@ func (s *Server) version() string {
 
 func (s *Server) metrics(r *http.Request, _ principal) (any, error) {
 	return s.eng.AppMetrics(r.Context(), r.PathValue("name"))
+}
+
+// --- GitHub ---
+
+func (s *Server) githubStatus(r *http.Request, _ principal) (any, error) {
+	return s.eng.GitHubStatus(r.Context())
+}
+
+type GitHubConnectRequest struct {
+	Token string `json:"token"`
+}
+
+func (s *Server) connectGitHub(r *http.Request, p principal) (any, error) {
+	var req GitHubConnectRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	return s.eng.ConnectGitHub(r.Context(), p.name, req.Token)
+}
+
+func (s *Server) disconnectGitHub(r *http.Request, p principal) (any, error) {
+	if err := s.eng.DisconnectGitHub(r.Context(), p.name); err != nil {
+		return nil, err
+	}
+	return map[string]any{"connected": false}, nil
+}
+
+// githubLimited keeps tokens limited to some apps from browsing GitHub.
+func githubLimited(p principal) error {
+	if p.limited() {
+		return apierr.New(403, "app_not_allowed", "token %q is limited to some apps and can't list GitHub repositories", p.name)
+	}
+	return nil
+}
+
+func (s *Server) githubRepos(r *http.Request, p principal) (any, error) {
+	if err := githubLimited(p); err != nil {
+		return nil, err
+	}
+	return s.eng.GitHubRepos(r.Context())
+}
+
+func (s *Server) githubBranches(r *http.Request, p principal) (any, error) {
+	if err := githubLimited(p); err != nil {
+		return nil, err
+	}
+	return s.eng.GitHubBranches(r.Context(), r.PathValue("owner")+"/"+r.PathValue("repo"))
 }

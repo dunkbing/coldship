@@ -98,6 +98,13 @@ func serverCmd() *cobra.Command {
 			if podman {
 				bd.UsePodman()
 			}
+			var engRef *engine.Engine
+			bd.GitHubToken = func() string {
+				if engRef == nil {
+					return ""
+				}
+				return engRef.GitHubToken(context.Background())
+			}
 			var px proxy.Proxy
 			if proxyOn {
 				dataAbs, err := filepath.Abs(data)
@@ -107,6 +114,7 @@ func serverCmd() *cobra.Command {
 				px = proxy.NewCaddy(filepath.Join(filepath.Dir(dataAbs), "coldship-proxy"), httpPort, httpsPort, acmeEmail)
 			}
 			eng := engine.New(st, rt, bd, px)
+			engRef = eng
 			if snapshotDir == "" {
 				dataAbs, err := filepath.Abs(data)
 				if err != nil {

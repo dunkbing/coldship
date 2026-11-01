@@ -95,6 +95,8 @@ type Git struct {
 	// CredentialsFile is a git-credential-store file used for private
 	// https repositories. SSH uses the server user's keys.
 	CredentialsFile string
+	// GitHubToken, if set, returns a token for cloning private GitHub repos.
+	GitHubToken func() string
 	// AllowedProtocols is passed as GIT_ALLOW_PROTOCOL. The default blocks
 	// file:// and ext:: transports.
 	AllowedProtocols string
@@ -114,7 +116,15 @@ func (g *Git) env() []string {
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
 		"DOCKER_BUILDKIT=1",
+		"COLDSHIP_GITHUB_TOKEN="+g.githubToken(),
 	)
+}
+
+func (g *Git) githubToken() string {
+	if g.GitHubToken == nil {
+		return ""
+	}
+	return g.GitHubToken()
 }
 
 // UsePodman builds with the podman command (which has no --progress flag).
@@ -126,6 +136,10 @@ func (g *Git) gitArgs(args ...string) []string {
 	pre := []string{"-c", "credential.helper=", "-c", "core.hooksPath=/dev/null", "-c", "protocol.version=2"}
 	if g.CredentialsFile != "" {
 		pre = append(pre, "-c", "credential.helper=store --file="+g.CredentialsFile)
+	}
+	if g.githubToken() != "" {
+		// The token comes from the environment, never the command line.
+		pre = append(pre, "-c", `credential.https://github.com.helper=!f() { test "$1" = get && echo username=x-access-token && echo "password=$COLDSHIP_GITHUB_TOKEN"; }; f`)
 	}
 	return append(pre, args...)
 }
