@@ -8,7 +8,7 @@ like deleting production data, waits for your approval.
 
 - **One command to deploy:** no config files to learn; every change is still recorded in an audit log
 - **Your approval for risky changes:** destructive production changes need a human
-- **Deploy from Git:** with or without a Dockerfile (Node, Bun, Python, Go, static sites)
+- **Deploy from Git:** with or without a Dockerfile (Node, Bun, Python, Go); static sites are served straight from the proxy, with no container
 - **Domains and HTTPS:** automatic certificates, zero-downtime deploys
 - **Preview environments** for branches, deleted automatically
 - **Managed Postgres and Redis** with automatic snapshots

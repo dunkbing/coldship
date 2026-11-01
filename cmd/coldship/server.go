@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dunkbing/coldship/internal/api"
+	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/builder"
 	"github.com/dunkbing/coldship/internal/engine"
 	"github.com/dunkbing/coldship/internal/mcpserver"
@@ -48,6 +49,15 @@ func serverCmd() *cobra.Command {
 		Short: "Run the Coldship control plane (API server + Docker runtime)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			// Installed as a service, Coldship is already running: say that,
+			// rather than a confusing error about Docker or the port.
+			if alreadyRunning(addr) {
+				hint := "it's already running, so there's nothing to start: use coldship commands directly (coldship apps, coldship deploy)"
+				if _, err := os.Stat("/etc/systemd/system/coldship.service"); err == nil {
+					hint += ". It runs as the coldship service: sudo systemctl status|restart|stop coldship"
+				}
+				return apierr.New(409, "already_running", "Coldship is already running at %s", addr).WithHint(hint)
+			}
 			// Without Docker nothing can run: say so now, with the fix,
 			// before creating any files and instead of failing every deploy.
 			rt := runtime.NewDocker()
@@ -273,4 +283,15 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// alreadyRunning reports whether a Coldship server answers at addr.
+func alreadyRunning(addr string) bool {
+	c := &http.Client{Timeout: time.Second}
+	resp, err := c.Get("http://" + addr + "/healthz")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }

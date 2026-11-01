@@ -32,8 +32,9 @@ func unavailable(what string, err error) *apierr.Error {
 	switch {
 	case strings.Contains(s, "permission denied"):
 		e.Code = "docker_permission_denied"
-		e.WithHint("this user isn't allowed to use Docker. Run Coldship as a service (install.sh --service), " +
-			"or add this user to the docker group: `sudo usermod -aG docker $USER`, then log out and back in and start coldship server again")
+		e.WithHint("this user isn't allowed to use Docker. Easiest: install Coldship as a service, which needs no Docker access for your user " +
+			"(curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh). Or add this user to the docker group " +
+			"(`sudo usermod -aG docker $USER`); that takes effect only in a new login session, so log out and back in (or run `newgrp docker`) before starting coldship server again")
 	case client.IsErrConnectionFailed(err) || strings.Contains(s, "no such file") || strings.Contains(s, "connection refused") ||
 		strings.Contains(s, "is the docker daemon running"):
 		e.Code = "docker_not_running"

@@ -167,6 +167,20 @@ For Go, `auto.build` is the package to build, e.g. `./cmd/server`. When detectio
 
 To use the repository's Dockerfile only, and fail if it's missing, set `builder: dockerfile`.
 
+## Static sites, with no container
+
+A repository that is just a static site (an `index.html` and no app code or Dockerfile) with a domain is served straight from Coldship's proxy, with no container at all:
+
+```sh
+coldship deploy --name docs --git https://github.com/you/docs.git --domain docs.example.com
+```
+
+Coldship copies the site's files out of the checkout and points the proxy at them. Deploys take a fraction of a second and switch atomically, so there's no downtime and no health check to wait for, and rollbacks are instant, because the last two versions' files are kept. Unknown paths fall back to `/index.html`, so single-page apps can handle their own routes. Responses are compressed.
+
+Every copied file becomes public, so Coldship leaves out what a build would ignore: `.git`, `.env` and `.env.*` files, `node_modules`, and anything in `.dockerignore`. Symlinks are skipped.
+
+A static site runs in an nginx container as before when it has no domain (a `host_port` needs a running process), when it has volumes or databases, when the server runs without the proxy, or when `build.builder` is `dockerfile`. `coldship status` says which way a site is served.
+
 ## Limits
 
 - Detection covers the projects above. Others need a Dockerfile, or `build.auto` with an explicit language and start command.
