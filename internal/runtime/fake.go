@@ -30,11 +30,13 @@ type Fake struct {
 	DBs          map[string]string
 	FailSnapshot error
 	FailDatabase error
+	// Ports holds images' declared ports (EXPOSE), by image.
+	Ports map[string][]int
 }
 
 func NewFake() *Fake {
 	return &Fake{Containers: map[string]spec.App{}, Volumes: map[string]bool{},
-		LogLines: map[string][]string{}, Statuses: map[string]Status{}, DBs: map[string]string{}}
+		LogLines: map[string][]string{}, Statuses: map[string]Status{}, DBs: map[string]string{}, Ports: map[string][]int{}}
 }
 
 func (f *Fake) Deploy(ctx context.Context, depID string, app spec.App, opts DeployOptions) error {
@@ -164,4 +166,11 @@ func (f *Fake) RestoreDatabase(_ context.Context, db DB, r io.Reader, _ io.Write
 	defer f.mu.Unlock()
 	f.DBs[db.App+"/"+db.Name] = string(b)
 	return nil
+}
+
+// ImagePorts returns Ports[image], standing in for an image's EXPOSE.
+func (f *Fake) ImagePorts(_ context.Context, image string) ([]int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Ports[image], nil
 }

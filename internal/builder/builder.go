@@ -519,6 +519,50 @@ type LogTail struct {
 	lines   []string
 	partial []byte
 	dropped int
+	// followers receive new lines as they are written; closed by Close.
+	followers map[chan string]struct{}
+	closed    bool
+}
+
+// Follow returns the lines so far and a channel that receives each new line
+// until the log is closed (the deployment finished) or stop is called. A
+// follower that falls behind misses lines rather than slowing the deploy.
+func (t *LogTail) Follow() (lines []string, next <-chan string, stop func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ch := make(chan string, 1024)
+	lines = append([]string(nil), t.lines...)
+	if t.closed {
+		close(ch)
+		return lines, ch, func() {}
+	}
+	if t.followers == nil {
+		t.followers = map[chan string]struct{}{}
+	}
+	t.followers[ch] = struct{}{}
+	return lines, ch, func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if _, ok := t.followers[ch]; ok {
+			delete(t.followers, ch)
+			close(ch)
+		}
+	}
+}
+
+// Close ends the log for its followers, writing out any partial last line.
+func (t *LogTail) Close() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.partial) > 0 {
+		t.add(string(t.partial))
+		t.partial = nil
+	}
+	t.closed = true
+	for ch := range t.followers {
+		close(ch)
+	}
+	t.followers = nil
 }
 
 func NewLogTail(maxLines int) *LogTail { return &LogTail{max: maxLines} }
@@ -546,6 +590,12 @@ func (t *LogTail) add(line string) {
 		line = line[:maxLineLen] + "…"
 	}
 	t.lines = append(t.lines, line)
+	for ch := range t.followers {
+		select {
+		case ch <- line:
+		default: // a slow follower misses lines
+		}
+	}
 	if len(t.lines) > t.max {
 		t.lines = t.lines[1:]
 		t.dropped++

@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/dunkbing/coldship/internal/client"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -259,7 +261,7 @@ func planAndApply(cmd *cobra.Command, req engine.PlanRequest, reason string) err
 	if !flagJSON {
 		printChanges(p, false)
 	}
-	res, err := c.Apply(cmd.Context(), p.ID, reason)
+	res, err := applyFollowing(cmd, c, p.ID, reason)
 	if err != nil {
 		return err
 	}
@@ -351,4 +353,48 @@ app's name, unless --yes. Production apps need a human's approval.`,
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "don't ask for confirmation")
 	cmd.Flags().StringVar(&reason, "reason", "", "why, for the audit log")
 	return cmd
+}
+
+// applyFollowing applies a plan and, for people (not --json), streams the
+// deployment's log while it runs: build steps, pulls, the start and health
+// checks.
+func applyFollowing(cmd *cobra.Command, c *client.Client, planID, reason string) (*engine.ApplyResult, error) {
+	ctx := cmd.Context()
+	type result struct {
+		res *engine.ApplyResult
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		res, err := c.Apply(ctx, planID, reason)
+		done <- result{res, err}
+	}()
+	if flagJSON {
+		r := <-done
+		return r.res, r.err
+	}
+	tick := time.NewTicker(300 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case r := <-done:
+			return r.res, r.err
+		case <-tick.C:
+			// Apply records the deployment on the plan as it starts.
+			p, err := c.GetPlan(ctx, planID)
+			if err != nil || p.Deployment == "" {
+				continue
+			}
+			tick.Stop()
+			dim, reset := "", ""
+			if isTerminal(os.Stderr) {
+				dim, reset = "\033[2m", "\033[0m"
+			}
+			c.FollowDeployLog(ctx, p.Deployment, func(l string) {
+				fmt.Fprintf(os.Stderr, "%s  │ %s%s\n", dim, l, reset)
+			})
+			r := <-done
+			return r.res, r.err
+		}
+	}
 }

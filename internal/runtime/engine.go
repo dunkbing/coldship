@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -312,4 +313,34 @@ func parseMemory(s string) int64 {
 		return n << 30
 	}
 	return 0
+}
+
+// ImagePorts lists the TCP ports an image declares (EXPOSE), lowest first,
+// pulling the image if it isn't here yet.
+func (d *Docker) ImagePorts(ctx context.Context, image string) ([]int, error) {
+	if err := d.EnsureImage(ctx, image, nil); err != nil {
+		return nil, err
+	}
+	cli, err := d.api()
+	if err != nil {
+		return nil, err
+	}
+	res, err := cli.ImageInspect(ctx, image)
+	if err != nil {
+		return nil, err
+	}
+	var ports []int
+	if res.Config != nil {
+		for p := range res.Config.ExposedPorts {
+			num, proto, _ := strings.Cut(p, "/")
+			if proto != "" && proto != "tcp" {
+				continue
+			}
+			if n, err := strconv.Atoi(num); err == nil && n > 0 {
+				ports = append(ports, n)
+			}
+		}
+	}
+	sort.Ints(ports)
+	return ports, nil
 }

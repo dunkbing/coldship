@@ -1,3 +1,4 @@
+import { LiveLog } from '../components/LiveLog'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type Patch, type Plan } from '../api'
@@ -46,6 +47,7 @@ export default function NewApp() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
   const [waiting, setWaiting] = useState<Plan>()
+  const [launched, setLaunched] = useState<{ app: string; deployment?: string; status?: string; error?: Error }>()
 
   const appName = nameTouched ? name : nameFrom(kind, source)
 
@@ -76,13 +78,60 @@ export default function NewApp() {
         setWaiting(plan)
         return
       }
-      if (plan.action !== 'noop') await api.apply(plan.id, 'created from the dashboard')
-      nav(`/apps/${plan.app}`)
+      if (plan.action === 'noop') {
+        nav(`/apps/${plan.app}`)
+        return
+      }
+      // Apply runs until the deploy finishes; follow its log meanwhile.
+      setLaunched({ app: plan.app })
+      const applying = api.apply(plan.id, 'created from the dashboard')
+      applying.catch((err) => setLaunched((l) => (l ? { ...l, error: err as Error } : l)))
+      for (let i = 0; i < 100; i++) {
+        const p = await api.plan(plan.id)
+        if (p.deployment) {
+          setLaunched((l) => (l ? { ...l, deployment: p.deployment } : l))
+          break
+        }
+        await new Promise((r) => setTimeout(r, 300))
+      }
     } catch (err) {
       setError(err as Error)
     } finally {
       setBusy(false)
     }
+  }
+
+  if (launched) {
+    return (
+      <>
+        <header className="page-head">
+          <div>
+            <h1>Launching {launched.app}</h1>
+            <p className="muted">Building and starting it. The log updates as it goes.</p>
+          </div>
+        </header>
+        <section className="card">
+          {launched.deployment ? (
+            <LiveLog deployment={launched.deployment} onEnd={(s) => setLaunched((l) => (l ? { ...l, status: s } : l))} />
+          ) : (
+            <div className="muted">Starting…</div>
+          )}
+          {launched.error && <ErrorBox error={launched.error} />}
+          {launched.status && (
+            <div className="inline" style={{ marginTop: 12 }}>
+              <Link className="btn btn-primary" to={`/apps/${launched.app}`}>
+                {launched.status === 'running' ? `Open ${launched.app}` : `See what went wrong in ${launched.app}`}
+              </Link>
+              {launched.status !== 'running' && (
+                <button className="btn btn-ghost" onClick={() => setLaunched(undefined)}>
+                  Back to the form
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+      </>
+    )
   }
 
   return (
@@ -146,7 +195,7 @@ export default function NewApp() {
               max={65535}
               value={port}
               onChange={(e) => setPort(e.target.value)}
-              placeholder={kind === 'git' ? 'detected' : '80'}
+              placeholder="detected"
             />
           </label>
         </div>

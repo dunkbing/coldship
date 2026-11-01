@@ -3,6 +3,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -296,4 +297,48 @@ func (c *Client) RestoreData(ctx context.Context, name, snapshot, reason string)
 	}
 	err := c.do(ctx, "POST", "/v1/data/"+url.PathEscape(name)+"/restore", api.DataRestoreRequest{Snapshot: snapshot, Reason: reason}, &out)
 	return out.Message, err
+}
+
+// FollowDeployLog calls line for each line of a deployment's log as it is
+// written, until the deployment finishes, and returns its final status.
+func (c *Client) FollowDeployLog(ctx context.Context, deployment string, line func(string)) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/v1/deployments/"+url.PathEscape(deployment)+"/log/stream", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", apierr.New(503, "server_unreachable", "cannot reach Coldship at %s: %v", c.BaseURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		var env struct {
+			Error *apierr.Error `json:"error"`
+		}
+		data, _ := io.ReadAll(resp.Body)
+		if json.Unmarshal(data, &env) == nil && env.Error != nil {
+			return "", env.Error
+		}
+		return "", apierr.New(resp.StatusCode, "http_error", "following the deploy log: %s", strings.TrimSpace(string(data)))
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	event := ""
+	for sc.Scan() {
+		l := sc.Text()
+		switch {
+		case strings.HasPrefix(l, "event: "):
+			event = strings.TrimPrefix(l, "event: ")
+		case strings.HasPrefix(l, "data: "):
+			data := strings.TrimPrefix(l, "data: ")
+			if event == "end" {
+				return data, nil
+			}
+			line(data)
+		case l == "":
+			event = ""
+		}
+	}
+	return "", sc.Err()
 }

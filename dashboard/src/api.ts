@@ -330,6 +330,7 @@ export const api = {
     req<Plan[]>('GET', `/v1/plans?limit=${limit}${status ? `&status=${enc(status)}` : ''}`),
   approve: (id: string) => req<Plan>('POST', `/v1/plans/${enc(id)}/approve`),
   planPatch: (patch: Patch) => req<Plan>('POST', '/v1/plans', { patch }),
+  plan: (id: string) => req<Plan>('GET', `/v1/plans/${enc(id)}`),
   apply: (id: string, reason: string) => req<ApplyResult>('POST', `/v1/plans/${enc(id)}/apply`, { reason }),
   snapshots: (app: string, database = '') => req<Snapshot[]>('GET', `/v1/apps/${enc(app)}/snapshots?database=${enc(database)}`),
   snapshot: (app: string, database: string, reason = 'manual, from the dashboard') =>

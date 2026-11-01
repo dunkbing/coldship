@@ -465,3 +465,33 @@ func TestDataServiceAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDeployLogStream(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
+	defer srv.Close()
+	tok, _ := eng.EnsureAdminToken(ctx)
+	c := client.New(srv.URL, tok)
+	p, err := c.Plan(ctx, engine.PlanRequest{Spec: &spec.App{Name: "web", Image: "nginx:1", Port: 80}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Apply(ctx, p.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	status, err := c.FollowDeployLog(ctx, res.Deployment.ID, func(l string) { lines = append(lines, l) })
+	if err != nil || status != "running" {
+		t.Fatalf("a finished deployment's stream ends with its status: %q %v", status, err)
+	}
+	if _, err := c.FollowDeployLog(ctx, "dep_nope", func(string) {}); errCode(err) != "deployment_not_found" {
+		t.Fatalf("unknown deployment: %v", err)
+	}
+}

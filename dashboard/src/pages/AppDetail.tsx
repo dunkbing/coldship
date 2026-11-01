@@ -1,3 +1,4 @@
+import { LiveLog } from '../components/LiveLog'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, type AppView, type Deployment } from '../api'
@@ -44,6 +45,13 @@ export default function AppDetail() {
       </header>
 
       {a.preview_of && <PreviewBanner a={a} />}
+
+      {a.latest_deployment && (a.latest_deployment.status === 'building' || a.latest_deployment.status === 'deploying') && (
+        <section className="card live-card">
+          <h2 className="card-title">Deploying {a.latest_deployment.id}</h2>
+          <LiveLog deployment={a.latest_deployment.id} onEnd={() => app.reload()} />
+        </section>
+      )}
 
       <div className="grid-2">
         <SpecCard a={a} />

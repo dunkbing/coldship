@@ -84,6 +84,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
 	s.route("GET /v1/deployments/{id}/log", store.ScopeRead, s.deployLog)
+	s.mux.HandleFunc("GET /v1/deployments/{id}/log/stream", s.streamDeployLog)
 	s.mux.HandleFunc("POST /hooks/git/{app}", s.gitHook)
 	s.route("GET /v1/apps/{name}/webhook", store.ScopeRead, s.webhookStatus)
 	s.route("POST /v1/apps/{name}/webhook", store.ScopeAdmin, s.enableWebhook)
@@ -837,4 +838,68 @@ func (s *Server) restoreData(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"message": msg}, nil
+}
+
+// streamDeployLog follows a deployment's log as server-sent events: one
+// "data:" event per line, then an "end" event with the deployment's status
+// when it finishes. The lines come from the build and the app: untrusted.
+func (s *Server) streamDeployLog(w http.ResponseWriter, r *http.Request) {
+	p, err := s.auth(r)
+	if err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	id := r.PathValue("id")
+	app, lines, next, stop, err := s.eng.FollowDeployLog(r.Context(), id)
+	if err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	defer stop()
+	if p.limited() {
+		if err := s.allowApp(r.Context(), p, app); err != nil {
+			writeErr(w, s.log, err)
+			return
+		}
+	}
+	flusher, _ := w.(http.Flusher)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	send := func(line string) {
+		fmt.Fprintf(w, "data: %s\n\n", line)
+	}
+	for _, l := range lines {
+		send(l)
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": keep-alive\n\n")
+		case l, ok := <-next:
+			if !ok {
+				status := ""
+				if d, err := s.st.GetDeployment(r.Context(), id); err == nil && d != nil {
+					status = d.Status
+				}
+				fmt.Fprintf(w, "event: end\ndata: %s\n\n", status)
+				if flusher != nil {
+					flusher.Flush()
+				}
+				return
+			}
+			send(l)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 }

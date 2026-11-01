@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -334,9 +335,17 @@ func (d *Docker) waitHealthy(ctx context.Context, name string, app spec.App, log
 		}
 		if time.Now().After(deadline) && app.Port > 0 {
 			d.dumpLogs(ctx, name, log)
-			return apierr.New(502, "health_check_failed", "the new container did not become healthy within %s: expected %s, last result: %s", timeout, check, last).
+			e := apierr.New(502, "health_check_failed", "the new container did not become healthy within %s: expected %s, last result: %s", timeout, check, last).
 				WithField("health").WithDetail("last_result", last).
 				WithHint("check that the app listens on the spec's port (on 0.0.0.0, not 127.0.0.1) and that health.path is right; raise health.timeout for slow starts")
+			// The likeliest mistake: a port the image doesn't listen on.
+			if ports, err := d.ImagePorts(context.WithoutCancel(ctx), app.Image); err == nil && len(ports) > 0 && !slices.Contains(ports, app.Port) {
+				e.Field = "port"
+				e.Hint = fmt.Sprintf("%s listens on port %s (its EXPOSE), not %d: set the app's port to that", app.Image, joinInts(ports), app.Port)
+				e.WithFix(map[string]any{"port": ports[0]})
+				fmt.Fprintf(log, "coldship: %s declares port %s, but the app's port is %d\n", app.Image, joinInts(ports), app.Port)
+			}
+			return e
 		}
 		select {
 		case <-ctx.Done():
@@ -469,4 +478,12 @@ func splitLines(s string) []string {
 		return []string{}
 	}
 	return strings.Split(s, "\n")
+}
+
+func joinInts(ns []int) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, " or ")
 }

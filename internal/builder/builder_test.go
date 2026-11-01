@@ -2,6 +2,7 @@ package builder
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -317,5 +318,34 @@ func TestDetectNotesDockerfilesElsewhere(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(det.Notes, "\n"), "found Dockerfiles at services/api/Dockerfile") {
 		t.Fatalf("a monorepo's Dockerfiles should be pointed out: %v", det.Notes)
+	}
+}
+
+func TestLogTailFollow(t *testing.T) {
+	l := NewLogTail(10)
+	fmt.Fprintln(l, "one")
+	lines, next, stop := l.Follow()
+	defer stop()
+	if len(lines) != 1 || lines[0] != "one" {
+		t.Fatalf("lines so far: %v", lines)
+	}
+	fmt.Fprintln(l, "two")
+	fmt.Fprint(l, "three (no newline)")
+	if got := <-next; got != "two" {
+		t.Fatalf("followed line: %q", got)
+	}
+	l.Close()
+	if got := <-next; got != "three (no newline)" {
+		t.Fatalf("Close flushes the partial line: %q", got)
+	}
+	if _, ok := <-next; ok {
+		t.Fatal("next closes when the log closes")
+	}
+	// A follower that never reads must not block writers.
+	m := NewLogTail(5000)
+	_, _, stop2 := m.Follow()
+	defer stop2()
+	for i := 0; i < 3000; i++ {
+		fmt.Fprintln(m, "line")
 	}
 }

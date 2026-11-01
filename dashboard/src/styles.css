@@ -982,3 +982,19 @@ section.card {
 .danger-zone {
   border-color: var(--danger, #c0392b);
 }
+
+/* Live deploy log */
+.live-log-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.log-box {
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+}
+.live-card {
+  border-color: var(--accent);
+}

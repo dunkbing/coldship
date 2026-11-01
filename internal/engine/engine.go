@@ -33,6 +33,9 @@ type Engine struct {
 	px       proxy.Proxy // nil when the proxy is disabled
 	proxyMu  sync.Mutex
 	routes   map[string]proxy.Route // live route table, by app
+	// live holds the logs of deployments in progress, for following.
+	liveMu sync.Mutex
+	live   map[string]*builder.LogTail
 	locksMu  sync.Mutex
 	locks    map[string]*sync.Mutex // one per app: mutations of an app are serialized
 	active   atomic.Int64           // applies in progress
@@ -48,7 +51,7 @@ type Engine struct {
 
 // New creates an engine. px may be nil, which disables domains.
 func New(st *store.Store, rt runtime.Runtime, bd builder.Builder, px proxy.Proxy) *Engine {
-	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{},
+	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{}, live: map[string]*builder.LogTail{},
 		PlanTTL: 30 * time.Minute, Previews: defaultPreviewConfig(), SnapshotDir: "snapshots", SnapshotKeep: 20, Now: time.Now}
 }
 
@@ -250,6 +253,16 @@ func (e *Engine) specFromPatch(ctx context.Context, p *spec.Patch) (*spec.App, e
 	s, err := p.Apply(cur)
 	if err != nil {
 		return nil, err
+	}
+	// An image with exactly one declared port: that's the app's port.
+	if s.Port == 0 && s.Image != "" {
+		if ip, ok := e.rt.(interface {
+			ImagePorts(context.Context, string) ([]int, error)
+		}); ok {
+			if ports, err := ip.ImagePorts(ctx, s.Image); err == nil && len(ports) == 1 {
+				s.Port = ports[0]
+			}
+		}
 	}
 	if s.Port == 0 && s.Build != nil {
 		// Detect on a copy without what needs a port, which wouldn't validate.
@@ -812,6 +825,15 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 	}
 
 	deployLog := builder.NewLogTail(500)
+	e.liveMu.Lock()
+	e.live[d.ID] = deployLog
+	e.liveMu.Unlock()
+	defer func() {
+		e.liveMu.Lock()
+		delete(e.live, d.ID)
+		e.liveMu.Unlock()
+		deployLog.Close()
+	}()
 	var runErr error
 	if p.Action == planner.OpDelete {
 		var vols []string
@@ -1032,6 +1054,44 @@ func (e *Engine) build(ctx context.Context, d *store.Deployment, run *spec.App, 
 		}
 	}
 	return e.st.SaveDeployment(ctx, d)
+}
+
+// FollowDeployLog returns a deployment's log so far and, while it is still
+// running, a channel of new lines that closes when it finishes. For a
+// finished deployment next is closed already.
+func (e *Engine) FollowDeployLog(ctx context.Context, deployment string) (app string, lines []string, next <-chan string, stop func(), err error) {
+	d, err := e.st.GetDeployment(ctx, deployment)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	if d == nil {
+		return "", nil, nil, nil, apierr.NotFound("deployment", deployment)
+	}
+	var tail *builder.LogTail
+	// A deployment is saved a moment before its log is registered.
+	for i := 0; i < 20; i++ {
+		e.liveMu.Lock()
+		tail = e.live[deployment]
+		e.liveMu.Unlock()
+		if tail != nil || (d.Status != store.DeployInProgress && d.Status != store.DeployBuilding) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+		if d, err = e.st.GetDeployment(ctx, deployment); err != nil || d == nil {
+			return "", nil, nil, nil, apierr.NotFound("deployment", deployment)
+		}
+	}
+	if tail != nil {
+		lines, next, stop = tail.Follow()
+		return d.App, lines, next, stop, nil
+	}
+	l, err := e.DeployLog(ctx, deployment)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	done := make(chan string)
+	close(done)
+	return d.App, l.Lines, done, func() {}, nil
 }
 
 type DeployLog struct {

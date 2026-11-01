@@ -67,7 +67,7 @@ func applyCmd() *cobra.Command {
 		Short: "Apply a reviewed plan",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := newClient().Apply(cmd.Context(), args[0], reason)
+			res, err := applyFollowing(cmd, newClient(), args[0], reason)
 			if err != nil {
 				return err
 			}

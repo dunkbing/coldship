@@ -86,3 +86,21 @@ func TestPatchDetectsPortForGitApps(t *testing.T) {
 		t.Fatalf("switch to image: %+v", s)
 	}
 }
+
+func TestPatchDetectsPortFromImage(t *testing.T) {
+	e, rt := dbSetup(t)
+	rt.Ports["nginx:1.27-alpine"] = []int{80}
+	rt.Ports["multi:1"] = []int{80, 443}
+	s := applyPatch(t, e, &spec.Patch{Name: "web", Image: "nginx:1.27-alpine"})
+	if s.Port != 80 {
+		t.Fatalf("one declared port is the app's port: %d", s.Port)
+	}
+	s = applyPatch(t, e, &spec.Patch{Name: "multi", Image: "multi:1"})
+	if s.Port != 0 {
+		t.Fatalf("several ports: leave it to the user, got %d", s.Port)
+	}
+	s = applyPatch(t, e, &spec.Patch{Name: "web2", Image: "nginx:1.27-alpine", Port: 8080})
+	if s.Port != 8080 {
+		t.Fatal("an explicit port wins")
+	}
+}
