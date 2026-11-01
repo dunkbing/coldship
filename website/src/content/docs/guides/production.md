@@ -74,3 +74,13 @@ WantedBy=multi-user.target
 ```
 
 `--admin-token-file` writes the first admin token to that file (mode 0600) instead of the log. Read it once, store it, and delete the file.
+
+## Uninstalling
+
+```sh
+coldship uninstall
+```
+
+It lists what it will remove and asks you to confirm: the service, all app, database and proxy containers, their data, Coldship's state in `/var/lib/coldship`, images built from Git, your CLI login, and the binary. Docker itself stays.
+
+To remove Coldship but keep app and database data (the Docker volumes and `/var/lib/coldship`), use `coldship uninstall --keep-data`. Running the installer again picks everything up; redeploy apps to start their containers.

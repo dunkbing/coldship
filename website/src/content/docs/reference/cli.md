@@ -134,6 +134,7 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 | Command | Description |
 |---|---|
 | `coldship upgrade` | Upgrade to the latest release: the server at `COLDSHIP_URL` if one is running (admin token; waits for its restart), then this CLI binary (with sudo if needed). `--check` only checks; `--no-wait` doesn't wait for the server; `--cli-only` skips the server. |
+| `coldship uninstall [--keep-data] [--yes]` | Remove Coldship from this machine: the service, every app, database and proxy container, their volumes and Coldship's state (unless `--keep-data`), images built from Git, the network, your CLI login, and the binary. Lists everything and asks you to type `uninstall` first. Asks for sudo if needed. Leaves Docker itself, and volumes Coldship didn't create, alone. |
 | `coldship release manifest --version X os/arch=path ...` | Write the release manifest, `latest.json` (maintainers; `make release` runs it) |
 
 After other commands, the CLI prints a one-line note on stderr when a new version is available or the CLI is older than the server. It checks at most once an hour, and never prints with `--json`, when stderr isn't a terminal, or with `COLDSHIP_NO_UPDATE_NOTICE=1`.

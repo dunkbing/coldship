@@ -347,7 +347,7 @@ func noticeLines(st *update.Status) []string {
 // clean output, and it asks the server at most once an hour.
 func maybeNotice(cmd *cobra.Command) {
 	switch cmd.Name() {
-	case "server", "mcp", "upgrade", "self-update", "version", "manifest", "completion", "help":
+	case "server", "mcp", "upgrade", "self-update", "uninstall", "login", "logout", "version", "manifest", "completion", "help":
 		return
 	}
 	if flagJSON || !isTerminal(os.Stderr) || os.Getenv("COLDSHIP_NO_UPDATE_NOTICE") != "" {

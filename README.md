@@ -30,7 +30,7 @@ a password manager. Coldship keeps itself up to date after that. Back up
 The dashboard is at http://127.0.0.1:7070 on the server (from your laptop: `ssh -L 7070:127.0.0.1:7070 your-server`).
 
 On macOS (or with `COLDSHIP_CLI_ONLY=1`) the same command installs just the CLI; connect it with
-`coldship login https://your-server`. To build from source, you need
+`coldship login https://your-server`. To remove Coldship again: `coldship uninstall`. To build from source, you need
 [Go](https://go.dev/dl/) and [Bun](https://bun.sh): `git clone https://github.com/dunkbing/coldship.git && cd coldship && make build`.
 
 ## Deploy an app

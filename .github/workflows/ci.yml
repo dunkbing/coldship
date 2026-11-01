@@ -111,6 +111,33 @@ jobs:
           sudo systemctl restart coldship
           for i in $(seq 30); do curl -sf http://127.0.0.1:7070/healthz >/dev/null && break; sleep 0.5; done
           coldship apps | grep -q ci-hello
+      - name: Uninstall, keeping data, then reinstall
+        run: |
+          docker volume create coldship-unrelated >/dev/null   # not Coldship's: must survive
+          coldship deploy --name ci-data --image nginx:1.27-alpine --port 80 --volume files:/data --db postgres
+          coldship uninstall --keep-data --yes
+          ! systemctl is-active --quiet coldship
+          test ! -e /usr/local/bin/coldship
+          sudo test -e /var/lib/coldship/coldship.db
+          docker volume inspect coldship-ci-data-files coldship-ci-data-db-main-data >/dev/null
+          test -z "$(docker ps -aq --filter label=coldship.app)"
+          COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh | grep -q "Existing installation"
+          coldship login http://127.0.0.1:7070 --token "$(grep -o 'cst_[0-9a-f]*' "$RUNNER_TEMP/install.log" | head -1)"
+          coldship apps | grep -q ci-data
+      - name: Uninstall everything
+        run: |
+          coldship uninstall --yes
+          ! systemctl is-active --quiet coldship
+          test ! -e /etc/systemd/system/coldship.service
+          test ! -e /usr/local/bin/coldship
+          sudo test ! -e /var/lib/coldship
+          test ! -e ~/.config/coldship
+          test -z "$(docker ps -aq --filter label=coldship.app)"
+          test -z "$(docker ps -aq --filter name=coldship-proxy)"
+          ! docker volume inspect coldship-ci-data-files >/dev/null 2>&1
+          ! docker volume inspect coldship-ci-data-db-main-data >/dev/null 2>&1
+          docker volume inspect coldship-unrelated >/dev/null
+          ! docker network inspect coldship >/dev/null 2>&1
       - name: CLI-only install
         run: |
           COLDSHIP_CLI_ONLY=1 COLDSHIP_INSTALL_DIR="$RUNNER_TEMP/cli" COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh
