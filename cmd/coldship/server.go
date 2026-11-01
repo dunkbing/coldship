@@ -14,14 +14,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/api"
-	"hangar/internal/builder"
-	"hangar/internal/engine"
-	"hangar/internal/mcpserver"
-	"hangar/internal/proxy"
-	"hangar/internal/runtime"
-	"hangar/internal/update"
-	"hangar/internal/web"
+	"github.com/dunkbing/coldship/internal/api"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/mcpserver"
+	"github.com/dunkbing/coldship/internal/proxy"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/update"
+	"github.com/dunkbing/coldship/internal/web"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -43,7 +43,7 @@ func serverCmd() *cobra.Command {
 	var httpPort, httpsPort int
 	cmd := &cobra.Command{
 		Use:   "server",
-		Short: "Run the Hangar control plane (API server + Docker runtime)",
+		Short: "Run the Coldship control plane (API server + Docker runtime)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 			if keyFile == "" {
@@ -57,7 +57,7 @@ func serverCmd() *cobra.Command {
 			if st.ScrubWarning != nil {
 				log.Warn("secrets are encrypted, but old plaintext copies may remain in free space; retrying on next start", "err", st.ScrubWarning)
 			}
-			rotator := &keyRotator{st: st, kr: kr, keyFile: keyFile, fromEnv: os.Getenv("HANGAR_SECRET_KEY") != ""}
+			rotator := &keyRotator{st: st, kr: kr, keyFile: keyFile, fromEnv: os.Getenv("COLDSHIP_SECRET_KEY") != ""}
 			rt := runtime.NewDocker()
 			rt.StartupGrace = grace
 			bd := builder.NewGit()
@@ -68,7 +68,7 @@ func serverCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				px = proxy.NewCaddy(filepath.Join(filepath.Dir(dataAbs), "hangar-proxy"), httpPort, httpsPort, acmeEmail)
+				px = proxy.NewCaddy(filepath.Join(filepath.Dir(dataAbs), "coldship-proxy"), httpPort, httpsPort, acmeEmail)
 			}
 			eng := engine.New(st, rt, bd, px)
 			if snapshotDir == "" {
@@ -76,7 +76,7 @@ func serverCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				snapshotDir = filepath.Join(filepath.Dir(dataAbs), "hangar-snapshots")
+				snapshotDir = filepath.Join(filepath.Dir(dataAbs), "coldship-snapshots")
 			}
 			eng.SnapshotDir, eng.SnapshotKeep = snapshotDir, snapshotKeep
 			eng.Previews = engine.PreviewConfig{Domain: previewDomain, DefaultTTL: previewTTL, MaxTTL: previewMaxTTL, Max: maxPreviews}
@@ -88,7 +88,7 @@ func serverCmd() *cobra.Command {
 				return err
 			} else if tok != "" {
 				fmt.Fprintf(os.Stderr, "\nCreated admin token (shown once, store it safely):\n\n  %s\n\n"+
-					"Give agents their own deploy-scoped token instead:\n  HANGAR_TOKEN=%s hangar token create --name my-agent --scope deploy\n\n", tok, tok)
+					"Give agents their own deploy-scoped token instead:\n  COLDSHIP_TOKEN=%s coldship token create --name my-agent --scope deploy\n\n", tok, tok)
 			}
 
 			if n, err := eng.RecoverDeployments(ctx); err != nil {
@@ -183,7 +183,7 @@ func serverCmd() *cobra.Command {
 				defer cancel()
 				srv.Shutdown(shCtx)
 			}()
-			log.Info("hangar listening", "addr", addr, "data", data, "version", version)
+			log.Info("coldship listening", "addr", addr, "data", data, "version", version)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}
@@ -203,36 +203,36 @@ func serverCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&addr, "addr", envOr("HANGAR_ADDR", "127.0.0.1:7070"), "listen address")
-	cmd.Flags().StringVar(&data, "data", envOr("HANGAR_DATA", "hangar.db"), "SQLite state file")
+	cmd.Flags().StringVar(&addr, "addr", envOr("COLDSHIP_ADDR", "127.0.0.1:7070"), "listen address")
+	cmd.Flags().StringVar(&data, "data", envOr("COLDSHIP_DATA", "coldship.db"), "SQLite state file")
 	cmd.Flags().DurationVar(&grace, "startup-grace", 3*time.Second, "how long a new container must stay up to count as deployed")
-	cmd.Flags().StringVar(&updURL, "update-url", envOr("HANGAR_UPDATE_URL", defaultUpdateURL), "signed release manifest to check for new versions")
-	cmd.Flags().StringVar(&updKey, "update-public-key", envOr("HANGAR_UPDATE_PUBLIC_KEY", updatePublicKey), "Ed25519 public key (base64) that release manifests must be signed with")
+	cmd.Flags().StringVar(&updURL, "update-url", envOr("COLDSHIP_UPDATE_URL", defaultUpdateURL), "signed release manifest to check for new versions")
+	cmd.Flags().StringVar(&updKey, "update-public-key", envOr("COLDSHIP_UPDATE_PUBLIC_KEY", updatePublicKey), "Ed25519 public key (base64) that release manifests must be signed with")
 	cmd.Flags().BoolVar(&autoUpgrade, "auto-upgrade", true, "install new minor and patch versions automatically when no deployment is running")
 	cmd.Flags().DurationVar(&updInterval, "update-interval", 6*time.Hour, "how often to check for new versions")
-	cmd.Flags().StringVar(&previewDomain, "preview-domain", envOr("HANGAR_PREVIEW_DOMAIN", ""), "give previews URLs under this domain (needs a wildcard DNS record *.<domain> pointing here)")
+	cmd.Flags().StringVar(&previewDomain, "preview-domain", envOr("COLDSHIP_PREVIEW_DOMAIN", ""), "give previews URLs under this domain (needs a wildcard DNS record *.<domain> pointing here)")
 	cmd.Flags().DurationVar(&previewTTL, "preview-ttl", 24*time.Hour, "default lifetime of a preview")
 	cmd.Flags().DurationVar(&previewMaxTTL, "preview-max-ttl", 7*24*time.Hour, "longest lifetime a preview may ask for")
 	cmd.Flags().IntVar(&maxPreviews, "max-previews", 20, "most previews that may exist at once")
-	cmd.Flags().StringVar(&keyFile, "secret-key-file", envOr("HANGAR_SECRET_KEY_FILE", ""), "key file that encrypts stored secrets (default: hangar.key next to --data; or set HANGAR_SECRET_KEY)")
-	cmd.Flags().StringVar(&publicURL, "public-url", envOr("HANGAR_PUBLIC_URL", ""), "URL Git hosts use to reach this server, for webhook URLs (e.g. https://hangar.example.com)")
-	cmd.Flags().StringVar(&snapshotDir, "snapshot-dir", envOr("HANGAR_SNAPSHOT_DIR", ""), "where database snapshots are kept (default: hangar-snapshots next to --data)")
+	cmd.Flags().StringVar(&keyFile, "secret-key-file", envOr("COLDSHIP_SECRET_KEY_FILE", ""), "key file that encrypts stored secrets (default: coldship.key next to --data; or set COLDSHIP_SECRET_KEY)")
+	cmd.Flags().StringVar(&publicURL, "public-url", envOr("COLDSHIP_PUBLIC_URL", ""), "URL Git hosts use to reach this server, for webhook URLs (e.g. https://coldship.example.com)")
+	cmd.Flags().StringVar(&snapshotDir, "snapshot-dir", envOr("COLDSHIP_SNAPSHOT_DIR", ""), "where database snapshots are kept (default: coldship-snapshots next to --data)")
 	cmd.Flags().IntVar(&snapshotKeep, "snapshot-keep", 20, "snapshots to keep per database (older ones are deleted)")
 	cmd.Flags().DurationVar(&snapshotInterval, "db-snapshot-interval", 24*time.Hour, "how often to snapshot every database (0 disables scheduled snapshots)")
 	cmd.Flags().BoolVar(&proxyOn, "proxy", true, "run the Caddy proxy that serves app domains with automatic HTTPS")
 	cmd.Flags().IntVar(&httpPort, "proxy-http-port", 80, "host port for the proxy's HTTP listener")
 	cmd.Flags().IntVar(&httpsPort, "proxy-https-port", 443, "host port for the proxy's HTTPS listener")
-	cmd.Flags().StringVar(&acmeEmail, "acme-email", envOr("HANGAR_ACME_EMAIL", ""), "email for Let's Encrypt certificate notices (optional)")
+	cmd.Flags().StringVar(&acmeEmail, "acme-email", envOr("COLDSHIP_ACME_EMAIL", ""), "email for Let's Encrypt certificate notices (optional)")
 	cmd.Flags().DurationVar(&buildTimeout, "build-timeout", 20*time.Minute, "maximum time for one Git build")
-	cmd.Flags().StringVar(&gitCreds, "git-credentials", envOr("HANGAR_GIT_CREDENTIALS", ""), "git-credential-store file for private https repositories")
-	cmd.Flags().StringVar(&buildDir, "build-dir", envOr("HANGAR_BUILD_DIR", ""), "directory for temporary build checkouts (default: system temp dir)")
+	cmd.Flags().StringVar(&gitCreds, "git-credentials", envOr("COLDSHIP_GIT_CREDENTIALS", ""), "git-credential-store file for private https repositories")
+	cmd.Flags().StringVar(&buildDir, "build-dir", envOr("COLDSHIP_BUILD_DIR", ""), "directory for temporary build checkouts (default: system temp dir)")
 	return cmd
 }
 
 func mcpCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "Run an MCP server on stdio for AI agents (uses HANGAR_URL / HANGAR_TOKEN)",
+		Short: "Run an MCP server on stdio for AI agents (uses COLDSHIP_URL / COLDSHIP_TOKEN)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s := mcpserver.New(newClient(), version)
 			return s.Run(cmd.Context(), &mcp.StdioTransport{})

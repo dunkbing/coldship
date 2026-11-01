@@ -1,4 +1,4 @@
-// Command hangar is a single binary: the control-plane server, the CLI, and
+// Command coldship is a single binary: the control-plane server, the CLI, and
 // the MCP server for AI agents.
 package main
 
@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/apierr"
-	"hangar/internal/client"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/client"
 )
 
 // Set at release time with -ldflags "-X main.version=... -X main.updatePublicKey=...".
@@ -35,14 +35,14 @@ const (
 
 func main() {
 	root := &cobra.Command{
-		Use:           "hangar",
+		Use:           "coldship",
 		Short:         "Agent-native, self-hosted app platform",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.PersistentFlags().StringVar(&flagURL, "url", "", "Hangar server URL (env HANGAR_URL, default http://127.0.0.1:7070)")
-	root.PersistentFlags().StringVar(&flagToken, "token", "", "API token (env HANGAR_TOKEN)")
+	root.PersistentFlags().StringVar(&flagURL, "url", "", "Coldship server URL (env COLDSHIP_URL, default http://127.0.0.1:7070)")
+	root.PersistentFlags().StringVar(&flagToken, "token", "", "API token (env COLDSHIP_TOKEN)")
 	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "machine-readable JSON output")
 
 	root.AddCommand(serverCmd(), mcpCmd())
@@ -59,14 +59,14 @@ func main() {
 func newClient() *client.Client {
 	u := flagURL
 	if u == "" {
-		u = os.Getenv("HANGAR_URL")
+		u = os.Getenv("COLDSHIP_URL")
 	}
 	if u == "" {
 		u = "http://127.0.0.1:7070"
 	}
 	t := flagToken
 	if t == "" {
-		t = os.Getenv("HANGAR_TOKEN")
+		t = os.Getenv("COLDSHIP_TOKEN")
 	}
 	return client.New(u, t)
 }

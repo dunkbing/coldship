@@ -129,7 +129,7 @@ function SpecCard({ a }: { a: AppView }) {
             <dt>Built with</dt>
             <dd>
               {a.latest_deployment?.detected ? (
-                <span title="Hangar generated the Dockerfile; override with build.auto">
+                <span title="Coldship generated the Dockerfile; override with build.auto">
                   generated Dockerfile · <Mono>{a.latest_deployment.detected}</Mono>
                 </span>
               ) : s.build.builder === 'auto' ? (
@@ -648,7 +648,7 @@ function DatabasesTab({ app, onChange }: { app: AppView; onChange: () => void })
         </table>
       </div>
       <p className="small muted section-note">
-        Hangar snapshots every database daily and before any change that would delete data. Credentials are never shown; the
+        Coldship snapshots every database daily and before any change that would delete data. Credentials are never shown; the
         app receives the connection URL in its env.
       </p>
 
@@ -688,7 +688,7 @@ function DatabasesTab({ app, onChange }: { app: AppView; onChange: () => void })
         </div>
       )}
       <p className="small muted section-note">
-        To restore one, run <Mono>hangar db restore {app.name} &lt;database&gt; &lt;snapshot&gt; --reason "…"</Mono>. It is planned like any
+        To restore one, run <Mono>coldship db restore {app.name} &lt;database&gt; &lt;snapshot&gt; --reason "…"</Mono>. It is planned like any
         destructive change{app.spec?.stage === 'production' ? ' and needs an admin approval' : ''}, and the current data is snapshotted first.
       </p>
     </>

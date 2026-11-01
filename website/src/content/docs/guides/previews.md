@@ -6,7 +6,7 @@ description: Throwaway copies of an app at a branch or image, for testing change
 A preview is a temporary copy of an app, running a different Git ref or image. It's how an agent (or a person, or CI) checks a change for real before it touches the actual app, and it deletes itself when its time is up.
 
 ```sh
-hangar preview create shop --ref feat/login --ttl 2h --env FEATURE_LOGIN=1 --reason "try the new login"
+coldship preview create shop --ref feat/login --ttl 2h --env FEATURE_LOGIN=1 --reason "try the new login"
 ```
 
 ```txt
@@ -15,7 +15,7 @@ Created preview shop-feat-login of shop: preview deployed
 Expires Sun 14:32 (in 2h0m).
 ```
 
-Agents use the `hangar_preview_create`, `hangar_preview_list` and `hangar_preview_delete` [MCP tools](/reference/mcp-tools/). The usual loop is: create a preview, check it with `hangar_get_app` and `hangar_diagnose`, iterate, then delete it.
+Agents use the `coldship_preview_create`, `coldship_preview_list` and `coldship_preview_delete` [MCP tools](/reference/mcp-tools/). The usual loop is: create a preview, check it with `coldship_get_app` and `coldship_diagnose`, iterate, then delete it.
 
 ## What a preview is
 
@@ -48,19 +48,19 @@ Leaving out an `--env` you passed before removes it, just as removing a line fro
 
 ## Expiry and limits
 
-- **TTL:** each preview lives for `--ttl` (default 24h, max 7 days; the server's `--preview-ttl` and `--preview-max-ttl` set these). Every minute, a background reaper deletes expired previews with their containers and volumes, audited as `hangar` with reason "preview expired". A preview whose first deploy failed is cleaned up too.
+- **TTL:** each preview lives for `--ttl` (default 24h, max 7 days; the server's `--preview-ttl` and `--preview-max-ttl` set these). Every minute, a background reaper deletes expired previews with their containers and volumes, audited as `coldship` with reason "preview expired". A preview whose first deploy failed is cleaned up too.
 - **Limit:** at most 20 previews exist at once (`--max-previews`). Creating one more fails with `preview_limit`, listing the existing previews soonest-expiring first, so you can decide which to delete. Updating an existing preview is never blocked.
-- **Deleting early:** `hangar preview delete <name>`, or the **Delete preview** button in the dashboard. This only works on previews. Regular apps are deleted through a reviewed plan.
+- **Deleting early:** `coldship preview delete <name>`, or the **Delete preview** button in the dashboard. This only works on previews. Regular apps are deleted through a reviewed plan.
 
 ## Preview URLs
 
 Give the server a domain for previews, and point a wildcard DNS record at it:
 
 ```sh
-hangar server --preview-domain previews.example.com   # DNS: *.previews.example.com → this server
+coldship server --preview-domain previews.example.com   # DNS: *.previews.example.com → this server
 ```
 
-Each preview then gets `https://<name>.previews.example.com` with its own certificate. Without a preview domain, previews still run, and you can check them with `diagnose` and `logs`, or reach them from other apps by name on Hangar's network.
+Each preview then gets `https://<name>.previews.example.com` with its own certificate. Without a preview domain, previews still run, and you can check them with `diagnose` and `logs`, or reach them from other apps by name on Coldship's network.
 
 Let's Encrypt allows 50 new certificates per registered domain per week. If you create many short-lived previews, use a domain dedicated to previews.
 

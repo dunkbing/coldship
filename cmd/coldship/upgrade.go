@@ -17,8 +17,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/apierr"
-	"hangar/internal/update"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/update"
 )
 
 func versionCmd() *cobra.Command {
@@ -37,7 +37,7 @@ func versionCmd() *cobra.Command {
 				out["server_error"] = err.Error()
 			}
 			return emit(out, func() {
-				fmt.Printf("hangar CLI %s (%s)\n", version, update.Platform())
+				fmt.Printf("coldship CLI %s (%s)\n", version, update.Platform())
 				if err != nil {
 					fmt.Printf("server: unreachable (%v)\n", err)
 					return
@@ -65,8 +65,8 @@ func upgradeCmd() *cobra.Command {
 	var check, noWait bool
 	cmd := &cobra.Command{
 		Use:   "upgrade",
-		Short: "Upgrade the Hangar server to the latest release (admin)",
-		Long: "Upgrade the Hangar server to the latest signed release. The server waits for running\n" +
+		Short: "Upgrade the Coldship server to the latest release (admin)",
+		Long: "Upgrade the Coldship server to the latest signed release. The server waits for running\n" +
 			"deployments to finish, verifies and installs the new binary, and restarts itself.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -79,7 +79,7 @@ func upgradeCmd() *cobra.Command {
 				clearNoticeCache()
 				return emit(st, func() {
 					if st.UpdateAvailable {
-						fmt.Printf("Hangar %s is available (server runs %s). Run `hangar upgrade` to install it.\n", st.Latest, st.Version)
+						fmt.Printf("Coldship %s is available (server runs %s). Run `coldship upgrade` to install it.\n", st.Latest, st.Version)
 					} else {
 						fmt.Printf("The server runs the latest version (%s).\n", st.Version)
 					}
@@ -126,8 +126,8 @@ func selfUpdateCmd() *cobra.Command {
 	var manifestURL, pubKey string
 	cmd := &cobra.Command{
 		Use:   "self-update",
-		Short: "Update this hangar binary to the latest signed release",
-		Long: "Update the local hangar binary (for CLIs on other machines than the server). The release\n" +
+		Short: "Update this coldship binary to the latest signed release",
+		Long: "Update the local coldship binary (for CLIs on other machines than the server). The release\n" +
 			"manifest comes from the server (or --manifest-url) and is verified with the built-in key.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -135,7 +135,7 @@ func selfUpdateCmd() *cobra.Command {
 				pubKey = updatePublicKey
 			}
 			if pubKey == "" {
-				return apierr.New(400, "updates_disabled", "this hangar binary has no update signing key built in, so releases cannot be verified").
+				return apierr.New(400, "updates_disabled", "this coldship binary has no update signing key built in, so releases cannot be verified").
 					WithHint("install an official release build, or pass --public-key")
 			}
 			pub, err := update.ParsePublicKey(pubKey)
@@ -158,14 +158,14 @@ func selfUpdateCmd() *cobra.Command {
 			}
 			if !update.Newer(m.Version, version) {
 				return emit(map[string]any{"version": version, "latest": m.Version, "updated": false}, func() {
-					fmt.Printf("hangar %s is up to date.\n", version)
+					fmt.Printf("coldship %s is up to date.\n", version)
 				})
 			}
 			target, err := update.Executable()
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Downloading hangar %s for %s…\n", m.Version, update.Platform())
+			fmt.Fprintf(os.Stderr, "Downloading coldship %s for %s…\n", m.Version, update.Platform())
 			bin, err := update.Download(cmd.Context(), m, filepath.Dir(target))
 			if err != nil {
 				return err
@@ -180,14 +180,14 @@ func selfUpdateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&manifestURL, "manifest-url", "", "fetch the release manifest from this URL instead of the server")
-	cmd.Flags().StringVar(&pubKey, "public-key", os.Getenv("HANGAR_UPDATE_PUBLIC_KEY"), "Ed25519 public key (base64) to verify releases with")
+	cmd.Flags().StringVar(&pubKey, "public-key", os.Getenv("COLDSHIP_UPDATE_PUBLIC_KEY"), "Ed25519 public key (base64) to verify releases with")
 	return cmd
 }
 
 // --- release tooling ---
 
 func releaseCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "release", Short: "Sign Hangar releases (for maintainers)"}
+	cmd := &cobra.Command{Use: "release", Short: "Sign Coldship releases (for maintainers)"}
 
 	var keyOut string
 	keygen := &cobra.Command{
@@ -212,7 +212,7 @@ func releaseCmd() *cobra.Command {
 			return nil
 		},
 	}
-	keygen.Flags().StringVar(&keyOut, "out", "hangar-release.key", "where to write the private key")
+	keygen.Flags().StringVar(&keyOut, "out", "coldship-release.key", "where to write the private key")
 
 	var relVersion, keyFile, notes, notesURL, baseURL, out string
 	manifest := &cobra.Command{
@@ -233,7 +233,7 @@ func releaseCmd() *cobra.Command {
 			for _, a := range args {
 				plat, path, ok := strings.Cut(a, "=")
 				if !ok || strings.Count(plat, "/") != 1 {
-					return fmt.Errorf("asset %q must look like linux/arm64=dist/hangar-linux-arm64", a)
+					return fmt.Errorf("asset %q must look like linux/arm64=dist/coldship-linux-arm64", a)
 				}
 				f, err := os.Open(path)
 				if err != nil {
@@ -263,7 +263,7 @@ func releaseCmd() *cobra.Command {
 		},
 	}
 	manifest.Flags().StringVar(&relVersion, "version", "", "release version, e.g. 0.2.0")
-	manifest.Flags().StringVar(&keyFile, "key-file", "hangar-release.key", "private key from `hangar release keygen`")
+	manifest.Flags().StringVar(&keyFile, "key-file", "coldship-release.key", "private key from `coldship release keygen`")
 	manifest.Flags().StringVar(&notes, "notes", "", "short release notes shown in the dashboard and CLI")
 	manifest.Flags().StringVar(&notesURL, "notes-url", "", "link to full release notes")
 	manifest.Flags().StringVar(&baseURL, "base-url", "", "URL the binaries are served from (default: next to the manifest)")
@@ -286,7 +286,7 @@ func noticePath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "hangar", "update-notice.json")
+	return filepath.Join(dir, "coldship", "update-notice.json")
 }
 
 func clearNoticeCache() {
@@ -298,16 +298,16 @@ func clearNoticeCache() {
 func noticeLines(st *update.Status) []string {
 	var lines []string
 	if st.UpdateAvailable {
-		l := fmt.Sprintf("A new Hangar version is available: %s (the server runs %s).", st.Latest, st.Version)
+		l := fmt.Sprintf("A new Coldship version is available: %s (the server runs %s).", st.Latest, st.Version)
 		switch {
 		case st.State != "" && st.State != "idle":
 			l += " It is being installed now."
 		case st.AutoUpgrade && st.AutoBlocked == "":
 			l += " It will be installed automatically when no deployment is running."
 		case st.AutoBlocked != "":
-			l += " It is a major version change: read the release notes, then run `hangar upgrade`."
+			l += " It is a major version change: read the release notes, then run `coldship upgrade`."
 		default:
-			l += " Run `hangar upgrade` to install it."
+			l += " Run `coldship upgrade` to install it."
 		}
 		lines = append(lines, l)
 		if st.NotesURL != "" {
@@ -317,7 +317,7 @@ func noticeLines(st *update.Status) []string {
 		}
 	}
 	if update.Newer(st.Version, version) {
-		lines = append(lines, fmt.Sprintf("This hangar CLI (%s) is older than the server (%s): run `hangar self-update`.", version, st.Version))
+		lines = append(lines, fmt.Sprintf("This coldship CLI (%s) is older than the server (%s): run `coldship self-update`.", version, st.Version))
 	}
 	return lines
 }
@@ -330,7 +330,7 @@ func maybeNotice(cmd *cobra.Command) {
 	case "server", "mcp", "upgrade", "self-update", "version", "keygen", "manifest", "completion", "help":
 		return
 	}
-	if flagJSON || !isTerminal(os.Stderr) || os.Getenv("HANGAR_NO_UPDATE_NOTICE") != "" {
+	if flagJSON || !isTerminal(os.Stderr) || os.Getenv("COLDSHIP_NO_UPDATE_NOTICE") != "" {
 		return
 	}
 	c := newClient()

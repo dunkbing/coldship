@@ -1,4 +1,4 @@
-// Typed client for the Hangar HTTP API. Types mirror the Go JSON shapes.
+// Typed client for the Coldship HTTP API. Types mirror the Go JSON shapes.
 
 export type Stage = 'production' | 'staging' | 'preview'
 export type Scope = 'read' | 'deploy' | 'admin'
@@ -263,20 +263,20 @@ export class ApiError extends Error {
 
 // The dashboard signs in by exchanging an API token for an HttpOnly session
 // cookie (POST /v1/sessions). The token itself is never stored in the browser.
-// State-changing requests carry X-Hangar-Request, the server's CSRF check.
+// State-changing requests carry X-Coldship-Request, the server's CSRF check.
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
     headers: {
-      'X-Hangar-Request': '1',
+      'X-Coldship-Request': '1',
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   const text = await res.text()
   const data = text ? JSON.parse(text) : null
-  if (res.status === 401 && path !== '/v1/sessions') window.dispatchEvent(new Event('hangar:signed-out'))
+  if (res.status === 401 && path !== '/v1/sessions') window.dispatchEvent(new Event('coldship:signed-out'))
   if (!res.ok) throw new ApiError(res.status, data?.error ?? {})
   return data as T
 }

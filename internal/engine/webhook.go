@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/spec"
-	"hangar/internal/store"
-	"hangar/internal/webhook"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
+	"github.com/dunkbing/coldship/internal/webhook"
 )
 
 // WebhookPlanTTL is how long plans created by pushes wait for review:
@@ -182,7 +182,7 @@ func (e *Engine) HandlePush(ctx context.Context, app string, p *webhook.Push) (*
 	case own && !spec.IsCommitSHA(p.After):
 		return ignore("the push has no valid commit SHA")
 	case own:
-		d.Result, d.Detail = "queued", fmt.Sprintf("building %s in the background; hangar webhook status %s shows the result", p.After[:12], app)
+		d.Result, d.Detail = "queued", fmt.Sprintf("building %s in the background; coldship webhook status %s shows the result", p.After[:12], app)
 		if err := e.saveDelivery(ctx, d); err != nil {
 			return nil, err
 		}
@@ -197,7 +197,7 @@ func (e *Engine) HandlePush(ctx context.Context, app string, p *webhook.Push) (*
 	}
 	name := previewName(app, p.Branch)
 	d.Preview = name
-	d.Result, d.Detail = "queued", fmt.Sprintf("updating preview %s in the background; hangar webhook status %s shows the result", name, app)
+	d.Result, d.Detail = "queued", fmt.Sprintf("updating preview %s in the background; coldship webhook status %s shows the result", name, app)
 	if err := e.saveDelivery(ctx, d); err != nil {
 		return nil, err
 	}
@@ -504,9 +504,9 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 		p.NextStep = nextStep(p)
 		e.st.SavePlan(ctx, p)
 		d.Result = "planned"
-		d.Detail = fmt.Sprintf("plan %s is waiting for review: hangar apply %s --reason ...%s", p.ID, p.ID, moved)
+		d.Detail = fmt.Sprintf("plan %s is waiting for review: coldship apply %s --reason ...%s", p.ID, p.ID, moved)
 		if p.RequiresApproval {
-			d.Detail = fmt.Sprintf("plan %s needs approval first: hangar approve %s", p.ID, p.ID)
+			d.Detail = fmt.Sprintf("plan %s needs approval first: coldship approve %s", p.ID, p.ID)
 		}
 		e.saveDelivery(ctx, d)
 		return

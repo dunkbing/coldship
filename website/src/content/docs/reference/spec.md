@@ -1,9 +1,9 @@
 ---
-title: App spec (hangar.yaml)
+title: App spec (coldship.yaml)
 description: Every field of the declarative app spec.
 ---
 
-An app is described by one YAML file, usually `hangar.yaml`. Parsing is strict: an unknown field (such as a typo like `imgae`) is an error, never silently ignored.
+An app is described by one YAML file, usually `coldship.yaml`. Parsing is strict: an unknown field (such as a typo like `imgae`) is an error, never silently ignored.
 
 ```yaml
 name: api
@@ -25,7 +25,7 @@ volumes:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | 1–40 characters: lowercase letters, digits and dashes, starting with a letter. The app's identity; changing it creates a different app. |
-| `stage` | string | no | `production`, `staging` (default) or `preview`. Destructive changes to `production` apps need [approval](/concepts/guardrails/). Apps created with `hangar preview create` always have stage `preview`. |
+| `stage` | string | no | `production`, `staging` (default) or `preview`. Destructive changes to `production` apps need [approval](/concepts/guardrails/). Apps created with `coldship preview create` always have stage `preview`. |
 | `image` | string | one of `image`, `build` | Container image reference. It is pulled if not present locally. |
 | `build` | object | one of `image`, `build` | Build the image from a Git repository. See below. |
 | `port` | int | no | Port the app listens on inside the container. Used to publish `host_port` and to detect port mismatches. |
@@ -61,7 +61,7 @@ Validation errors name the field and, where they can, suggest a fix:
 {
   "error": {
     "code": "invalid_spec",
-    "message": "host_port is set but port is not; Hangar needs to know which container port to publish",
+    "message": "host_port is set but port is not; Coldship needs to know which container port to publish",
     "field": "port",
     "suggested_fix": { "port": 8080 }
   }
@@ -72,9 +72,9 @@ Validation errors name the field and, where they can, suggest a fix:
 
 | Thing | Name |
 |---|---|
-| Container | `hangar-<name>` |
-| Volume | `hangar-<name>-<volume>` |
-| Labels | `hangar.app=<name>`, `hangar.deployment=<id>` |
-| Built image | `hangar-build/<name>:<commit>-<config hash>` |
+| Container | `coldship-<name>` |
+| Volume | `coldship-<name>-<volume>` |
+| Labels | `coldship.app=<name>`, `coldship.deployment=<id>` |
+| Built image | `coldship-build/<name>:<commit>-<config hash>` |
 
 Containers run with `--restart unless-stopped`.

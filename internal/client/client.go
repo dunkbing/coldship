@@ -1,4 +1,4 @@
-// Package client is the Go client for the Hangar HTTP API, shared by the CLI
+// Package client is the Go client for the Coldship HTTP API, shared by the CLI
 // and the MCP server.
 package client
 
@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"hangar/internal/api"
-	"hangar/internal/apierr"
-	"hangar/internal/engine"
-	"hangar/internal/store"
-	"hangar/internal/update"
+	"github.com/dunkbing/coldship/internal/api"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/store"
+	"github.com/dunkbing/coldship/internal/update"
 )
 
 type Client struct {
@@ -51,8 +51,8 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return apierr.New(503, "server_unreachable", "cannot reach Hangar at %s: %v", c.BaseURL, err).
-			WithHint("start it with `hangar server` or set HANGAR_URL")
+		return apierr.New(503, "server_unreachable", "cannot reach Coldship at %s: %v", c.BaseURL, err).
+			WithHint("start it with `coldship server` or set COLDSHIP_URL")
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)

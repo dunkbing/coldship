@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"hangar/internal/apierr"
-	"hangar/internal/builder"
-	"hangar/internal/proxy"
-	"hangar/internal/runtime"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/proxy"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 func dbSetup(t *testing.T) (*Engine, *runtime.Fake) {

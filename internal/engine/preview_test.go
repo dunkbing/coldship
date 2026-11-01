@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/builder"
-	"hangar/internal/proxy"
-	"hangar/internal/runtime"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/proxy"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 const repo = "https://github.com/acme/shop.git"
@@ -161,7 +161,7 @@ func TestPreviewLimitAndReaper(t *testing.T) {
 		t.Fatal("regular apps must never be reaped")
 	}
 	entries, _ := e.Audit(ctx, 10)
-	if entries[0].Actor != "hangar" || entries[0].Reason != "preview expired" {
+	if entries[0].Actor != "coldship" || entries[0].Reason != "preview expired" {
 		t.Fatalf("the reaper should be audited: %+v", entries[0])
 	}
 }

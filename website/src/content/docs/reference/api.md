@@ -1,18 +1,18 @@
 ---
 title: HTTP API
-description: Endpoints, authentication and request shapes for the Hangar HTTP API.
+description: Endpoints, authentication and request shapes for the Coldship HTTP API.
 ---
 
 All endpoints are under `/v1`, take and return JSON, and need `Authorization: Bearer <token>`. Errors use the [structured error format](/reference/errors/) with a matching HTTP status.
 
-The dashboard authenticates with a session cookie instead. It gets one from `POST /v1/sessions`, and must send `X-Hangar-Request: 1` on requests that change state. See [Dashboard sessions](/concepts/guardrails/#dashboard-sessions).
+The dashboard authenticates with a session cookie instead. It gets one from `POST /v1/sessions`, and must send `X-Coldship-Request: 1` on requests that change state. See [Dashboard sessions](/concepts/guardrails/#dashboard-sessions).
 
 ## Endpoints
 
 | Method | Path | Scope | Description |
 |---|---|---|---|
 | `GET` | `/healthz` | none | Liveness: returns `ok` |
-| `POST` | `/v1/sessions` | none | Body `{token}`. Sets the `hangar_session` cookie and returns `{name, scope}`. |
+| `POST` | `/v1/sessions` | none | Body `{token}`. Sets the `coldship_session` cookie and returns `{name, scope}`. |
 | `DELETE` | `/v1/sessions` | session | Sign out: deletes the session and clears the cookie |
 | `GET` | `/v1/whoami` | read | `{name, scope}` of the calling token |
 | `GET` | `/v1/apps` | read | List apps |
@@ -27,7 +27,7 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/system/secrets/rotate` | admin | Rotate the secret key |
 | `POST` | `/v1/system/check` | admin | Check for a new version now |
 | `POST` | `/v1/system/upgrade` | admin | Start an upgrade: waits for deployments, installs, restarts |
-| `GET` | `/v1/system/manifest` | read | The latest signed release manifest and its URL, for `hangar self-update` |
+| `GET` | `/v1/system/manifest` | read | The latest signed release manifest and its URL, for `coldship self-update` |
 | `POST` | `/hooks/git/{app}` | webhook signature | Git push webhooks. Authenticated only by the app's secret; see [Git webhooks](/guides/webhooks/) |
 | `GET` | `/v1/apps/{name}/webhook` | read | Webhook URL, settings and recent deliveries |
 | `POST` | `/v1/apps/{name}/webhook` | admin | Enable, or with `{rotate: true}` replace, the secret; returns it once |
@@ -52,7 +52,7 @@ Request bodies reject unknown fields and are limited to 1 MiB.
 ## Example
 
 ```sh
-curl -s -H "Authorization: Bearer $HANGAR_TOKEN" \
+curl -s -H "Authorization: Bearer $COLDSHIP_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"spec":{"name":"web","image":"nginx:1.27-alpine","port":80,"host_port":8080}}' \
   http://127.0.0.1:7070/v1/plans

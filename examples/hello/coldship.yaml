@@ -5,4 +5,4 @@ port: 80
 host_port: 8080
 memory: 128m
 env:
-  GREETING: hello from hangar
+  GREETING: hello from coldship

@@ -6,8 +6,8 @@ import (
 	"io"
 	"sync"
 
-	"hangar/internal/apierr"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 // Fake is an in-memory Builder for tests. Refs maps "git-url@ref" (or

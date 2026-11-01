@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"hangar/internal/apierr"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 // These tests use real git against local repositories. Docker is replaced by
@@ -135,12 +135,12 @@ func TestBuild(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, strings.Join(log.Lines(), "\n"))
 	}
 	tag := res.Image
-	if res.Auto || tag != ImageTag("api", b) || !strings.HasPrefix(tag, "hangar-build/api:"+commit[:12]+"-") {
+	if res.Auto || tag != ImageTag("api", b) || !strings.HasPrefix(tag, "coldship-build/api:"+commit[:12]+"-") {
 		t.Errorf("unexpected tag %s", tag)
 	}
 	raw, _ := os.ReadFile(argsFile)
 	args := string(raw)
-	for _, want := range []string{"--build-arg\nVERSION=1.2", "hangar.commit=" + commit, "-t\n" + tag, "services/api/Dockerfile"} {
+	for _, want := range []string{"--build-arg\nVERSION=1.2", "coldship.commit=" + commit, "-t\n" + tag, "services/api/Dockerfile"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("docker args missing %q:\n%s", want, args)
 		}
@@ -200,7 +200,7 @@ func TestLogTail(t *testing.T) {
 	l := NewLogTail(3)
 	l.Write([]byte("a\nb\nc\nd\npartial"))
 	got := strings.Join(l.Lines(), "|")
-	if got != "hangar: 1 earlier lines omitted|b|c|d|partial" {
+	if got != "coldship: 1 earlier lines omitted|b|c|d|partial" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -249,10 +249,10 @@ func TestAutoBuildGeneratesDockerfileOutsideCheckout(t *testing.T) {
 			fpath = lines[i+1]
 		}
 	}
-	if !strings.HasSuffix(fpath, "/Dockerfile.hangar") || strings.Contains(fpath, "/src/") {
+	if !strings.HasSuffix(fpath, "/Dockerfile.coldship") || strings.Contains(fpath, "/src/") {
 		t.Fatalf("generated Dockerfile must live outside the checkout, got %s", fpath)
 	}
-	if !strings.Contains(string(args), "hangar.builder=auto") {
+	if !strings.Contains(string(args), "coldship.builder=auto") {
 		t.Fatal("auto images must be labelled")
 	}
 	df, _ := os.ReadFile(filepath.Join(out, "Dockerfile"))

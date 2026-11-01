@@ -3,7 +3,7 @@ import { api, type SystemStatus } from '../api'
 import { useSession } from '../App'
 import { ErrorBox } from './ui'
 
-const DISMISS_KEY = 'hangar.dismissed-update'
+const DISMISS_KEY = 'coldship.dismissed-update'
 
 function dismissedVersion(): string {
   try {
@@ -13,7 +13,7 @@ function dismissedVersion(): string {
   }
 }
 
-// UpdateBanner tells people a new Hangar version is available, and lets
+// UpdateBanner tells people a new Coldship version is available, and lets
 // admins install it. While the server upgrades it restarts; the banner waits
 // for it to come back on the new version and reloads the page so the new
 // dashboard loads too.
@@ -56,7 +56,7 @@ export default function UpdateBanner() {
       <div className="update-banner" role="status">
         <span className="spinner" aria-hidden />
         <div>
-          <strong>Upgrading Hangar to {upgradingTo}…</strong>
+          <strong>Upgrading Coldship to {upgradingTo}…</strong>
           <div className="small muted">
             The server finishes running deployments, installs the new version and restarts. This page reloads when it is back.
           </div>
@@ -86,7 +86,7 @@ export default function UpdateBanner() {
     <div className="update-banner" role="status">
       <div className="update-text">
         <div>
-          <strong>Hangar {st.latest} is available</strong> <span className="muted">(you are on {st.version}).</span> {how}
+          <strong>Coldship {st.latest} is available</strong> <span className="muted">(you are on {st.version}).</span> {how}
         </div>
         {st.notes && <div className="small">{st.notes}</div>}
         {st.notes_url && (

@@ -1,4 +1,4 @@
-// Package spec defines the declarative app spec (hangar.yaml), the single
+// Package spec defines the declarative app spec (coldship.yaml), the single
 // source of truth an agent edits before running plan/apply.
 package spec
 
@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"hangar/internal/apierr"
+	"github.com/dunkbing/coldship/internal/apierr"
 )
 
 type Stage string
@@ -33,7 +33,7 @@ type Volume struct {
 type Build struct {
 	Git        string            `json:"git" yaml:"git" jsonschema:"repository URL: https://, http:// or ssh (git@host:org/repo.git). No embedded passwords"`
 	Ref        string            `json:"ref,omitempty" yaml:"ref,omitempty" jsonschema:"branch, tag or full commit SHA to build (default: the repository's default branch)"`
-	Commit     string            `json:"commit,omitempty" yaml:"commit,omitempty" jsonschema:"optional full commit SHA pin. When empty, Hangar resolves ref at plan time and records the commit in the plan"`
+	Commit     string            `json:"commit,omitempty" yaml:"commit,omitempty" jsonschema:"optional full commit SHA pin. When empty, Coldship resolves ref at plan time and records the commit in the plan"`
 	Context    string            `json:"context,omitempty" yaml:"context,omitempty" jsonschema:"build context directory inside the repository (default .)"`
 	Dockerfile string            `json:"dockerfile,omitempty" yaml:"dockerfile,omitempty" jsonschema:"Dockerfile path relative to the context (default Dockerfile)"`
 	Args       map[string]string `json:"args,omitempty" yaml:"args,omitempty" jsonschema:"docker build args. Visible in plans and image history: never put secrets here"`
@@ -45,13 +45,13 @@ type Build struct {
 	Auto *AutoBuild `json:"auto,omitempty" yaml:"auto,omitempty" jsonschema:"overrides for builds without a Dockerfile: language, version, install, build, start"`
 }
 
-// Database engines Hangar manages.
+// Database engines Coldship manages.
 const (
 	EnginePostgres = "postgres"
 	EngineRedis    = "redis"
 )
 
-// Database is a managed database attached to the app. Hangar runs it, keeps
+// Database is a managed database attached to the app. Coldship runs it, keeps
 // its data in a volume, injects its connection URL into the app's env, and
 // snapshots it before any destructive change.
 type Database struct {
@@ -83,9 +83,9 @@ const (
 	OnPushDeploy = "deploy"
 )
 
-// Health tells Hangar when a newly started container is ready for traffic.
+// Health tells Coldship when a newly started container is ready for traffic.
 type Health struct {
-	Path    string `json:"path,omitempty" yaml:"path,omitempty" jsonschema:"HTTP path that returns 2xx or 3xx when the app is ready, e.g. /healthz. Without it, Hangar waits for the port to accept connections"`
+	Path    string `json:"path,omitempty" yaml:"path,omitempty" jsonschema:"HTTP path that returns 2xx or 3xx when the app is ready, e.g. /healthz. Without it, Coldship waits for the port to accept connections"`
 	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty" jsonschema:"how long a new container may take to become healthy, e.g. 60s (default 60s, max 10m)"`
 }
 
@@ -104,10 +104,10 @@ type App struct {
 	Stage     Stage             `json:"stage,omitempty" yaml:"stage,omitempty" jsonschema:"production, staging (default) or preview. Destructive changes to production need human approval"`
 	Image     string            `json:"image,omitempty" yaml:"image,omitempty" jsonschema:"container image to run, e.g. nginx:1.27. Set either image or build"`
 	Build     *Build            `json:"build,omitempty" yaml:"build,omitempty" jsonschema:"build the image from a Git repository instead of using image"`
-	OnPush    *OnPush           `json:"on_push,omitempty" yaml:"on_push,omitempty" jsonschema:"what Git webhook pushes do (apps built from Git; enable the webhook with hangar webhook enable)"`
+	OnPush    *OnPush           `json:"on_push,omitempty" yaml:"on_push,omitempty" jsonschema:"what Git webhook pushes do (apps built from Git; enable the webhook with coldship webhook enable)"`
 	Port      int               `json:"port,omitempty" yaml:"port,omitempty" jsonschema:"port the app listens on inside the container"`
 	HostPort  int               `json:"host_port,omitempty" yaml:"host_port,omitempty" jsonschema:"host port to publish the container port on (requires port). Apps with a host_port cannot be deployed without downtime; prefer domains"`
-	Domains   []string          `json:"domains,omitempty" yaml:"domains,omitempty" jsonschema:"hostnames routed to this app through Hangar's proxy with automatic HTTPS, e.g. app.example.com (requires port)"`
+	Domains   []string          `json:"domains,omitempty" yaml:"domains,omitempty" jsonschema:"hostnames routed to this app through Coldship's proxy with automatic HTTPS, e.g. app.example.com (requires port)"`
 	Health    *Health           `json:"health,omitempty" yaml:"health,omitempty" jsonschema:"readiness check used before switching traffic to a new version"`
 	Memory    string            `json:"memory,omitempty" yaml:"memory,omitempty" jsonschema:"memory limit such as 256m or 1g"`
 	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"environment variables; values are write-only and redacted in all output"`
@@ -221,7 +221,7 @@ func (a *App) Validate() error {
 		return apierr.Invalid("host_port", "host_port %d out of range 1-65535", a.HostPort)
 	}
 	if a.HostPort > 0 && a.Port == 0 {
-		return apierr.Invalid("port", "host_port is set but port is not; Hangar needs to know which container port to publish").
+		return apierr.Invalid("port", "host_port is set but port is not; Coldship needs to know which container port to publish").
 			WithFix(map[string]any{"port": a.HostPort})
 	}
 	seen := map[string]bool{}
@@ -244,7 +244,7 @@ func (a *App) Validate() error {
 		seen[d] = true
 	}
 	if len(a.Domains) > 0 && a.Port == 0 {
-		return apierr.Invalid("port", "domains are set but port is not; Hangar needs to know which container port to route traffic to").
+		return apierr.Invalid("port", "domains are set but port is not; Coldship needs to know which container port to route traffic to").
 			WithFix(map[string]any{"port": 8080})
 	}
 	if h := a.Health; h != nil {
@@ -342,14 +342,14 @@ func (b *Build) validate() error {
 			WithHint("local paths, file:// and other git transports are not allowed")
 	case hasPassword(u):
 		return apierr.Invalid("build.git", "build.git must not contain a password or token").
-			WithHint("remove the credentials from the URL and give the server a git credentials file with `hangar server --git-credentials`")
+			WithHint("remove the credentials from the URL and give the server a git credentials file with `coldship server --git-credentials`")
 	}
 	if b.Ref != "" && (!refRe.MatchString(b.Ref) || strings.HasPrefix(b.Ref, "-") || strings.Contains(b.Ref, "..")) {
 		return apierr.Invalid("build.ref", "build.ref %q is not a valid branch, tag or commit", b.Ref)
 	}
 	if b.Commit != "" && !IsCommitSHA(b.Commit) {
 		return apierr.Invalid("build.commit", "build.commit must be a full 40-character lowercase commit SHA").
-			WithHint("leave commit empty to have Hangar resolve ref when planning")
+			WithHint("leave commit empty to have Coldship resolve ref when planning")
 	}
 	if !relPathOK(b.Context) {
 		return apierr.Invalid("build.context", "build.context %q must be a relative path inside the repository", b.Context)

@@ -3,9 +3,9 @@ title: Git webhooks
 description: Plan, deploy or preview automatically when you push.
 ---
 
-For apps [built from Git](/guides/build-from-git/), a push can trigger Hangar. What it does is part of the app's spec, so changing it is a reviewed plan like anything else:
+For apps [built from Git](/guides/build-from-git/), a push can trigger Coldship. What it does is part of the app's spec, so changing it is a reviewed plan like anything else:
 
-```yaml title="hangar.yaml"
+```yaml title="coldship.yaml"
 build:
   git: https://github.com/acme/shop.git
   ref: main
@@ -27,17 +27,17 @@ on_push:
 1. Make the webhook endpoint reachable from your Git host (see [Exposing the endpoint](#exposing-the-endpoint)), and start the server with its public address:
 
    ```sh
-   hangar server --public-url https://hangar.example.com
+   coldship server --public-url https://coldship.example.com
    ```
 
 2. Enable the webhook for the app (admin token). The secret is shown **once**:
 
    ```sh
-   hangar webhook enable shop
+   coldship webhook enable shop
    ```
 
    ```txt
-     URL:     https://hangar.example.com/hooks/git/shop
+     URL:     https://coldship.example.com/hooks/git/shop
      Secret:  c869dab5…
    ```
 
@@ -49,7 +49,7 @@ on_push:
 4. Push, then check what happened:
 
    ```sh
-   hangar webhook status shop
+   coldship webhook status shop
    ```
 
    ```txt
@@ -59,11 +59,11 @@ on_push:
    11-01 08:00:53  main        548140c  alice  deployed         deployment dep_128b30d253e0
    ```
 
-The dashboard has the same delivery log on the app's **Webhook** tab, and agents can read it with the `hangar_webhook_status` MCP tool. `hangar webhook enable shop --rotate` replaces the secret (the old one stops working immediately), and `hangar webhook disable shop` turns the webhook off.
+The dashboard has the same delivery log on the app's **Webhook** tab, and agents can read it with the `coldship_webhook_status` MCP tool. `coldship webhook enable shop --rotate` replaces the secret (the old one stops working immediately), and `coldship webhook disable shop` turns the webhook off.
 
 ## What a push can and can't do
 
-- **The push is only a trigger.** Hangar doesn't deploy the commit named in the payload. It asks the app's own repository (the `build.git` in the spec) for the branch's current tip, and plans that. So a replayed old push, or one the Git host delivers out of order, can't move the app back to an older commit; it's recorded as "already runs the tip". For the same reason, a "branch deleted" event only removes a preview after the repository confirms the branch is gone.
+- **The push is only a trigger.** Coldship doesn't deploy the commit named in the payload. It asks the app's own repository (the `build.git` in the spec) for the branch's current tip, and plans that. So a replayed old push, or one the Git host delivers out of order, can't move the app back to an older commit; it's recorded as "already runs the tip". For the same reason, a "branch deleted" event only removes a preview after the repository confirms the branch is gone.
 - **A push can only change the commit.** Nothing in the payload can change the spec, the repository, env or anything else.
 - **Every request is verified first,** using the app's own secret: an HMAC-SHA256 signature for GitHub, Gitea/Forgejo and the generic format, or GitLab's token. The comparison is constant-time, and nothing is parsed before verification. The payload's repository must also match the app's. Redelivered requests with the same delivery ID are recognized and ignored.
 - **Pending plans don't pile up.** In `action: plan` mode, a newer push supersedes the app's earlier webhook plans. Applying an old one fails with `plan_superseded`, naming the newer plan.
@@ -83,10 +83,10 @@ With `previews: true`, **anyone who can push a branch** to the repository gets t
 
 ### Exposing the endpoint
 
-The Hangar server listens on localhost by default, and [should stay that way](/guides/production/#network-exposure). For webhooks, expose **only** the `/hooks/git/` path through your reverse proxy, not the API or dashboard:
+The Coldship server listens on localhost by default, and [should stay that way](/guides/production/#network-exposure). For webhooks, expose **only** the `/hooks/git/` path through your reverse proxy, not the API or dashboard:
 
 ```txt title="Caddyfile"
-hangar.example.com {
+coldship.example.com {
 	handle /hooks/git/* {
 		reverse_proxy 127.0.0.1:7070
 	}

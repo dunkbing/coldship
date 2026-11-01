@@ -9,7 +9,7 @@ import sitemap from '@astrojs/sitemap';
 export default defineConfig({
   site: process.env.SITE_URL || undefined,
   integrations: [starlight({
-    title: 'Hangar',
+    title: 'Coldship',
     description: 'A self-hosted app platform built for AI agents, with humans in control.',
     logo: { src: './src/assets/logo.svg' },
     favicon: '/favicon.svg',

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 type Status struct {
@@ -29,7 +29,7 @@ type DeployOptions struct {
 	// switched. If anything fails before that, the old one keeps running.
 	ZeroDowntime bool
 	// Switch routes traffic to the new container at upstream ("host:port" on
-	// the Hangar network). It runs after the health check passes. May be nil.
+	// the Coldship network). It runs after the health check passes. May be nil.
 	Switch func(ctx context.Context, upstream string) error
 	// Log receives progress and, on failure, the new container's output.
 	Log io.Writer
@@ -61,9 +61,9 @@ type Runtime interface {
 
 // Network is the Docker network shared by apps and the proxy. Apps can reach
 // each other by app name on it.
-const Network = "hangar"
+const Network = "coldship"
 
-// Alias is a deployment's stable hostname on the Hangar network. It survives
+// Alias is a deployment's stable hostname on the Coldship network. It survives
 // the container being renamed, so the proxy can keep pointing at it.
 func Alias(deploymentID string) string { return strings.ReplaceAll(deploymentID, "_", "-") }
 

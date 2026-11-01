@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: How Hangar is put together.
+description: How Coldship is put together.
 ---
 
 ```txt
@@ -16,8 +16,8 @@ Everything ships as one Go binary. The CLI, the MCP server and the React dashboa
 
 | Package | Responsibility |
 |---|---|
-| `cmd/hangar` | CLI entry point (cobra): `server`, `mcp`, and all client commands |
-| `internal/spec` | The `hangar.yaml` schema: strict parsing, validation with suggested fixes, redaction |
+| `cmd/coldship` | CLI entry point (cobra): `server`, `mcp`, and all client commands |
+| `internal/spec` | The `coldship.yaml` schema: strict parsing, validation with suggested fixes, redaction |
 | `internal/planner` | Diffs current against desired spec and classifies destructive changes |
 | `internal/engine` | The control plane: plan, approve, apply, rollback, diagnose |
 | `internal/store` | SQLite persistence for tokens, apps, plans, deployments and the audit log |

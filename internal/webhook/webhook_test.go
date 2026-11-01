@@ -59,7 +59,7 @@ func TestGiteaGitLabGeneric(t *testing.T) {
 		t.Fatal("wrong GitLab token must be rejected")
 	}
 
-	p, err = Parse(hdr("X-Hangar-Signature", "sha256="+Sign(ghBody, secret)), ghBody, secret)
+	p, err = Parse(hdr("X-Coldship-Signature", "sha256="+Sign(ghBody, secret)), ghBody, secret)
 	if err != nil || p.Provider != "generic" || p.Branch != "main" {
 		t.Fatalf("generic: %+v %v", p, err)
 	}

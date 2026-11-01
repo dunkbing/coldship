@@ -19,10 +19,10 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"hangar/internal/apierr"
-	"hangar/internal/planner"
-	"hangar/internal/secrets"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/planner"
+	"github.com/dunkbing/coldship/internal/secrets"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 type Scope string
@@ -128,7 +128,7 @@ type Deployment struct {
 	// previous version, which kept running and serving traffic.
 	KeptPrevious bool   `json:"kept_previous,omitempty"`
 	Strategy     string `json:"strategy,omitempty"` // zero-downtime | recreate
-	// Detected summarizes the project detection when Hangar generated the
+	// Detected summarizes the project detection when Coldship generated the
 	// Dockerfile, e.g. "node 22 · pnpm · pnpm start".
 	Detected   string     `json:"detected,omitempty"`
 	Actor      string     `json:"actor"`
@@ -147,7 +147,7 @@ type AuditEntry struct {
 	Detail json.RawMessage `json:"detail,omitempty"`
 }
 
-// Store keeps Hangar's state. Columns that can hold secrets (app specs with
+// Store keeps Coldship's state. Columns that can hold secrets (app specs with
 // env values, plans and deployments that embed specs, database passwords,
 // webhook secrets, deploy logs) are encrypted with the keyring; nothing
 // is ever written to them in plaintext.
@@ -313,7 +313,7 @@ func (s *Store) checkKey() (needMarker bool, err error) {
 	}
 	for _, c := range sealedColumns {
 		var sample string
-		e := s.db.QueryRow(`SELECT ` + c.col + ` FROM ` + c.table + ` WHERE substr(` + c.col + `, 1, 5) = 'hgs1:' LIMIT 1`).Scan(&sample)
+		e := s.db.QueryRow(`SELECT ` + c.col + ` FROM ` + c.table + ` WHERE substr(` + c.col + `, 1, 5) = 'css1:' LIMIT 1`).Scan(&sample)
 		if e == nil {
 			return false, fmt.Errorf("%w: the database holds values encrypted with key %s, but its key check is missing",
 				ErrKeyMismatch, secrets.KeyID(sample))
@@ -333,7 +333,7 @@ func (s *Store) reseal(ctx context.Context, all, createMarker bool) (int, error)
 	kr := s.kr.Load()
 	n := 0
 	if createMarker {
-		sealed, err := kr.Seal([]byte("hangar"), keyCheckAAD)
+		sealed, err := kr.Seal([]byte("coldship"), keyCheckAAD)
 		if err != nil {
 			return 0, err
 		}
@@ -456,7 +456,7 @@ func (s *Store) KeyIDsInUse(ctx context.Context) (map[string]int, error) {
 		cols = append(cols, struct{ table, col string }{c.table, c.col})
 	}
 	for _, c := range cols {
-		rows, err := s.db.QueryContext(ctx, `SELECT `+c.col+` FROM `+c.table+` WHERE substr(`+c.col+`, 1, 5) = 'hgs1:'`)
+		rows, err := s.db.QueryContext(ctx, `SELECT `+c.col+` FROM `+c.table+` WHERE substr(`+c.col+`, 1, 5) = 'css1:'`)
 		if err != nil {
 			return nil, err
 		}
@@ -490,7 +490,7 @@ func DecryptAll(ctx context.Context, path string, kr *secrets.Keyring) (int, err
 	n := 0
 	for _, c := range sealedColumns {
 		cols := strings.Join(c.keys, ", ")
-		rows, err := tx.QueryContext(ctx, `SELECT `+cols+`, `+c.col+` FROM `+c.table+` WHERE substr(`+c.col+`, 1, 5) = 'hgs1:'`)
+		rows, err := tx.QueryContext(ctx, `SELECT `+cols+`, `+c.col+` FROM `+c.table+` WHERE substr(`+c.col+`, 1, 5) = 'css1:'`)
 		if err != nil {
 			return 0, err
 		}
@@ -557,8 +557,8 @@ func (s *Store) SecretsStatus(ctx context.Context) (*SecretsStatus, error) {
 	for _, c := range sealedColumns {
 		var enc, plain int
 		if err := s.db.QueryRowContext(ctx, `SELECT
-			coalesce(sum(CASE WHEN substr(`+c.col+`, 1, 5) = 'hgs1:' THEN 1 ELSE 0 END), 0),
-			coalesce(sum(CASE WHEN substr(`+c.col+`, 1, 5) = 'hgs1:' THEN 0 ELSE 1 END), 0)
+			coalesce(sum(CASE WHEN substr(`+c.col+`, 1, 5) = 'css1:' THEN 1 ELSE 0 END), 0),
+			coalesce(sum(CASE WHEN substr(`+c.col+`, 1, 5) = 'css1:' THEN 0 ELSE 1 END), 0)
 			FROM `+c.table+` WHERE `+c.col+` IS NOT NULL`).Scan(&enc, &plain); err != nil {
 			return nil, err
 		}
@@ -589,7 +589,7 @@ func (s *Store) CreateToken(ctx context.Context, name string, scope Scope) (stri
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	plain := "hgr_" + hex.EncodeToString(b)
+	plain := "cst_" + hex.EncodeToString(b)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens(name, hash, scope, created_at) VALUES(?,?,?,?)`,
 		name, hashToken(plain), string(scope), ts(time.Now()))
 	if err != nil {
@@ -831,7 +831,7 @@ func (s *Store) DeleteWebhook(ctx context.Context, app string) error {
 	return err
 }
 
-// Delivery is one received webhook request and what Hangar did with it.
+// Delivery is one received webhook request and what Coldship did with it.
 type Delivery struct {
 	ID        string    `json:"id"`
 	App       string    `json:"app"`

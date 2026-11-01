@@ -30,7 +30,7 @@ export default function Login({ onLogin, initialError }: { onLogin: (w: WhoAmI) 
             <rect width="32" height="32" rx="7" fill="var(--accent)" />
             <path d="M6 23V13l10-6 10 6v10h-4v-7H10v7z" fill="#fff" />
           </svg>
-          <span>Hangar</span>
+          <span>Coldship</span>
         </div>
         <p className="muted">
           Sign in with an API token. Use an admin token to approve plans. The token is exchanged for a 12-hour session and is not
@@ -41,7 +41,7 @@ export default function Login({ onLogin, initialError }: { onLogin: (w: WhoAmI) 
           <input
             type="password"
             autoComplete="off"
-            placeholder="hgr_…"
+            placeholder="cst_…"
             value={token}
             onChange={(e) => setTok(e.target.value)}
             autoFocus
@@ -52,7 +52,7 @@ export default function Login({ onLogin, initialError }: { onLogin: (w: WhoAmI) 
           {busy ? 'Checking…' : 'Sign in'}
         </button>
         <p className="muted small">
-          The first admin token is printed when <code>hangar server</code> starts for the first time.
+          The first admin token is printed when <code>coldship server</code> starts for the first time.
         </p>
       </form>
     </div>

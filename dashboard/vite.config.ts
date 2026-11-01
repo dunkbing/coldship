@@ -7,6 +7,6 @@ export default defineConfig({
   plugins: [react()],
   build: { outDir: '../internal/web/dist', emptyOutDir: true },
   server: {
-    proxy: { '/v1': process.env.HANGAR_URL ?? 'http://127.0.0.1:7070' },
+    proxy: { '/v1': process.env.COLDSHIP_URL ?? 'http://127.0.0.1:7070' },
   },
 })

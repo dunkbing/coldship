@@ -59,7 +59,7 @@ type Checker struct {
 func (c *Checker) disabledReason() string {
 	switch {
 	case c.URL == "":
-		return "no update URL configured (hangar server --update-url)"
+		return "no update URL configured (coldship server --update-url)"
 	case c.PublicKey == nil:
 		return "no update signing key built in or configured (--update-public-key), so releases cannot be verified"
 	}
@@ -90,7 +90,7 @@ func (c *Checker) Status() Status {
 		}
 		st.UpdateAvailable = Newer(m.Version, c.Current)
 		if st.UpdateAvailable && c.Auto && !SameMajor(m.Version, c.Current) {
-			st.AutoBlocked = "major version change: install it manually with `hangar upgrade` after reading the release notes"
+			st.AutoBlocked = "major version change: install it manually with `coldship upgrade` after reading the release notes"
 		}
 	}
 	return st
@@ -137,7 +137,7 @@ func (c *Checker) Run(ctx context.Context) {
 			c.Log.Warn("update check failed", "err", err)
 		}
 		if st := c.Status(); st.UpdateAvailable {
-			c.Log.Info("new Hangar version available", "current", c.Current, "latest", st.Latest, "auto", c.Auto && st.AutoBlocked == "")
+			c.Log.Info("new Coldship version available", "current", c.Current, "latest", st.Latest, "auto", c.Auto && st.AutoBlocked == "")
 			if c.Auto && st.AutoBlocked == "" {
 				if err := c.Upgrade(ctx, true); err != nil && ctx.Err() == nil {
 					c.Log.Error("automatic upgrade failed", "err", err)
@@ -200,7 +200,7 @@ func (c *Checker) upgrade(ctx context.Context, m *Manifest, waitIdle bool) error
 		}
 	}
 	c.setState("downloading")
-	c.Log.Info("downloading Hangar", "version", m.Version)
+	c.Log.Info("downloading Coldship", "version", m.Version)
 	newBin, err := Download(ctx, m, filepath.Dir(target))
 	if err != nil {
 		return err
@@ -210,7 +210,7 @@ func (c *Checker) upgrade(ctx context.Context, m *Manifest, waitIdle bool) error
 		return err
 	}
 	c.setState("restarting")
-	c.Log.Info("installed Hangar; restarting", "version", m.Version, "previous_binary", target+".old")
+	c.Log.Info("installed Coldship; restarting", "version", m.Version, "previous_binary", target+".old")
 	if c.Restart != nil {
 		go c.Restart(target)
 	}

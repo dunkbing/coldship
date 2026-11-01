@@ -2,10 +2,10 @@
 // which seeds a demo server and runs this inside the Playwright Docker image.
 import { chromium } from 'playwright'
 
-const base = process.env.HANGAR_URL ?? 'http://127.0.0.1:7272'
-const token = process.env.HANGAR_TOKEN
+const base = process.env.COLDSHIP_URL ?? 'http://127.0.0.1:7272'
+const token = process.env.COLDSHIP_TOKEN
 const out = process.env.OUT ?? '.'
-if (!token) throw new Error('HANGAR_TOKEN is required')
+if (!token) throw new Error('COLDSHIP_TOKEN is required')
 
 const browser = await chromium.launch()
 
@@ -41,11 +41,13 @@ const page = await light.newPage()
 await shot(page, '/apps', 'apps', 'demo-worker')
 await shot(page, '/apps/demo-worker?tab=diagnose', 'app-diagnose', 'port_mismatch')
 await shot(page, '/apps/demo-worker?tab=deployments', 'app-deployments', 'Upgrade worker to v2')
-await shot(page, '/apps/demo-worker?tab=logs', 'app-logs', 'DATABASE_URL')
+// With zero-downtime deploys the crashing v2 never replaced v1, so the live
+// logs are v1's (the crash output is in the deploy log).
+await shot(page, '/apps/demo-worker?tab=logs', 'app-logs', 'untrusted output')
 await shot(page, '/apps/demo-site?tab=diagnose', 'app-git-diagnose', 'build_failed')
 // Deployments of the Git-built app, with the failed build's log expanded.
 await page.goto(base + '/apps/demo-site?tab=deployments')
-await page.getByRole('button', { name: 'Build log' }).first().click()
+await page.getByRole('button', { name: 'Log', exact: true }).first().click()
 await page.getByText('npm run build').first().waitFor({ timeout: 15000 })
 await page.waitForTimeout(400)
 await page.screenshot({ path: `${out}/app-git-deployments.png`, fullPage: true })

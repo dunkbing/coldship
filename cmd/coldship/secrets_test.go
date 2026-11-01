@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestOpenStoreKeyHandling(t *testing.T) {
 	dir := t.TempDir()
-	data, keyFile := filepath.Join(dir, "hangar.db"), filepath.Join(dir, "hangar.key")
-	t.Setenv("HANGAR_SECRET_KEY", "")
+	data, keyFile := filepath.Join(dir, "coldship.db"), filepath.Join(dir, "coldship.key")
+	t.Setenv("COLDSHIP_SECRET_KEY", "")
 
 	// First start: a key is created with mode 0600.
 	st, _, err := openStore(data, keyFile, quiet)
@@ -58,16 +58,16 @@ func TestOpenStoreKeyHandling(t *testing.T) {
 
 func TestKeyRotatorRefusesEnvKey(t *testing.T) {
 	r := &keyRotator{fromEnv: true}
-	if _, err := r.rotate(context.Background()); err == nil || !strings.Contains(err.Error(), "HANGAR_SECRET_KEY") {
+	if _, err := r.rotate(context.Background()); err == nil || !strings.Contains(err.Error(), "COLDSHIP_SECRET_KEY") {
 		t.Fatalf("env keys can't be rotated in place: %v", err)
 	}
 }
 
 func TestNewKeyKeptOnOtherErrors(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HANGAR_SECRET_KEY", "")
-	keyFile := filepath.Join(dir, "hangar.key")
-	data := filepath.Join(dir, "missing-dir", "hangar.db") // can't be created
+	t.Setenv("COLDSHIP_SECRET_KEY", "")
+	keyFile := filepath.Join(dir, "coldship.key")
+	data := filepath.Join(dir, "missing-dir", "coldship.db") // can't be created
 	if _, _, err := openStore(data, keyFile, quiet); err == nil {
 		t.Fatal("expected an error")
 	}

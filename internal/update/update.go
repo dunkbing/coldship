@@ -1,4 +1,4 @@
-// Package update checks for, verifies and installs new Hangar releases.
+// Package update checks for, verifies and installs new Coldship releases.
 //
 // A release is described by a signed manifest:
 //
@@ -138,7 +138,7 @@ func Fetch(ctx context.Context, manifestURL string, pub ed25519.PublicKey) (*Man
 	if err != nil {
 		return nil, nil, err
 	}
-	req.Header.Set("User-Agent", "hangar-update-check")
+	req.Header.Set("User-Agent", "coldship-update-check")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetching update manifest: %w", err)
@@ -202,7 +202,7 @@ func Download(ctx context.Context, m *Manifest, dir string) (string, error) {
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("downloading %s: HTTP %d", a.URL, resp.StatusCode)
 	}
-	f, err := os.CreateTemp(dir, ".hangar-update-*")
+	f, err := os.CreateTemp(dir, ".coldship-update-*")
 	if err != nil {
 		return "", fmt.Errorf("cannot write next to the current binary (%s): %w", dir, err)
 	}

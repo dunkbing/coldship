@@ -1,4 +1,4 @@
-// Package apierr defines the structured errors Hangar returns on every
+// Package apierr defines the structured errors Coldship returns on every
 // interface (HTTP, CLI, MCP). They are written for an LLM reader: a stable
 // machine-readable code, a plain-language message, and where possible a
 // concrete suggested fix or next step.

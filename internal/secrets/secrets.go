@@ -1,6 +1,6 @@
 // Package secrets encrypts values at rest with AES-256-GCM.
 //
-// A sealed value looks like "hgs1:<key id>:<base64 nonce+ciphertext>". Each
+// A sealed value looks like "css1:<key id>:<base64 nonce+ciphertext>". Each
 // value is bound to where it is stored (its "additional data", e.g.
 // "webhooks.secret:shop"), so a ciphertext copied into another row does not
 // decrypt. Keys live in a keyring so they can be rotated: values sealed with
@@ -24,7 +24,7 @@ import (
 	"sync"
 )
 
-const prefix = "hgs1:"
+const prefix = "css1:"
 
 // Keyring holds the encryption keys. It is safe for concurrent use.
 type Keyring struct {
@@ -193,7 +193,7 @@ func Load(path string) (*Keyring, error) {
 	}
 	var f file
 	if err := json.Unmarshal(b, &f); err != nil || f.Version != 1 {
-		return nil, fmt.Errorf("secret key file %s is not a Hangar keyring", path)
+		return nil, fmt.Errorf("secret key file %s is not a Coldship keyring", path)
 	}
 	k := &Keyring{current: f.Current, keys: map[string][]byte{}, Source: "file " + path}
 	for id, b64 := range f.Keys {
@@ -224,7 +224,7 @@ func (k *Keyring) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".hangar-key-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".coldship-key-*")
 	if err != nil {
 		return err
 	}
@@ -252,11 +252,11 @@ func (k *Keyring) Save(path string) error {
 func FromEnv(b64 string) (*Keyring, error) {
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
 	if err != nil || len(key) != 32 {
-		return nil, errors.New("HANGAR_SECRET_KEY must be a base64-encoded 32-byte key (e.g. openssl rand -base64 32)")
+		return nil, errors.New("COLDSHIP_SECRET_KEY must be a base64-encoded 32-byte key (e.g. openssl rand -base64 32)")
 	}
 	// A stable id derived from nothing secret: the key is identified by
 	// position, since an env key cannot be rotated in place.
-	return &Keyring{current: "env", keys: map[string][]byte{"env": key}, Source: "environment HANGAR_SECRET_KEY"}, nil
+	return &Keyring{current: "env", keys: map[string][]byte{"env": key}, Source: "environment COLDSHIP_SECRET_KEY"}, nil
 }
 
 // Exists reports whether a keyring file exists at path.

@@ -33,8 +33,8 @@ export default function App() {
   // Any 401 later on (session expired, signed out elsewhere) returns to sign-in.
   useEffect(() => {
     const onSignedOut = () => setMe(null)
-    window.addEventListener('hangar:signed-out', onSignedOut)
-    return () => window.removeEventListener('hangar:signed-out', onSignedOut)
+    window.addEventListener('coldship:signed-out', onSignedOut)
+    return () => window.removeEventListener('coldship:signed-out', onSignedOut)
   }, [])
 
   if (checking) return <div className="boot">Loading…</div>
@@ -76,7 +76,7 @@ function Sidebar({ me, onSignOut }: { me: WhoAmI; onSignOut: () => void }) {
           <rect width="32" height="32" rx="7" fill="var(--accent)" />
           <path d="M6 23V13l10-6 10 6v10h-4v-7H10v7z" fill="#fff" />
         </svg>
-        <span>Hangar</span>
+        <span>Coldship</span>
       </div>
       <div className="nav-links">
         <NavLink to="/apps">Apps</NavLink>

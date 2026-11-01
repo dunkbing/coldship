@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/apierr"
-	"hangar/internal/engine"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/engine"
 )
 
 func dbCmd() *cobra.Command {
@@ -105,7 +105,7 @@ func dbCmd() *cobra.Command {
 			}
 			if p.RequiresApproval {
 				return apierr.New(403, "approval_required", "restoring a production database needs human approval (plan %s)", p.ID).
-					WithHint("review it, run `hangar approve " + p.ID + "`, then `hangar apply " + p.ID + " --reason ...`")
+					WithHint("review it, run `coldship approve " + p.ID + "`, then `coldship apply " + p.ID + " --reason ...`")
 			}
 			res, err := c.Apply(cmd.Context(), p.ID, restoreReason)
 			if err != nil {

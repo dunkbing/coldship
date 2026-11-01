@@ -1,4 +1,4 @@
-// Package engine is Hangar's control plane: plan, approve, apply, rollback,
+// Package engine is Coldship's control plane: plan, approve, apply, rollback,
 // logs and diagnose. Every interface (HTTP API, CLI, MCP) goes through it.
 package engine
 
@@ -12,13 +12,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/builder"
-	"hangar/internal/planner"
-	"hangar/internal/proxy"
-	"hangar/internal/runtime"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/planner"
+	"github.com/dunkbing/coldship/internal/proxy"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 type Engine struct {
@@ -113,7 +113,7 @@ func (e *Engine) checkDomains(ctx context.Context, a *spec.App) error {
 	}
 	if e.px == nil {
 		return apierr.New(400, "proxy_disabled", "app %s has domains, but this server runs without the proxy", a.Name).
-			WithField("domains").WithHint("restart hangar server without --proxy=false, or remove domains and use host_port")
+			WithField("domains").WithHint("restart coldship server without --proxy=false, or remove domains and use host_port")
 	}
 	apps, err := e.st.ListApps(ctx)
 	if err != nil {
@@ -256,7 +256,7 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 		for _, c := range current.Databases {
 			for _, d := range desired.Databases {
 				if c.Name == d.Name && (c.Engine != d.Engine || c.Version != d.Version) {
-					return nil, apierr.New(409, "database_version_change", "database %s is %s %s; changing it to %s %s needs a data migration, which Hangar doesn't do yet",
+					return nil, apierr.New(409, "database_version_change", "database %s is %s %s; changing it to %s %s needs a data migration, which Coldship doesn't do yet",
 						c.Name, c.Engine, c.Version, d.Engine, d.Version).WithField("databases").
 						WithFix(map[string]any{"databases": map[string]any{"name": c.Name, "engine": c.Engine, "version": c.Version}}).
 						WithHint("keep the current engine and version; to move data, add a new database and restore a snapshot into it")
@@ -335,7 +335,7 @@ func nextStep(p *store.Plan) string {
 	case p.Action == "noop":
 		return "Nothing to do: the app already matches this spec."
 	case p.RequiresApproval && p.ApprovedBy == "":
-		return fmt.Sprintf("Destructive change to a production app. A human must approve it (hangar approve %s) before it can be applied.", p.ID)
+		return fmt.Sprintf("Destructive change to a production app. A human must approve it (coldship approve %s) before it can be applied.", p.ID)
 	default:
 		return fmt.Sprintf("Review the changes, then apply plan %s with a reason.", p.ID)
 	}
@@ -474,7 +474,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 	}
 	if p.RequiresApproval && p.ApprovedBy == "" {
 		return nil, apierr.New(403, "approval_required", "plan %s makes a destructive change to a production app and has not been approved", p.ID).
-			WithHint(fmt.Sprintf("ask a human to review and run: hangar approve %s", p.ID)).WithDetail("plan", p.ID)
+			WithHint(fmt.Sprintf("ask a human to review and run: coldship approve %s", p.ID)).WithDetail("plan", p.ID)
 	}
 
 	app, err := e.st.GetApp(ctx, p.App)
@@ -545,7 +545,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 						d.KeptPrevious = true
 						break
 					}
-					fmt.Fprintf(deployLog, "hangar: snapshot %s of database %s saved\n", sn.ID, db.Name)
+					fmt.Fprintf(deployLog, "coldship: snapshot %s of database %s saved\n", sn.ID, db.Name)
 				}
 			}
 		}
@@ -558,7 +558,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 		if runErr == nil {
 			d.Status = store.DeployDeleted
 			if err := e.setRoute(ctx, p.App, nil, ""); err != nil {
-				fmt.Fprintf(deployLog, "hangar: warning: removing the proxy route failed: %v\n", err)
+				fmt.Fprintf(deployLog, "coldship: warning: removing the proxy route failed: %v\n", err)
 			}
 			runErr = e.st.DeleteApp(ctx, p.App)
 		}
@@ -603,14 +603,14 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 				}
 				// Also covers removing all domains, where Switch isn't called.
 				if err := e.setRoute(ctx, run.Name, run.Domains, upstream); err != nil {
-					fmt.Fprintf(deployLog, "hangar: warning: updating the proxy failed: %v\n", err)
+					fmt.Fprintf(deployLog, "coldship: warning: updating the proxy failed: %v\n", err)
 				}
 				runErr = e.rt.RemoveVolumes(ctx, p.App, planner.RemovedVolumes(current, p.Desired))
 				if gone := planner.RemovedDatabases(current, p.Desired); runErr == nil && len(gone) > 0 {
 					// The new version no longer uses them. Each is snapshotted
 					// first; one whose snapshot fails is kept.
 					if err := e.removeDatabases(ctx, actor, current, gone, "removed from the spec in "+p.ID, true, deployLog); err != nil {
-						fmt.Fprintf(deployLog, "hangar: warning: %v\n", err)
+						fmt.Fprintf(deployLog, "coldship: warning: %v\n", err)
 						e.audit(ctx, actor, "database.remove_failed", p.App, err.Error(), nil)
 					}
 				}
@@ -700,7 +700,7 @@ func (e *Engine) build(ctx context.Context, d *store.Deployment, run *spec.App, 
 				run.Env = map[string]string{}
 			}
 			run.Env["PORT"] = strconv.Itoa(run.Port)
-			fmt.Fprintf(log, "hangar: PORT=%d set for the generated image\n", run.Port)
+			fmt.Fprintf(log, "coldship: PORT=%d set for the generated image\n", run.Port)
 		}
 	}
 	return e.st.SaveDeployment(ctx, d)
@@ -793,7 +793,7 @@ func (e *Engine) Rollback(ctx context.Context, actor, appName, toDeployment, rea
 	}
 	if p.RequiresApproval {
 		return nil, apierr.New(403, "approval_required", "rolling back to %s is destructive on a production app (plan %s)", target.ID, p.ID).
-			WithHint(fmt.Sprintf("ask a human to approve it (hangar approve %s), then apply that plan", p.ID)).WithDetail("plan", p.ID)
+			WithHint(fmt.Sprintf("ask a human to approve it (coldship approve %s), then apply that plan", p.ID)).WithDetail("plan", p.ID)
 	}
 	res, err := e.apply(ctx, actor, p.ID, fmt.Sprintf("rollback to %s: %s", target.ID, reason))
 	if err == nil {

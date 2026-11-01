@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/runtime"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 // RestoreRequest asks for a plan that restores a database from a snapshot.
@@ -72,7 +72,7 @@ func (e *Engine) ensureDatabases(ctx context.Context, run *spec.App, log io.Writ
 			run.Env = map[string]string{}
 		}
 		run.Env[d.Env] = db.URL()
-		fmt.Fprintf(log, "hangar: database %s (%s %s) ready; connection URL injected as %s\n", d.Name, d.Engine, d.Version, d.Env)
+		fmt.Fprintf(log, "coldship: database %s (%s %s) ready; connection URL injected as %s\n", d.Name, d.Engine, d.Version, d.Env)
 	}
 	return nil
 }
@@ -176,7 +176,7 @@ func (e *Engine) removeDatabases(ctx context.Context, actor string, app *spec.Ap
 				return apierr.New(502, "snapshot_failed", "database %s was not deleted because its snapshot failed: %v", d.Name, err).
 					WithHint("fix the database (see diagnose), or take a snapshot manually, then try again")
 			}
-			fmt.Fprintf(log, "hangar: snapshot %s of database %s saved (%d bytes)\n", sn.ID, d.Name, sn.Size)
+			fmt.Fprintf(log, "coldship: snapshot %s of database %s saved (%d bytes)\n", sn.ID, d.Name, sn.Size)
 		}
 		if err := e.rt.RemoveDatabase(ctx, app.Name, d.Name); err != nil {
 			return err
@@ -184,7 +184,7 @@ func (e *Engine) removeDatabases(ctx context.Context, actor string, app *spec.Ap
 		if err := e.st.DeleteDatabase(ctx, app.Name, d.Name); err != nil {
 			return err
 		}
-		fmt.Fprintf(log, "hangar: database %s deleted\n", d.Name)
+		fmt.Fprintf(log, "coldship: database %s deleted\n", d.Name)
 	}
 	return nil
 }
@@ -213,7 +213,7 @@ func (e *Engine) planRestore(ctx context.Context, r *RestoreRequest) (*spec.App,
 	}
 	if sn == nil || sn.App != r.App || sn.Database != r.Database {
 		return nil, nil, nil, apierr.New(404, "snapshot_not_found", "snapshot %q of %s/%s not found", r.Snapshot, r.App, r.Database).
-			WithHint("list snapshots with hangar db snapshots " + r.App)
+			WithHint("list snapshots with coldship db snapshots " + r.App)
 	}
 	if sn.Engine != db.Engine {
 		return nil, nil, nil, apierr.New(400, "invalid_request", "snapshot %s is a %s snapshot; %s is %s", sn.ID, sn.Engine, db.Name, db.Engine)
@@ -311,7 +311,7 @@ func (e *Engine) ScheduledSnapshots(ctx context.Context) (int, error) {
 			continue
 		}
 		for _, d := range a.Spec.Databases {
-			if _, err := e.Snapshot(ctx, "hangar", a.Name, d.Name, "scheduled"); err != nil {
+			if _, err := e.Snapshot(ctx, "coldship", a.Name, d.Name, "scheduled"); err != nil {
 				return n, fmt.Errorf("%s/%s: %w", a.Name, d.Name, err)
 			}
 			n++

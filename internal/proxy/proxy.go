@@ -1,7 +1,7 @@
 // Package proxy routes domains to app containers with automatic HTTPS.
 //
-// Hangar runs Caddy as a managed container ("hangar-proxy") on the Hangar
-// Docker network. Hangar renders Caddy's whole JSON config from its route
+// Coldship runs Caddy as a managed container ("coldship-proxy") on the Coldship
+// Docker network. Coldship renders Caddy's whole JSON config from its route
 // table, writes it to a directory mounted into the container, and asks Caddy
 // to reload it gracefully (in-flight requests finish). Caddy's admin API stays
 // inside the container.
@@ -19,8 +19,8 @@ import (
 	"strings"
 	"sync"
 
-	"hangar/internal/apierr"
-	"hangar/internal/runtime"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/runtime"
 )
 
 // Route sends every listed domain to one upstream ("host:port").
@@ -46,13 +46,13 @@ type Status struct {
 	Error   string `json:"error,omitempty"`
 }
 
-const containerName = "hangar-proxy"
+const containerName = "coldship-proxy"
 
 type Caddy struct {
 	DockerBin string
 	Image     string
 	// ConfigDir is a host directory mounted into the container at
-	// /etc/hangar; Hangar writes caddy.json there.
+	// /etc/coldship; Coldship writes caddy.json there.
 	ConfigDir string
 	HTTPPort  int
 	HTTPSPort int
@@ -93,7 +93,7 @@ func (c *Caddy) Ensure(ctx context.Context) error {
 		}
 	}
 
-	out, _, err := c.docker(ctx, "inspect", "-f", `{{.State.Running}} {{index .Config.Labels "hangar.proxy.ports"}}`, containerName)
+	out, _, err := c.docker(ctx, "inspect", "-f", `{{.State.Running}} {{index .Config.Labels "coldship.proxy.ports"}}`, containerName)
 	if err == nil {
 		running, ports, _ := strings.Cut(strings.TrimSpace(out), " ")
 		if running == "true" && ports == c.portsLabel() {
@@ -107,15 +107,15 @@ func (c *Caddy) Ensure(ctx context.Context) error {
 		return err
 	}
 	_, se, err := c.docker(ctx, "run", "-d", "--name", containerName,
-		"--label", "hangar.proxy.ports="+c.portsLabel(), "--restart", "unless-stopped",
+		"--label", "coldship.proxy.ports="+c.portsLabel(), "--restart", "unless-stopped",
 		"--network", runtime.Network,
 		"-p", fmt.Sprintf("%d:80", c.HTTPPort), "-p", fmt.Sprintf("%d:443", c.HTTPSPort),
-		"-v", "hangar-proxy-data:/data", "-v", "hangar-proxy-config:/config", "-v", abs+":/etc/hangar:ro",
-		c.Image, "caddy", "run", "--config", "/etc/hangar/caddy.json")
+		"-v", "coldship-proxy-data:/data", "-v", "coldship-proxy-config:/config", "-v", abs+":/etc/coldship:ro",
+		c.Image, "caddy", "run", "--config", "/etc/coldship/caddy.json")
 	if err != nil {
 		e := apierr.New(502, "proxy_unavailable", "could not start the proxy container: %s", se)
 		if strings.Contains(se, "port is already allocated") || strings.Contains(se, "address already in use") {
-			e.Hint = fmt.Sprintf("ports %d/%d are taken by another web server; stop it, or start hangar with --proxy-http-port/--proxy-https-port", c.HTTPPort, c.HTTPSPort)
+			e.Hint = fmt.Sprintf("ports %d/%d are taken by another web server; stop it, or start coldship with --proxy-http-port/--proxy-https-port", c.HTTPPort, c.HTTPSPort)
 		}
 		return e
 	}
@@ -128,10 +128,10 @@ func (c *Caddy) Apply(ctx context.Context, routes []Route) error {
 	if err := c.write(routes); err != nil {
 		return err
 	}
-	_, se, err := c.docker(ctx, "exec", containerName, "caddy", "reload", "--config", "/etc/hangar/caddy.json", "--force")
+	_, se, err := c.docker(ctx, "exec", containerName, "caddy", "reload", "--config", "/etc/coldship/caddy.json", "--force")
 	if err != nil {
 		return apierr.New(502, "proxy_reload_failed", "the proxy rejected its new configuration: %s", lastLine(se)).
-			WithHint("check that the hangar-proxy container is running (hangar server starts it)")
+			WithHint("check that the coldship-proxy container is running (coldship server starts it)")
 	}
 	return nil
 }
@@ -194,7 +194,7 @@ func Config(routes []Route, email string) map[string]any {
 		"admin": map[string]any{"listen": "localhost:2019"},
 		"apps": map[string]any{
 			"http": map[string]any{"servers": map[string]any{
-				"hangar": map[string]any{"listen": []string{":80", ":443"}, "routes": rs},
+				"coldship": map[string]any{"listen": []string{":80", ":443"}, "routes": rs},
 			}},
 		},
 	}

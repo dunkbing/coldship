@@ -1,5 +1,5 @@
 ---
-title: Hangar
+title: Coldship
 description: A self-hosted app platform built for AI agents, with humans in control.
 template: splash
 hero:
@@ -17,11 +17,11 @@ import { Card, CardGrid } from '@astrojs/starlight/components'
 import { Image } from 'astro:assets'
 import apps from '../../assets/screenshots/apps.png'
 
-<Image src={apps} alt="The Hangar dashboard listing three apps: two healthy, one failing after a deploy" />
+<Image src={apps} alt="The Coldship dashboard listing three apps: two healthy, one failing after a deploy" />
 
-## Why Hangar
+## Why Coldship
 
-Most self-hosting platforms are built for people clicking through a dashboard. Agents work differently. They can't see a UI, they retry blindly, they get confused by vague errors, and they will occasionally do something destructive with total confidence. Hangar is designed around that.
+Most self-hosting platforms are built for people clicking through a dashboard. Agents work differently. They can't see a UI, they retry blindly, they get confused by vague errors, and they will occasionally do something destructive with total confidence. Coldship is designed around that.
 
 <CardGrid>
   <Card title="Plan, then apply" icon="list-format">
@@ -41,7 +41,7 @@ Most self-hosting platforms are built for people clicking through a dashboard. A
     context. [Debugging](/concepts/debugging-and-rollback/)
   </Card>
   <Card title="MCP built in" icon="puzzle">
-    `hangar mcp` exposes ten tools to Claude Code and other MCP clients, acting under the agent's own scoped token.
+    `coldship mcp` exposes ten tools to Claude Code and other MCP clients, acting under the agent's own scoped token.
     [MCP tools](/reference/mcp-tools/)
   </Card>
   <Card title="Deploy from Git" icon="github">

@@ -74,10 +74,10 @@ func TestNewer(t *testing.T) {
 	}
 }
 
-// fakeBinary is a shell script that answers --version like hangar.
+// fakeBinary is a shell script that answers --version like coldship.
 func fakeBinary(t *testing.T, version string) []byte {
 	t.Helper()
-	return []byte("#!/bin/sh\necho \"hangar version " + version + "\"\n")
+	return []byte("#!/bin/sh\necho \"coldship version " + version + "\"\n")
 }
 
 func serveRelease(t *testing.T, priv ed25519.PrivateKey, version string, bin []byte, shaOverride string) *httptest.Server {
@@ -88,13 +88,13 @@ func serveRelease(t *testing.T, priv ed25519.PrivateKey, version string, bin []b
 		sha = shaOverride
 	}
 	signed, err := Sign(Manifest{Version: version, Notes: "faster deploys",
-		Assets: map[string]Asset{Platform(): {URL: "bin/hangar", SHA256: sha, Size: int64(len(bin))}}}, priv)
+		Assets: map[string]Asset{Platform(): {URL: "bin/coldship", SHA256: sha, Size: int64(len(bin))}}}, priv)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest.json", func(w http.ResponseWriter, _ *http.Request) { w.Write(signed) })
-	mux.HandleFunc("/releases/bin/hangar", func(w http.ResponseWriter, _ *http.Request) { w.Write(bin) })
+	mux.HandleFunc("/releases/bin/coldship", func(w http.ResponseWriter, _ *http.Request) { w.Write(bin) })
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
@@ -110,11 +110,11 @@ func TestFetchDownloadInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Assets[Platform()].URL != srv.URL+"/releases/bin/hangar" {
+	if m.Assets[Platform()].URL != srv.URL+"/releases/bin/coldship" {
 		t.Fatalf("relative asset URLs should resolve against the manifest: %s", m.Assets[Platform()].URL)
 	}
 	dir := t.TempDir()
-	target := filepath.Join(dir, "hangar")
+	target := filepath.Join(dir, "coldship")
 	os.WriteFile(target, fakeBinary(t, "0.1.0"), 0o755)
 
 	newBin, err := Download(ctx, m, dir)
@@ -149,7 +149,7 @@ func TestDownloadRejectsWrongHash(t *testing.T) {
 
 func TestInstallRejectsBinaryThatDoesNotRun(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "hangar")
+	target := filepath.Join(dir, "coldship")
 	os.WriteFile(target, fakeBinary(t, "0.1.0"), 0o755)
 	bad := filepath.Join(dir, "new")
 	os.WriteFile(bad, fakeBinary(t, "0.1.9"), 0o755) // reports the wrong version
@@ -184,7 +184,7 @@ func TestCheckerUpgradeWaitsForIdle(t *testing.T) {
 	pub, priv := keys(t)
 	srv := serveRelease(t, priv, "0.2.0", fakeBinary(t, "0.2.0"), "")
 	dir := t.TempDir()
-	target := filepath.Join(dir, "hangar")
+	target := filepath.Join(dir, "coldship")
 	os.WriteFile(target, fakeBinary(t, "0.1.0"), 0o755)
 
 	var busy atomic.Bool

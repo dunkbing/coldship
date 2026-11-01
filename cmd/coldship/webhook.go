@@ -62,7 +62,7 @@ func webhookCmd() *cobra.Command {
 			}
 			return emit(info, func() {
 				if !info.Enabled {
-					fmt.Printf("The webhook for %s is not enabled (hangar webhook enable %s).\n", info.App, info.App)
+					fmt.Printf("The webhook for %s is not enabled (coldship webhook enable %s).\n", info.App, info.App)
 					return
 				}
 				fmt.Printf("Webhook for %s: %s\n", info.App, info.URL)

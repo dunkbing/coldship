@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/apierr"
-	"hangar/internal/engine"
-	"hangar/internal/planner"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/planner"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 func planRequestFromFlags(file, del string, redeploy bool) (engine.PlanRequest, error) {
@@ -24,7 +24,7 @@ func planRequestFromFlags(file, del string, redeploy bool) (engine.PlanRequest, 
 		return engine.PlanRequest{Delete: del}, nil
 	default:
 		if file == "" {
-			file = "hangar.yaml"
+			file = "coldship.yaml"
 		}
 		a, err := spec.Load(file)
 		if err != nil {
@@ -53,7 +53,7 @@ func planCmd() *cobra.Command {
 			return emit(p, func() { printPlan(p) })
 		},
 	}
-	cmd.Flags().StringVarP(&file, "file", "f", "", "spec file (default hangar.yaml)")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "spec file (default coldship.yaml)")
 	cmd.Flags().StringVar(&del, "delete", "", "plan deleting this app instead")
 	cmd.Flags().BoolVar(&redeploy, "redeploy", false, "recreate the container even if nothing changed")
 	return cmd
@@ -100,7 +100,7 @@ func deployCmd() *cobra.Command {
 					printPlan(p)
 				}
 				return apierr.New(403, "approval_required", "plan %s needs human approval before it can be applied", p.ID).
-					WithHint("review it, run `hangar approve " + p.ID + "`, then `hangar apply " + p.ID + " --reason ...`")
+					WithHint("review it, run `coldship approve " + p.ID + "`, then `coldship apply " + p.ID + " --reason ...`")
 			}
 			if p.Action == "noop" {
 				return emit(p, func() { fmt.Println("Nothing to do: app already matches the spec.") })
@@ -116,7 +116,7 @@ func deployCmd() *cobra.Command {
 			return emit(res, func() { printApply(res) })
 		},
 	}
-	cmd.Flags().StringVarP(&file, "file", "f", "", "spec file (default hangar.yaml)")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "spec file (default coldship.yaml)")
 	cmd.Flags().StringVar(&reason, "reason", "", "why (recorded in the audit log)")
 	cmd.Flags().BoolVar(&redeploy, "redeploy", false, "recreate the container even if nothing changed")
 	cmd.MarkFlagRequired("reason")

@@ -1,16 +1,16 @@
 ---
 title: CLI
-description: Every hangar command, its flags and its exit codes.
+description: Every coldship command, its flags and its exit codes.
 ---
 
-The `hangar` binary is the server, the CLI and the MCP server.
+The `coldship` binary is the server, the CLI and the MCP server.
 
 ## Global flags
 
 | Flag | Env | Default | Description |
 |---|---|---|---|
-| `--url` | `HANGAR_URL` | `http://127.0.0.1:7070` | Server URL |
-| `--token` | `HANGAR_TOKEN` | | API token |
+| `--url` | `COLDSHIP_URL` | `http://127.0.0.1:7070` | Server URL |
+| `--token` | `COLDSHIP_TOKEN` | | API token |
 | `--json` | | off | Machine-readable output on stdout; errors as JSON on stderr |
 
 ## Exit codes
@@ -24,116 +24,116 @@ The `hangar` binary is the server, the CLI and the MCP server.
 
 ## Server
 
-### `hangar server`
+### `coldship server`
 
 Runs the API server, the Docker runtime and the dashboard.
 
 | Flag | Env | Default | |
 |---|---|---|---|
-| `--addr` | `HANGAR_ADDR` | `127.0.0.1:7070` | Listen address |
-| `--data` | `HANGAR_DATA` | `hangar.db` | SQLite state file |
+| `--addr` | `COLDSHIP_ADDR` | `127.0.0.1:7070` | Listen address |
+| `--data` | `COLDSHIP_DATA` | `coldship.db` | SQLite state file |
 | `--startup-grace` | | `3s` | How long a new container must stay up for the deploy to count as successful |
 | `--build-timeout` | | `20m` | Maximum time for one Git build |
-| `--git-credentials` | `HANGAR_GIT_CREDENTIALS` | | git-credential-store file for private HTTPS repositories |
-| `--build-dir` | `HANGAR_BUILD_DIR` | system temp dir | Where temporary build checkouts go |
+| `--git-credentials` | `COLDSHIP_GIT_CREDENTIALS` | | git-credential-store file for private HTTPS repositories |
+| `--build-dir` | `COLDSHIP_BUILD_DIR` | system temp dir | Where temporary build checkouts go |
 | `--proxy` | | `true` | Run the Caddy proxy for app domains |
-| `--preview-domain` | `HANGAR_PREVIEW_DOMAIN` | | Previews get `https://<name>.<domain>` (needs wildcard DNS) |
+| `--preview-domain` | `COLDSHIP_PREVIEW_DOMAIN` | | Previews get `https://<name>.<domain>` (needs wildcard DNS) |
 | `--preview-ttl` / `--preview-max-ttl` | | `24h` / `168h` | Default and maximum preview lifetime |
 | `--max-previews` | | `20` | Most previews at once |
-| `--secret-key-file` | `HANGAR_SECRET_KEY_FILE` | `hangar.key` next to `--data` | Key that encrypts stored secrets. `HANGAR_SECRET_KEY` (base64 32 bytes) supplies the key directly instead. |
-| `--public-url` | `HANGAR_PUBLIC_URL` | | How Git hosts reach this server, for webhook URLs |
-| `--snapshot-dir` | `HANGAR_SNAPSHOT_DIR` | `hangar-snapshots` next to `--data` | Where database snapshots are stored |
+| `--secret-key-file` | `COLDSHIP_SECRET_KEY_FILE` | `coldship.key` next to `--data` | Key that encrypts stored secrets. `COLDSHIP_SECRET_KEY` (base64 32 bytes) supplies the key directly instead. |
+| `--public-url` | `COLDSHIP_PUBLIC_URL` | | How Git hosts reach this server, for webhook URLs |
+| `--snapshot-dir` | `COLDSHIP_SNAPSHOT_DIR` | `coldship-snapshots` next to `--data` | Where database snapshots are stored |
 | `--snapshot-keep` | | `20` | Snapshots kept per database |
 | `--db-snapshot-interval` | | `24h` | Scheduled snapshots of every database (`0` disables) |
 | `--proxy-http-port` / `--proxy-https-port` | | `80` / `443` | Host ports for the proxy |
-| `--acme-email` | `HANGAR_ACME_EMAIL` | | Email for Let's Encrypt notices |
-| `--update-url` | `HANGAR_UPDATE_URL` | built in | Signed release manifest to check |
-| `--update-public-key` | `HANGAR_UPDATE_PUBLIC_KEY` | built in | Key release manifests must be signed with |
+| `--acme-email` | `COLDSHIP_ACME_EMAIL` | | Email for Let's Encrypt notices |
+| `--update-url` | `COLDSHIP_UPDATE_URL` | built in | Signed release manifest to check |
+| `--update-public-key` | `COLDSHIP_UPDATE_PUBLIC_KEY` | built in | Key release manifests must be signed with |
 | `--auto-upgrade` | | `true` | Install new minor/patch versions automatically when no deployment is running |
 | `--update-interval` | | `6h` | How often to check for updates |
 
 On first start, with no tokens in the database, it creates an `admin` token and prints it once.
 
-### `hangar mcp`
+### `coldship mcp`
 
-Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tools](/reference/mcp-tools/).
+Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP tools](/reference/mcp-tools/).
 
 ## Changing apps
 
 | Command | Description |
 |---|---|
-| `hangar plan [-f hangar.yaml] [--redeploy]` | Dry run of a spec. Defaults to `./hangar.yaml`. |
-| `hangar plan --delete <app>` | Dry run of deleting an app |
-| `hangar apply <plan-id> --reason "..."` | Apply a reviewed plan |
-| `hangar deploy [-f hangar.yaml] --reason "..." [--redeploy]` | Plan and apply in one step. Stops with exit 3 if approval is needed. |
-| `hangar approve <plan-id>` | Approve a plan (admin token) |
-| `hangar rollback <app> --reason "..." [--to <deployment-id>]` | Redeploy the last good or a specific deployment |
+| `coldship plan [-f coldship.yaml] [--redeploy]` | Dry run of a spec. Defaults to `./coldship.yaml`. |
+| `coldship plan --delete <app>` | Dry run of deleting an app |
+| `coldship apply <plan-id> --reason "..."` | Apply a reviewed plan |
+| `coldship deploy [-f coldship.yaml] --reason "..." [--redeploy]` | Plan and apply in one step. Stops with exit 3 if approval is needed. |
+| `coldship approve <plan-id>` | Approve a plan (admin token) |
+| `coldship rollback <app> --reason "..." [--to <deployment-id>]` | Redeploy the last good or a specific deployment |
 
 ## Inspecting
 
 | Command | Description |
 |---|---|
-| `hangar apps` | List apps |
-| `hangar status <app>` | Spec, container state and latest deployment |
-| `hangar deployments <app> [--limit 20]` | Deployment history, newest first |
-| `hangar logs <app> [--tail 100] [--since 10m]` | Container logs |
-| `hangar diagnose <app>` | Findings and suggested fixes |
-| `hangar deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
-| `hangar version` | CLI and server versions, and whether an update is available |
+| `coldship apps` | List apps |
+| `coldship status <app>` | Spec, container state and latest deployment |
+| `coldship deployments <app> [--limit 20]` | Deployment history, newest first |
+| `coldship logs <app> [--tail 100] [--since 10m]` | Container logs |
+| `coldship diagnose <app>` | Findings and suggested fixes |
+| `coldship deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
+| `coldship version` | CLI and server versions, and whether an update is available |
 
 ## Secrets
 
 | Command | Description |
 |---|---|
-| `hangar secrets status` | Key id, key source, and how many stored values are encrypted (admin) |
-| `hangar secrets rotate-key` | Re-encrypt all stored secrets with a new key, then drop the old one (admin) |
-| `hangar secrets decrypt --data hangar.db --yes` | Offline, server stopped: write secrets back as plaintext, for downgrading to a version without encryption |
+| `coldship secrets status` | Key id, key source, and how many stored values are encrypted (admin) |
+| `coldship secrets rotate-key` | Re-encrypt all stored secrets with a new key, then drop the old one (admin) |
+| `coldship secrets decrypt --data coldship.db --yes` | Offline, server stopped: write secrets back as plaintext, for downgrading to a version without encryption |
 
 ## Builds
 
 | Command | Description |
 |---|---|
-| `hangar build detect [-f hangar.yaml \| --app A] [--dockerfile]` | Show how the app would be built (its Dockerfile, or what Hangar detects and generates) without building |
+| `coldship build detect [-f coldship.yaml \| --app A] [--dockerfile]` | Show how the app would be built (its Dockerfile, or what Coldship detects and generates) without building |
 
 ## Webhooks
 
 | Command | Description |
 |---|---|
-| `hangar webhook enable <app> [--rotate]` | Enable the app's Git webhook and print its URL and secret, shown once (admin) |
-| `hangar webhook status <app>` | Webhook settings and recent deliveries |
-| `hangar webhook disable <app>` | Turn the webhook off (admin) |
+| `coldship webhook enable <app> [--rotate]` | Enable the app's Git webhook and print its URL and secret, shown once (admin) |
+| `coldship webhook status <app>` | Webhook settings and recent deliveries |
+| `coldship webhook disable <app>` | Turn the webhook off (admin) |
 
 ## Databases
 
 | Command | Description |
 |---|---|
-| `hangar db list <app>` | Databases with status, injected env var and latest snapshot |
-| `hangar db snapshot <app> <database> [--reason "..."]` | Snapshot now |
-| `hangar db snapshots <app> [--database D]` | Snapshots, newest first |
-| `hangar db restore <app> <database> <snapshot> --reason "..."` | Plan and apply a restore. Stops with exit 3 if approval is needed. |
+| `coldship db list <app>` | Databases with status, injected env var and latest snapshot |
+| `coldship db snapshot <app> <database> [--reason "..."]` | Snapshot now |
+| `coldship db snapshots <app> [--database D]` | Snapshots, newest first |
+| `coldship db restore <app> <database> <snapshot> --reason "..."` | Plan and apply a restore. Stops with exit 3 if approval is needed. |
 
 ## Previews
 
 | Command | Description |
 |---|---|
-| `hangar preview create <app> [--ref R \| --image I] [--name N] [--ttl 2h] [--env K=V] [--inherit-env \| --no-inherit-env] [--reason "..."]` | Create or update a preview. Safe to repeat. |
-| `hangar preview list` | Previews, soonest-expiring first |
-| `hangar preview delete <preview> [--reason "..."]` | Delete a preview and its volumes |
+| `coldship preview create <app> [--ref R \| --image I] [--name N] [--ttl 2h] [--env K=V] [--inherit-env \| --no-inherit-env] [--reason "..."]` | Create or update a preview. Safe to repeat. |
+| `coldship preview list` | Previews, soonest-expiring first |
+| `coldship preview delete <preview> [--reason "..."]` | Delete a preview and its volumes |
 
 ## Upgrades
 
 | Command | Description |
 |---|---|
-| `hangar upgrade` | Upgrade the server to the latest signed release (admin). Waits for the restart. `--check` checks now; `--no-wait` returns at once. |
-| `hangar self-update` | Update this hangar binary (for CLIs on other machines). Verifies the release with the built-in key. |
-| `hangar release keygen` | Create the Ed25519 key pair that signs releases (maintainers) |
-| `hangar release manifest --version X os/arch=path ...` | Write a signed release manifest (maintainers; `make release` runs it) |
+| `coldship upgrade` | Upgrade the server to the latest signed release (admin). Waits for the restart. `--check` checks now; `--no-wait` returns at once. |
+| `coldship self-update` | Update this coldship binary (for CLIs on other machines). Verifies the release with the built-in key. |
+| `coldship release keygen` | Create the Ed25519 key pair that signs releases (maintainers) |
+| `coldship release manifest --version X os/arch=path ...` | Write a signed release manifest (maintainers; `make release` runs it) |
 
-After other commands, the CLI prints a one-line note on stderr when a new version is available or the CLI is older than the server. It checks at most once an hour, and never prints with `--json`, when stderr isn't a terminal, or with `HANGAR_NO_UPDATE_NOTICE=1`.
-| `hangar audit [--limit 50]` | Audit log |
+After other commands, the CLI prints a one-line note on stderr when a new version is available or the CLI is older than the server. It checks at most once an hour, and never prints with `--json`, when stderr isn't a terminal, or with `COLDSHIP_NO_UPDATE_NOTICE=1`.
+| `coldship audit [--limit 50]` | Audit log |
 
 ## Tokens
 
 | Command | Description |
 |---|---|
-| `hangar token create --name <name> [--scope deploy]` | Create a token (admin). Scopes: `read`, `deploy`, `admin`. The token is shown once. |
+| `coldship token create --name <name> [--scope deploy]` | Create a token (admin). Scopes: `read`, `deploy`, `admin`. The token is shown once. |

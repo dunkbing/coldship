@@ -1,18 +1,18 @@
 ---
 title: Plan and apply
-description: How every change in Hangar goes from a dry-run plan to a deployment.
+description: How every change in Coldship goes from a dry-run plan to a deployment.
 ---
 
-Every change in Hangar, including creates, updates, deletes and rollbacks, goes through two steps. This is the main thing that makes it safe to hand to an agent.
+Every change in Coldship, including creates, updates, deletes and rollbacks, goes through two steps. This is the main thing that makes it safe to hand to an agent.
 
 ## Plan
 
 A plan compares the app's **current spec** (from the last successful deployment) with the **desired spec** you send, and records the difference.
 
 ```sh
-hangar plan -f hangar.yaml          # create or update
-hangar plan --delete web            # delete an app
-hangar plan -f hangar.yaml --redeploy   # recreate the container even if nothing changed
+coldship plan -f coldship.yaml          # create or update
+coldship plan --delete web            # delete an app
+coldship plan -f coldship.yaml --redeploy   # recreate the container even if nothing changed
 ```
 
 A plan contains:
@@ -46,7 +46,7 @@ For apps [built from Git](/guides/build-from-git/), planning also resolves `buil
 ## Apply
 
 ```sh
-hangar apply plan_0a2136c9ac8b --reason "upgrade nginx for CVE-2026-1234"
+coldship apply plan_0a2136c9ac8b --reason "upgrade nginx for CVE-2026-1234"
 ```
 
 Apply checks, in order:
@@ -56,7 +56,7 @@ Apply checks, in order:
 3. **Approval, if required.** Otherwise `approval_required`.
 4. **The plan isn't stale.** If the app was deployed or deleted after the plan was made, you get `plan_stale`. Make a new plan and review it again.
 
-Then Hangar gets the image before touching the running container: it pulls it, or for Git apps builds it (or reuses an image already built from that commit). Then it replaces the container and waits for a startup grace period (3 seconds by default). A deploy only succeeds if the container is still running, with no restarts, at the end of that period.
+Then Coldship gets the image before touching the running container: it pulls it, or for Git apps builds it (or reuses an image already built from that commit). Then it replaces the container and waits for a startup grace period (3 seconds by default). A deploy only succeeds if the container is still running, with no restarts, at the end of that period.
 
 ### Apply is idempotent
 

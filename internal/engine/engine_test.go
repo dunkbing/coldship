@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/builder"
-	"hangar/internal/proxy"
-	"hangar/internal/runtime"
-	"hangar/internal/secrets"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/proxy"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/secrets"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 // testKeys encrypts every test database; tests that reopen a database reuse it.
@@ -302,7 +302,7 @@ func TestGitBuildFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Deployment.Commit != shaA || !strings.HasPrefix(res.Deployment.Image, "hangar-build/api:aaaaaaaaaaaa-") {
+	if res.Deployment.Commit != shaA || !strings.HasPrefix(res.Deployment.Image, "coldship-build/api:aaaaaaaaaaaa-") {
 		t.Fatalf("deployment should record commit and built image: %+v", res.Deployment)
 	}
 	if rt.Containers["api"].Image != res.Deployment.Image || rt.Containers["api"].Build != nil {

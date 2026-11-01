@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/engine"
+	"github.com/dunkbing/coldship/internal/engine"
 )
 
 func previewCmd() *cobra.Command {

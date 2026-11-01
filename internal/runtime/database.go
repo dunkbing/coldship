@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 // DB identifies a managed database and carries its generated password.
@@ -31,11 +31,11 @@ type DBStatus struct {
 	Image   string `json:"image,omitempty"`
 }
 
-// DBHost is the database's hostname on the Hangar network.
+// DBHost is the database's hostname on the Coldship network.
 func DBHost(app, name string) string { return app + "-db-" + name }
 
-func dbContainer(app, name string) string { return "hangar-" + DBHost(app, name) }
-func dbVolume(app, name string) string    { return "hangar-" + DBHost(app, name) + "-data" }
+func dbContainer(app, name string) string { return "coldship-" + DBHost(app, name) }
+func dbVolume(app, name string) string    { return "coldship-" + DBHost(app, name) + "-data" }
 
 func dbImage(engine, version string) string { return engine + ":" + version + "-alpine" }
 
@@ -75,27 +75,27 @@ func (d *Docker) EnsureDatabase(ctx context.Context, db DB, log io.Writer) error
 	switch {
 	case st.Exists && st.Image != image:
 		return apierr.New(409, "database_version_change", "database %s runs %s, not %s", db.Name, st.Image, image).
-			WithField("databases").WithHint("changing a database's engine or major version needs a migration, which Hangar doesn't do yet; keep the current version")
+			WithField("databases").WithHint("changing a database's engine or major version needs a migration, which Coldship doesn't do yet; keep the current version")
 	case st.Exists && !st.Running:
-		fmt.Fprintf(log, "hangar: starting database %s\n", db.Name)
+		fmt.Fprintf(log, "coldship: starting database %s\n", db.Name)
 		if _, se, err := d.run(ctx, "start", name); err != nil {
 			return apierr.New(502, "database_start_failed", "could not start database %s: %s", db.Name, se)
 		}
 	case !st.Exists:
 		if _, _, err := d.run(ctx, "image", "inspect", image); err != nil {
-			fmt.Fprintf(log, "hangar: pulling %s\n", image)
+			fmt.Fprintf(log, "coldship: pulling %s\n", image)
 			if _, se, err := d.run(ctx, "pull", image); err != nil {
 				return apierr.New(502, "database_start_failed", "could not pull %s: %s", image, se)
 			}
 		}
-		fmt.Fprintf(log, "hangar: creating database %s (%s)\n", db.Name, image)
-		envFile, err := os.CreateTemp("", "hangar-db-env-*")
+		fmt.Fprintf(log, "coldship: creating database %s (%s)\n", db.Name, image)
+		envFile, err := os.CreateTemp("", "coldship-db-env-*")
 		if err != nil {
 			return err
 		}
 		defer os.Remove(envFile.Name())
 		args := []string{"run", "-d", "--name", name, "--restart", "unless-stopped",
-			"--label", "hangar.app=" + db.App, "--label", "hangar.db=" + db.Name,
+			"--label", "coldship.app=" + db.App, "--label", "coldship.db=" + db.Name,
 			"--network", Network, "--network-alias", DBHost(db.App, db.Name), "--env-file", envFile.Name()}
 		switch db.Engine {
 		case spec.EngineRedis:
@@ -122,7 +122,7 @@ func (d *Docker) waitDBReady(ctx context.Context, db DB, log io.Writer) error {
 		}
 		if time.Now().After(deadline) {
 			out, _ := exec.CommandContext(context.WithoutCancel(ctx), d.Bin, "logs", "--tail", "30", dbContainer(db.App, db.Name)).CombinedOutput()
-			fmt.Fprintf(log, "hangar: database %s did not become ready; its last output:\n%s", db.Name, out)
+			fmt.Fprintf(log, "coldship: database %s did not become ready; its last output:\n%s", db.Name, out)
 			return apierr.New(502, "database_not_ready", "database %s did not accept connections within 90s", db.Name).
 				WithHint("read the deploy log for the database's output")
 		}
@@ -204,7 +204,7 @@ func (d *Docker) RestoreDatabase(ctx context.Context, db DB, r io.Reader, log io
 	case spec.EngineRedis:
 		// Redis loads dump.rdb only at startup: stop it, replace the file
 		// in the volume, start it again.
-		fmt.Fprintf(log, "hangar: stopping redis %s to restore\n", db.Name)
+		fmt.Fprintf(log, "coldship: stopping redis %s to restore\n", db.Name)
 		if _, se, err := d.run(ctx, "stop", c); err != nil {
 			return apierr.New(502, "restore_failed", "could not stop %s: %s", db.Name, se)
 		}

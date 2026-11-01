@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 func tmpProject(t *testing.T, files map[string]string) string {

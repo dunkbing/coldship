@@ -10,16 +10,16 @@ import (
 	"strings"
 	"testing"
 
-	"hangar/internal/api"
-	"hangar/internal/apierr"
-	"hangar/internal/builder"
-	"hangar/internal/client"
-	"hangar/internal/engine"
-	"hangar/internal/runtime"
-	"hangar/internal/secrets"
-	"hangar/internal/spec"
-	"hangar/internal/store"
-	"hangar/internal/webhook"
+	"github.com/dunkbing/coldship/internal/api"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/client"
+	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/secrets"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
+	"github.com/dunkbing/coldship/internal/webhook"
 )
 
 // testKeys encrypts every test database; tests that reopen a database reuse it.
@@ -131,7 +131,7 @@ func TestDashboardSessions(t *testing.T) {
 		return resp
 	}
 
-	if r := do("POST", "/v1/sessions", `{"token":"hgr_wrong"}`, nil, false); r.StatusCode != 401 {
+	if r := do("POST", "/v1/sessions", `{"token":"cst_wrong"}`, nil, false); r.StatusCode != 401 {
 		t.Fatalf("bad token: want 401, got %d", r.StatusCode)
 	}
 	r := do("POST", "/v1/sessions", `{"token":"`+admin+`"}`, nil, false)

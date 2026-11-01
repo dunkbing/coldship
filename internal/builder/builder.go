@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 type Builder interface {
@@ -42,7 +42,7 @@ type Builder interface {
 // Result describes a built image.
 type Result struct {
 	Image string
-	// Auto is true when Hangar generated the Dockerfile. Such images read
+	// Auto is true when Coldship generated the Dockerfile. Such images read
 	// their port from $PORT, which the engine sets to the spec's port.
 	Auto    bool
 	Summary string
@@ -72,7 +72,7 @@ func ImageTag(app string, b spec.Build) string {
 	if len(commit) > 12 {
 		commit = commit[:12]
 	}
-	return "hangar-build/" + app + ":" + commit + "-" + hex.EncodeToString(h.Sum(nil))[:8]
+	return "coldship-build/" + app + ":" + commit + "-" + hex.EncodeToString(h.Sum(nil))[:8]
 }
 
 // Git builds with the git and docker CLIs.
@@ -199,9 +199,9 @@ func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer
 	}
 	tag := ImageTag(app, b)
 	if out, err := g.run(ctx, "", nil, g.DockerBin, "image", "inspect", "-f",
-		`{{index .Config.Labels "hangar.builder"}}|{{index .Config.Labels "hangar.detected"}}`, tag); err == nil {
+		`{{index .Config.Labels "coldship.builder"}}|{{index .Config.Labels "coldship.detected"}}`, tag); err == nil {
 		mode, summary, _ := strings.Cut(strings.TrimSpace(out), "|")
-		fmt.Fprintf(log, "hangar: image %s for commit %s already exists, reusing it\n", tag, b.Commit)
+		fmt.Fprintf(log, "coldship: image %s for commit %s already exists, reusing it\n", tag, b.Commit)
 		return &Result{Image: tag, Auto: mode == "auto", Summary: summary}, nil
 	}
 
@@ -220,14 +220,14 @@ func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer
 	}
 
 	args := []string{"build", "--progress=plain", "-t", tag, "-f", dockerfile,
-		"--label", "hangar.app=" + app, "--label", "hangar.commit=" + b.Commit, "--label", "hangar.git=" + b.Git}
+		"--label", "coldship.app=" + app, "--label", "coldship.commit=" + b.Commit, "--label", "coldship.git=" + b.Git}
 	if det.Mode == "auto" {
-		args = append(args, "--label", "hangar.builder=auto", "--label", "hangar.detected="+det.Summary())
-		fmt.Fprintf(log, "hangar: no Dockerfile used; detected %s\n", det.Summary())
+		args = append(args, "--label", "coldship.builder=auto", "--label", "coldship.detected="+det.Summary())
+		fmt.Fprintf(log, "coldship: no Dockerfile used; detected %s\n", det.Summary())
 		for _, n := range det.Notes {
-			fmt.Fprintf(log, "hangar:   - %s\n", n)
+			fmt.Fprintf(log, "coldship:   - %s\n", n)
 		}
-		fmt.Fprintf(log, "hangar: generated Dockerfile:\n%s", indent(det.Dockerfile))
+		fmt.Fprintf(log, "coldship: generated Dockerfile:\n%s", indent(det.Dockerfile))
 	}
 	keys := make([]string, 0, len(b.Args))
 	for k := range b.Args {
@@ -239,9 +239,9 @@ func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer
 	}
 	args = append(args, co.ctxDir)
 	if det.Mode == "auto" {
-		fmt.Fprintf(log, "hangar: docker build (generated Dockerfile) %s\n", b.Context)
+		fmt.Fprintf(log, "coldship: docker build (generated Dockerfile) %s\n", b.Context)
 	} else {
-		fmt.Fprintf(log, "hangar: docker build -f %s %s\n", b.Dockerfile, b.Context)
+		fmt.Fprintf(log, "coldship: docker build -f %s %s\n", b.Dockerfile, b.Context)
 	}
 	if _, err := g.run(ctx, "", log, g.DockerBin, args...); err != nil {
 		if err := g.timeout(ctx, nil); err != nil {
@@ -250,13 +250,13 @@ func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer
 		e := apierr.New(422, "build_failed", "docker build failed for commit %s", b.Commit[:12]).
 			WithHint("read the build log for the failing step, fix the repository, then plan again")
 		if det.Mode == "auto" {
-			e.Message += " (with a Dockerfile Hangar generated: " + det.Summary() + ")"
+			e.Message += " (with a Dockerfile Coldship generated: " + det.Summary() + ")"
 			e.Hint = "read the build log; if the generated Dockerfile guessed wrong, set build.auto (language, version, install, build, start) or commit your own Dockerfile"
 			e.WithDetail("detected", det.Summary())
 		}
 		return nil, e
 	}
-	fmt.Fprintf(log, "hangar: built %s\n", tag)
+	fmt.Fprintf(log, "coldship: built %s\n", tag)
 	return &Result{Image: tag, Auto: det.Mode == "auto", Summary: det.Summary()}, nil
 }
 
@@ -293,14 +293,14 @@ type checkout struct {
 
 // checkout fetches exactly b.Commit into a temporary directory.
 func (g *Git) checkout(ctx context.Context, b spec.Build, log io.Writer) (*checkout, error) {
-	work, err := os.MkdirTemp(g.WorkDir, "hangar-build-")
+	work, err := os.MkdirTemp(g.WorkDir, "coldship-build-")
 	if err != nil {
 		return nil, err
 	}
 	co := &checkout{work: work, repo: filepath.Join(work, "src")}
 	repo := co.repo
 
-	fmt.Fprintf(log, "hangar: fetching %s at %s\n", b.Git, b.Commit)
+	fmt.Fprintf(log, "coldship: fetching %s at %s\n", b.Git, b.Commit)
 	if out, err := g.run(ctx, "", log, g.GitBin, "init", "-q", repo); err != nil {
 		return co, apierr.New(500, "git_clone_failed", "git init failed: %s", lastLine(out))
 	}
@@ -311,7 +311,7 @@ func (g *Git) checkout(ctx context.Context, b spec.Build, log io.Writer) (*check
 	// fetching by SHA (and dumb HTTP cannot do shallow fetches), so fall back
 	// to a full fetch.
 	if _, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("fetch", "-q", "--depth", "1", "origin", b.Commit)...); err != nil {
-		fmt.Fprintln(log, "hangar: shallow fetch by commit not supported, fetching all branches")
+		fmt.Fprintln(log, "coldship: shallow fetch by commit not supported, fetching all branches")
 		if out, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("fetch", "-q", "--tags", "origin", "+refs/heads/*:refs/remotes/origin/*")...); err != nil {
 			return co, unreachable(b.Git, out)
 		}
@@ -364,7 +364,7 @@ func chooseDockerfile(co *checkout, b spec.Build) (string, *Detection, error) {
 	if exists && b.Builder == spec.BuilderAuto {
 		det.note("ignored the repository's Dockerfile because builder is auto")
 	}
-	gen := filepath.Join(co.work, "Dockerfile.hangar")
+	gen := filepath.Join(co.work, "Dockerfile.coldship")
 	if err := os.WriteFile(gen, []byte(det.Dockerfile), 0o600); err != nil {
 		return "", nil, err
 	}
@@ -429,7 +429,7 @@ func missingDockerfile(repo string, b spec.Build) error {
 		e.WithFix(map[string]any{"build": fix})
 		e.Hint = "point build.context and build.dockerfile at one of the Dockerfiles found"
 	} else {
-		e.Hint = "add the Dockerfile, or remove builder: dockerfile / build.dockerfile so Hangar detects the project and generates one"
+		e.Hint = "add the Dockerfile, or remove builder: dockerfile / build.dockerfile so Coldship detects the project and generates one"
 	}
 	return e
 }
@@ -528,7 +528,7 @@ func (t *LogTail) Lines() []string {
 	defer t.mu.Unlock()
 	out := []string{}
 	if t.dropped > 0 {
-		out = append(out, fmt.Sprintf("hangar: %d earlier lines omitted", t.dropped))
+		out = append(out, fmt.Sprintf("coldship: %d earlier lines omitted", t.dropped))
 	}
 	out = append(out, t.lines...)
 	if len(t.partial) > 0 {

@@ -9,10 +9,10 @@ import (
 	"os"
 	"strings"
 
-	"hangar/internal/apierr"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/spec"
 
-	"hangar/internal/secrets"
+	"github.com/dunkbing/coldship/internal/secrets"
 	"path/filepath"
 	"testing"
 	"time"

@@ -25,7 +25,7 @@ export default function Apps() {
       <header className="page-head">
         <div>
           <h1>Apps</h1>
-          <p className="muted">Everything Hangar runs on this node. Agents change apps through plans; this view is live.</p>
+          <p className="muted">Everything Coldship runs on this node. Agents change apps through plans; this view is live.</p>
         </div>
       </header>
 
@@ -50,7 +50,7 @@ export default function Apps() {
       {loading && !data && <div className="muted">Loading…</div>}
       {data?.length === 0 && previews.length === 0 && (
         <Empty title="No apps yet">
-          Deploy one with <code>hangar deploy -f hangar.yaml --reason "first deploy"</code>, or ask your agent to.
+          Deploy one with <code>coldship deploy -f coldship.yaml --reason "first deploy"</code>, or ask your agent to.
         </Empty>
       )}
 

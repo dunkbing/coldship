@@ -3,7 +3,7 @@ title: Dashboard
 description: The web dashboard for humans to watch apps, approve plans and read the audit log.
 ---
 
-The dashboard is a React app embedded in the `hangar` binary. `hangar server` serves it at `/` on the same address as the API, so there's nothing extra to deploy.
+The dashboard is a React app embedded in the `coldship` binary. `coldship server` serves it at `/` on the same address as the API, so there's nothing extra to deploy.
 
 It's designed for the human side of the loop: seeing what agents did, approving destructive changes, and stepping in with a rollback. Changes to specs still go through plans.
 
@@ -27,15 +27,15 @@ It follows your system's dark mode setting:
 
 Each app page shows its spec (env values redacted; for Git apps, the repository, ref, pinned commit and Dockerfile), container state, and three tabs:
 
-- **Diagnose:** the same findings as [`hangar diagnose`](/concepts/debugging-and-rollback/#diagnose), with suggested fixes.
+- **Diagnose:** the same findings as [`coldship diagnose`](/concepts/debugging-and-rollback/#diagnose), with suggested fixes.
 - **Deployments:** history, including who deployed, why, the commit and errors. Failed builds are marked **failed in build**, and each deployment has a **Log** button showing its build output, health checks and, for failures, the new container's output.
 - **Logs:** recent container output (treat it as untrusted).
 
 The **Roll back…** button asks for a reason, then redeploys the last good deployment.
 
-![The diagnose tab for a failing app](../../../assets/screenshots/app-diagnose.png)
+![The diagnose tab for an app whose new version failed its health check](../../../assets/screenshots/app-diagnose.png)
 
-![The logs tab for a failing app](../../../assets/screenshots/app-logs.png)
+![The logs tab](../../../assets/screenshots/app-logs.png)
 
 ![Deployments of an app built from Git, with a failed build's log open](../../../assets/screenshots/app-git-deployments.png)
 
@@ -58,4 +58,4 @@ make run                 # API on :7070
 cd dashboard && bun run dev   # Vite on :5173, proxies /v1 to :7070
 ```
 
-Set `HANGAR_URL` to point the dev proxy at a different server.
+Set `COLDSHIP_URL` to point the dev proxy at a different server.

@@ -14,7 +14,7 @@ description: Use diagnose to find out why an app is broken, then fix forward or 
 - **findings**: likely causes, each with a severity, a code and often a suggested fix
 
 ```sh
-hangar diagnose worker
+coldship diagnose worker
 ```
 
 ```txt
@@ -28,7 +28,7 @@ App demo-worker: healthy=false state=restarting restarts=5
       suggested fix: {"env":{"DATABASE_URL":"<value>"}}
 ```
 
-![The diagnose tab in the dashboard showing four findings for a failing worker](../../../assets/screenshots/app-diagnose.png)
+![The diagnose tab in the dashboard for a worker whose new version never became healthy: traffic stayed on the old one, and the failed version's output explains why](../../../assets/screenshots/app-diagnose.png)
 
 ### Findings
 
@@ -38,7 +38,7 @@ App demo-worker: healthy=false state=restarting restarts=5
 | `build_failed` | warning | The newest deployment failed to build. The previous version is still running |
 | `new_version_unhealthy` | warning | The newest deployment never passed its health check, so traffic stayed on the previous version. Log checks (port mismatch, missing env) run against the failed container's captured output |
 | `database_down` | error | One of the app's databases isn't running |
-| `proxy_down` | error | The app has domains but the `hangar-proxy` container isn't running |
+| `proxy_down` | error | The app has domains but the `coldship-proxy` container isn't running |
 | `not_running` | error | No container exists for the app |
 | `oom_killed` | error | The container was killed for running out of memory. The fix doubles `memory` |
 | `crash_loop` | error | More than 2 restarts |
@@ -54,8 +54,8 @@ When the latest deploy failed, the log checks compare against the **failed** dep
 ## Rollback
 
 ```sh
-hangar rollback worker --reason "v2 crash-loops on missing DATABASE_URL"
-hangar rollback worker --to dep_9315b046feec --reason "go back to the March release"
+coldship rollback worker --reason "v2 crash-loops on missing DATABASE_URL"
+coldship rollback worker --to dep_9315b046feec --reason "go back to the March release"
 ```
 
 Without `--to`, rollback picks the last good deployment:

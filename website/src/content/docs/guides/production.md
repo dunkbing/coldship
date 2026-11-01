@@ -1,9 +1,9 @@
 ---
 title: Running in production
-description: What to do before exposing a Hangar server beyond localhost.
+description: What to do before exposing a Coldship server beyond localhost.
 ---
 
-Hangar is an early project. Before relying on it, go through this list.
+Coldship is an early project. Before relying on it, go through this list.
 
 ## Network exposure
 
@@ -21,40 +21,40 @@ For [Git webhooks](/guides/webhooks/#exposing-the-endpoint), expose only the `/h
 
 ## State and backups
 
-All platform state (apps, plans, deployments, tokens, audit log) is in one SQLite file, set with `--data` (default `./hangar.db`). Back it up with SQLite's online backup, which is safe while the server runs:
+All platform state (apps, plans, deployments, tokens, audit log) is in one SQLite file, set with `--data` (default `./coldship.db`). Back it up with SQLite's online backup, which is safe while the server runs:
 
 ```sh
-sqlite3 hangar.db ".backup 'hangar-backup.db'"
+sqlite3 coldship.db ".backup 'coldship-backup.db'"
 ```
 
-App data lives in Docker volumes named `hangar-<app>-<volume>`. Back those up separately. [Managed databases](/guides/databases/) are snapshotted daily into `--snapshot-dir`; copy that directory off the server too, since a disk failure takes local snapshots with it.
+App data lives in Docker volumes named `coldship-<app>-<volume>`. Back those up separately. [Managed databases](/guides/databases/) are snapshotted daily into `--snapshot-dir`; copy that directory off the server too, since a disk failure takes local snapshots with it.
 
 ## Git builds
 
 - Private repositories: use `--git-credentials` (HTTPS) or an SSH key for the server user. See [Build from Git](/guides/build-from-git/#private-repositories).
-- Builds use disk space for checkouts (`--build-dir`, default the system temp directory) and images. Prune old `hangar-build/*` images now and then; ones you might roll back to are rebuilt automatically if missing.
+- Builds use disk space for checkouts (`--build-dir`, default the system temp directory) and images. Prune old `coldship-build/*` images now and then; ones you might roll back to are rebuilt automatically if missing.
 - Only build repositories you trust. A Dockerfile runs code on your build host.
 
 ## Secrets
 
-Stored secrets are [encrypted](/guides/secrets/) with a key that is created on first start as `hangar.key` next to the database. For production:
+Stored secrets are [encrypted](/guides/secrets/) with a key that is created on first start as `coldship.key` next to the database. For production:
 
-- Keep the key off the server's data disk with `--secret-key-file`, or provide it with `HANGAR_SECRET_KEY` from a secret manager.
-- Back up the key, and back it up separately from `hangar.db`. Without it, the stored secrets can't be recovered.
-- Delete backups of `hangar.db` taken before upgrading to encryption: they contain plaintext.
+- Keep the key off the server's data disk with `--secret-key-file`, or provide it with `COLDSHIP_SECRET_KEY` from a secret manager.
+- Back up the key, and back it up separately from `coldship.db`. Without it, the stored secrets can't be recovered.
+- Delete backups of `coldship.db` taken before upgrading to encryption: they contain plaintext.
 
 ## Running as a service
 
-```ini title="/etc/systemd/system/hangar.service"
+```ini title="/etc/systemd/system/coldship.service"
 [Unit]
-Description=Hangar
+Description=Coldship
 After=docker.service
 Requires=docker.service
 
 [Service]
-ExecStart=/usr/local/bin/hangar server --addr 127.0.0.1:7070 --data /var/lib/hangar/hangar.db
+ExecStart=/usr/local/bin/coldship server --addr 127.0.0.1:7070 --data /var/lib/coldship/coldship.db
 Restart=on-failure
-User=hangar
+User=coldship
 Group=docker
 
 [Install]

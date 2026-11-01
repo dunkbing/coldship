@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 // PreviewConfig controls preview environments.
@@ -314,7 +314,7 @@ func (e *Engine) ReapPreviews(ctx context.Context) (deleted []string, err error)
 		if p.ExpiresAt == nil || now.Before(*p.ExpiresAt) {
 			continue
 		}
-		if _, err := e.DeletePreview(ctx, "hangar", p.Name, "preview expired"); err != nil {
+		if _, err := e.DeletePreview(ctx, "coldship", p.Name, "preview expired"); err != nil {
 			return deleted, fmt.Errorf("deleting expired preview %s: %w", p.Name, err)
 		}
 		deleted = append(deleted, p.Name)

@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 
-	"hangar/internal/apierr"
-	"hangar/internal/builder"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 type DetectRequest struct {
@@ -21,7 +21,7 @@ type DetectResult struct {
 	Note      string             `json:"note"`
 }
 
-// DetectBuild checks out the spec's commit and reports how Hangar would
+// DetectBuild checks out the spec's commit and reports how Coldship would
 // build it, without building or deploying anything.
 func (e *Engine) DetectBuild(ctx context.Context, req DetectRequest) (*DetectResult, error) {
 	var s *spec.App

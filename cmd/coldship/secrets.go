@@ -12,32 +12,32 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/apierr"
-	"hangar/internal/secrets"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/secrets"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
-// defaultKeyFile is hangar.key next to the state database.
+// defaultKeyFile is coldship.key next to the state database.
 func defaultKeyFile(data string) string {
 	abs, err := filepath.Abs(data)
 	if err != nil {
 		abs = data
 	}
-	return filepath.Join(filepath.Dir(abs), "hangar.key")
+	return filepath.Join(filepath.Dir(abs), "coldship.key")
 }
 
 // openStore loads the secret key and opens the state database with it. It
 // never creates a new key for a database whose secrets are already
 // encrypted: that would make them unreadable.
 func openStore(data, keyFile string, log *slog.Logger) (*store.Store, *secrets.Keyring, error) {
-	if env := os.Getenv("HANGAR_SECRET_KEY"); env != "" {
+	if env := os.Getenv("COLDSHIP_SECRET_KEY"); env != "" {
 		kr, err := secrets.FromEnv(env)
 		if err != nil {
 			return nil, nil, err
 		}
 		st, err := store.Open(data, kr)
 		if errors.Is(err, store.ErrKeyMismatch) {
-			return nil, nil, fmt.Errorf("HANGAR_SECRET_KEY cannot read the secrets in %s: %w", data, err)
+			return nil, nil, fmt.Errorf("COLDSHIP_SECRET_KEY cannot read the secrets in %s: %w", data, err)
 		}
 		return st, kr, err
 	}
@@ -65,7 +65,7 @@ func openStore(data, keyFile string, log *slog.Logger) (*store.Store, *secrets.K
 			// Nothing was written with the new key, so it is safe to drop.
 			os.Remove(keyFile)
 			return nil, nil, fmt.Errorf("the secrets in %s are encrypted, but the key file %s is missing. Restore it from your backup, "+
-				"or set HANGAR_SECRET_KEY. Hangar did not create a new key, because it could not read the existing secrets (%v)", data, keyFile, err)
+				"or set COLDSHIP_SECRET_KEY. Coldship did not create a new key, because it could not read the existing secrets (%v)", data, keyFile, err)
 		}
 		// Keep the key: some values may already be encrypted with it.
 		return nil, nil, fmt.Errorf("%w (the new key file %s was kept; do not delete it)", err, keyFile)
@@ -90,8 +90,8 @@ func (r *keyRotator) rotate(ctx context.Context) (map[string]any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.fromEnv {
-		return nil, apierr.New(409, "key_from_environment", "the secret key comes from HANGAR_SECRET_KEY, which Hangar can't rewrite").
-			WithHint("to rotate it: stop the server, run `hangar secrets decrypt`, set a new HANGAR_SECRET_KEY, and start the server again")
+		return nil, apierr.New(409, "key_from_environment", "the secret key comes from COLDSHIP_SECRET_KEY, which Coldship can't rewrite").
+			WithHint("to rotate it: stop the server, run `coldship secrets decrypt`, set a new COLDSHIP_SECRET_KEY, and start the server again")
 	}
 	old := r.kr.CurrentID()
 	next := r.kr.WithNewKey()
@@ -172,9 +172,9 @@ func secretsCmd() *cobra.Command {
 	decrypt := &cobra.Command{
 		Use:   "decrypt",
 		Short: "Write all stored secrets back as plaintext (offline, for downgrades)",
-		Long: "Decrypt every stored secret in place, so an older Hangar version that predates encryption can\n" +
+		Long: "Decrypt every stored secret in place, so an older Coldship version that predates encryption can\n" +
 			"read the database. Stop the server first. Afterwards the database holds secrets in plaintext;\n" +
-			"a newer Hangar encrypts them again when it starts.",
+			"a newer Coldship encrypts them again when it starts.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !yes {
@@ -185,7 +185,7 @@ func secretsCmd() *cobra.Command {
 			}
 			var kr *secrets.Keyring
 			var err error
-			if env := os.Getenv("HANGAR_SECRET_KEY"); env != "" {
+			if env := os.Getenv("COLDSHIP_SECRET_KEY"); env != "" {
 				kr, err = secrets.FromEnv(env)
 			} else {
 				kr, err = secrets.Load(keyFile)
@@ -201,8 +201,8 @@ func secretsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	decrypt.Flags().StringVar(&data, "data", envOr("HANGAR_DATA", "hangar.db"), "state database")
-	decrypt.Flags().StringVar(&keyFile, "key-file", envOr("HANGAR_SECRET_KEY_FILE", ""), "secret key file (default: hangar.key next to --data)")
+	decrypt.Flags().StringVar(&data, "data", envOr("COLDSHIP_DATA", "coldship.db"), "state database")
+	decrypt.Flags().StringVar(&keyFile, "key-file", envOr("COLDSHIP_SECRET_KEY_FILE", ""), "secret key file (default: coldship.key next to --data)")
 	decrypt.Flags().BoolVar(&yes, "yes", false, "confirm")
 
 	cmd.AddCommand(status, rotate, decrypt)

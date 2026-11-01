@@ -1,6 +1,6 @@
 ---
 title: Contributing
-description: Build, test and develop Hangar, its dashboard and these docs.
+description: Build, test and develop Coldship, its dashboard and these docs.
 ---
 
 ## Prerequisites
@@ -13,7 +13,7 @@ description: Build, test and develop Hangar, its dashboard and these docs.
 
 | Target | What it does |
 |---|---|
-| `make build` | Builds the dashboard into `internal/web/dist`, then the Go binary into `bin/hangar` |
+| `make build` | Builds the dashboard into `internal/web/dist`, then the Go binary into `bin/coldship` |
 | `make go` | Builds only the Go binary (uses whatever dashboard build is present) |
 | `make test` | Go tests |
 | `make run` | Build and start the server |

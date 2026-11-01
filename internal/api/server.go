@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"hangar/internal/apierr"
-	"hangar/internal/engine"
-	"hangar/internal/store"
-	"hangar/internal/update"
-	"hangar/internal/webhook"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/store"
+	"github.com/dunkbing/coldship/internal/update"
+	"github.com/dunkbing/coldship/internal/webhook"
 )
 
 type principal struct {
@@ -124,12 +124,12 @@ func (s *Server) route(pattern string, need store.Scope, h handler) {
 
 // SessionCookie holds the dashboard's session id. It is HttpOnly, so page
 // scripts (and any XSS) cannot read it.
-const SessionCookie = "hangar_session"
+const SessionCookie = "coldship_session"
 
 // CSRFHeader must accompany cookie-authenticated requests that change state.
 // Browsers only send custom headers cross-origin after a CORS preflight, which
 // this server never allows, so a forged cross-site request cannot carry it.
-const CSRFHeader = "X-Hangar-Request"
+const CSRFHeader = "X-Coldship-Request"
 
 const sessionTTL = 12 * time.Hour
 
@@ -139,7 +139,7 @@ func (s *Server) auth(r *http.Request) (principal, error) {
 		c, err := r.Cookie(SessionCookie)
 		if err != nil || c.Value == "" {
 			return principal{}, apierr.New(401, "unauthenticated", "missing bearer token").
-				WithHint("set HANGAR_TOKEN or pass --token")
+				WithHint("set COLDSHIP_TOKEN or pass --token")
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get(CSRFHeader) == "" {
 			return principal{}, apierr.New(403, "csrf_check_failed", "cookie-authenticated requests that change state need the %s header", CSRFHeader)
@@ -535,7 +535,7 @@ func (s *Server) systemUpgrade(_ *http.Request, p principal) (any, error) {
 	}
 	if !st.UpdateAvailable {
 		return nil, apierr.New(409, "no_update_available", "already running the latest version (%s)", st.Version).
-			WithHint("check again with POST /v1/system/check (hangar upgrade --check)")
+			WithHint("check again with POST /v1/system/check (coldship upgrade --check)")
 	}
 	if st.State != "idle" {
 		return nil, apierr.New(409, "upgrade_in_progress", "an upgrade is already %s", st.State)
@@ -552,7 +552,7 @@ func (s *Server) systemUpgrade(_ *http.Request, p principal) (any, error) {
 }
 
 // systemManifest returns the latest signed release manifest, so remote CLIs
-// can verify and install it themselves (hangar self-update). Any token may
+// can verify and install it themselves (coldship self-update). Any token may
 // read it; it contains nothing secret.
 func (s *Server) systemManifest(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.auth(r); err != nil {

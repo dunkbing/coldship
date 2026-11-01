@@ -1,6 +1,6 @@
 ---
 title: Quick start
-description: Build Hangar, start the server, deploy your first app and open the dashboard.
+description: Build Coldship, start the server, deploy your first app and open the dashboard.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components'
@@ -18,32 +18,32 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 1. **Build the binary.** This builds the React dashboard and embeds it in the Go binary.
 
    ```sh
-   git clone <your-repo-url> hangar && cd hangar
+   git clone https://github.com/dunkbing/coldship.git && cd coldship
    make build
    ```
 
 2. **Start the server.** On first start it prints an admin token. It is shown only once, so save it.
 
    ```sh
-   ./bin/hangar server
+   ./bin/coldship server
    ```
 
    ```txt
    Created admin token (shown once, store it safely):
 
-     hgr_3f9c...
+     cst_3f9c...
    ```
 
-   The server listens on `127.0.0.1:7070` and keeps its state in `./hangar.db`. Change these with `--addr` and `--data`.
+   The server listens on `127.0.0.1:7070` and keeps its state in `./coldship.db`. Change these with `--addr` and `--data`.
 
 3. **Point the CLI at it.**
 
    ```sh
-   export HANGAR_URL=http://127.0.0.1:7070
-   export HANGAR_TOKEN=hgr_3f9c...
+   export COLDSHIP_URL=http://127.0.0.1:7070
+   export COLDSHIP_TOKEN=cst_3f9c...
    ```
 
-4. **Write a spec.** Save this as `hangar.yaml`:
+4. **Write a spec.** Save this as `coldship.yaml`:
 
    ```yaml
    name: hello
@@ -52,13 +52,13 @@ import { Steps, Aside } from '@astrojs/starlight/components'
    port: 80
    host_port: 8080
    env:
-     GREETING: hello from hangar
+     GREETING: hello from coldship
    ```
 
 5. **Plan it.** Planning is a dry run that changes nothing.
 
    ```sh
-   ./bin/hangar plan -f hangar.yaml
+   ./bin/coldship plan -f coldship.yaml
    ```
 
    ```txt
@@ -71,11 +71,11 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 6. **Apply it.** Every apply needs a reason, which goes in the audit log.
 
    ```sh
-   ./bin/hangar apply plan_692da65cccbb --reason "first deploy"
+   ./bin/coldship apply plan_692da65cccbb --reason "first deploy"
    curl http://127.0.0.1:8080
    ```
 
-   `hangar deploy -f hangar.yaml --reason "..."` does plan and apply in one step. It stops if the plan needs approval.
+   `coldship deploy -f coldship.yaml --reason "..."` does plan and apply in one step. It stops if the plan needs approval.
 
 7. **Open the dashboard** at [http://127.0.0.1:7070](http://127.0.0.1:7070) and sign in with the admin token.
 

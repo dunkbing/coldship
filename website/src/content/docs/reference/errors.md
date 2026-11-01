@@ -32,9 +32,9 @@ Every error from every interface has the same shape:
 | `invalid_token_name` | 400 | Token names are lowercase letters, digits and dashes |
 | `invalid_rollback_target` | 400 | `to_deployment` isn't a successful deployment of this app |
 | `unauthenticated` | 401 | Missing or unknown token, or an expired session |
-| `csrf_check_failed` | 403 | Cookie-authenticated request that changes state, without the `X-Hangar-Request` header |
+| `csrf_check_failed` | 403 | Cookie-authenticated request that changes state, without the `X-Coldship-Request` header |
 | `insufficient_scope` | 403 | The token's scope is too low for this action |
-| `approval_required` | 403 | Destructive production change. A human must run `hangar approve <plan>`. CLI exit code 3. |
+| `approval_required` | 403 | Destructive production change. A human must run `coldship approve <plan>`. CLI exit code 3. |
 | `app_not_found` / `plan_not_found` / `deployment_not_found` | 404 | Check the name or id |
 | `route_not_found` | 404 | Unknown API path |
 | `plan_stale` | 409 | The app changed since planning. Plan again. CLI exit code 4. |
@@ -49,11 +49,11 @@ Every error from every interface has the same shape:
 | `git_commit_not_found` | 422 | The pinned commit is gone (force-pushed?). Plan again. |
 | `git_clone_failed` | 500 | Setting up the checkout failed |
 | `dockerfile_not_found` | 422 | `builder: dockerfile` (or a named Dockerfile) is set, but the file doesn't exist. The suggested fix names one found elsewhere in the repository. |
-| `build_detect_failed` | 422 | No Dockerfile, and Hangar couldn't work out how to build or start the project. The suggested fix shows the `build.auto` fields to set. |
+| `build_detect_failed` | 422 | No Dockerfile, and Coldship couldn't work out how to build or start the project. The suggested fix shows the `build.auto` fields to set. |
 | `build_failed` | 422 | `docker build` failed. Read the build log. The running app is untouched (`failed_in: build`). |
 | `build_timeout` | 504 | The build exceeded the server's `--build-timeout` |
 | `health_check_failed` | 502 | The new container never became healthy. With zero-downtime deploys the previous version keeps serving (`details.previous_version_running`). |
-| `database_version_change` | 409 | Changing a database's engine or major version needs a migration Hangar doesn't do yet |
+| `database_version_change` | 409 | Changing a database's engine or major version needs a migration Coldship doesn't do yet |
 | `database_start_failed`, `database_not_ready` | 502 | A database couldn't start or accept connections. The running app is untouched; see the deploy log. |
 | `snapshot_failed` | 502 | A snapshot failed. Nothing was deleted. |
 | `snapshot_not_found`, `snapshot_missing`, `snapshot_corrupt` | 404/500 | The snapshot doesn't exist, its file is gone, or it doesn't match its checksum. Nothing is restored. |
@@ -75,8 +75,8 @@ Every error from every interface has the same shape:
 | `host_port_in_use` | 502 | Another process uses `host_port`. Pick another. |
 | `container_remove_failed`, `volume_remove_failed` | 502 | Docker failed to remove a resource |
 | `deploy_failed` | 502 | Another runtime failure during apply |
-| `runtime_unavailable`, `logs_unavailable` | 502 | Hangar couldn't talk to Docker |
-| `server_unreachable` | 503 | (CLI and MCP) The server isn't running at `HANGAR_URL` |
+| `runtime_unavailable`, `logs_unavailable` | 502 | Coldship couldn't talk to Docker |
+| `server_unreachable` | 503 | (CLI and MCP) The server isn't running at `COLDSHIP_URL` |
 | `secrets_unreadable` | 500 | A stored secret doesn't decrypt with the configured key (wrong key, corrupted, or copied from another row) |
-| `key_from_environment` | 409 | Keys from `HANGAR_SECRET_KEY` can't be rotated in place; see [rotation](/guides/secrets/#status-and-rotation) |
+| `key_from_environment` | 409 | Keys from `COLDSHIP_SECRET_KEY` can't be rotated in place; see [rotation](/guides/secrets/#status-and-rotation) |
 | `internal` | 500 | A bug. Details are in the server log. |

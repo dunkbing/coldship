@@ -9,5 +9,5 @@ node_modules/
 /website/.astro/
 /dashboard/test-results/
 /dist/
-hangar-release.key
+coldship-release.key
 *.key

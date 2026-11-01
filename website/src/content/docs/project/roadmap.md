@@ -1,9 +1,9 @@
 ---
 title: Roadmap
-description: What is planned next for Hangar.
+description: What is planned next for Coldship.
 ---
 
-Hangar today deploys container images, or builds them from Git repositories (with or without a Dockerfile), on a single Docker host, with domains, automatic HTTPS, zero-downtime deploys, preview environments, managed Postgres and Redis, Git webhooks, and self-upgrades. Planned next, roughly in order:
+Coldship today deploys container images, or builds them from Git repositories (with or without a Dockerfile), on a single Docker host, with domains, automatic HTTPS, zero-downtime deploys, preview environments, managed Postgres and Redis, Git webhooks, and self-upgrades. Planned next, roughly in order:
 
 - **More build languages.** Ruby, PHP, Rust, Java and Elixir detection for builds without a Dockerfile.
 - **Seeded previews.** Start a preview's volumes from a sanitized snapshot of the parent's data instead of empty.

@@ -1,4 +1,4 @@
-# Hangar
+# Coldship
 
 A self-hosted app platform designed for **AI agents as first-class users**.
 Agents work through MCP or a JSON CLI. Humans keep control through scoped tokens, approvals, an audit log,
@@ -10,7 +10,7 @@ and a web dashboard embedded in the binary.
 
 | Principle | How |
 |---|---|
-| Declarative | One `hangar.yaml` per app. Unknown fields are errors, so a typo never becomes a silent no-op. |
+| Declarative | One `coldship.yaml` per app. Unknown fields are errors, so a typo never becomes a silent no-op. |
 | Plan, then apply | `plan` is a dry run that returns a diff marked destructive or not. `apply` takes a plan id, so an agent can only apply what it reviewed. |
 | Safe retries | Re-applying an applied plan returns the original result. Plans go stale if the app changed, and expire after 30 minutes. |
 | Errors for LLMs | Every error has a stable `code`, a `hint`, and often a `suggested_fix` (for example `{"port": 3000}`). |
@@ -19,12 +19,12 @@ and a web dashboard embedded in the binary.
 | Rollback | `rollback` redeploys the last good deployment. A failed deploy never replaces the "current" spec. |
 | Domains + HTTPS | `domains: [...]` routes through a managed Caddy proxy with automatic certificates. |
 | Zero-downtime deploys | New version starts next to the old, must pass its health check, then traffic switches. If it fails, the old one keeps serving. |
-| Preview environments | `hangar preview create web --ref feat/x --ttl 2h`: a throwaway copy with fresh volumes and no production secrets by default, deleted automatically. |
+| Preview environments | `coldship preview create web --ref feat/x --ttl 2h`: a throwaway copy with fresh volumes and no production secrets by default, deleted automatically. |
 | Git webhooks | `on_push: {action: plan\|deploy, previews: true}`: signed pushes from GitHub, GitLab or Gitea plan or deploy the branch tip, and branches get previews. |
 | Managed databases | `databases: [{name: main, engine: postgres}]`: credentials generated and injected as `DATABASE_URL`, never shown; snapshots daily and before anything destructive; restores are approved plans. |
-| Secrets at rest | Env values, database passwords, webhook secrets and deploy logs are AES-256-GCM encrypted in the state file; `hangar secrets rotate-key`. Back up `hangar.key` separately. |
+| Secrets at rest | Env values, database passwords, webhook secrets and deploy logs are AES-256-GCM encrypted in the state file; `coldship secrets rotate-key`. Back up `coldship.key` separately. |
 | Self-upgrades | Signed releases (Ed25519 + SHA-256), installed automatically when idle; "new version available" in the dashboard and CLI. |
-| Build from Git | `build: {git, ref}` instead of `image`; no Dockerfile needed for Node, Bun, Python, Go and static sites (`hangar build detect` explains the generated one). Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
+| Build from Git | `build: {git, ref}` instead of `image`; no Dockerfile needed for Node, Bun, Python, Go and static sites (`coldship build detect` explains the generated one). Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
 | No secret leaks | Env values are redacted in all output. The runtime gets them through a 0600 env file, never argv. |
 | Prompt-injection hygiene | Logs are labeled untrusted data in every response and tool description. |
 | Accountability | Every mutation is audited with the actor (token name) and a required `reason`. |
@@ -39,12 +39,12 @@ and a web dashboard embedded in the binary.
                                     │                               deployments, tokens, audit)
 ```
 
-A single `hangar` binary contains the server, the CLI, and the MCP server. The CLI and MCP server are both
+A single `coldship` binary contains the server, the CLI, and the MCP server. The CLI and MCP server are both
 clients of the HTTP API, so every action goes through the same auth, guardrails, and audit.
 
 ```
-cmd/hangar/          CLI entry point (cobra): server, mcp, plan, apply, deploy, approve, rollback, ...
-internal/spec/       hangar.yaml schema, strict parsing, validation with suggested fixes, redaction
+cmd/coldship/          CLI entry point (cobra): server, mcp, plan, apply, deploy, approve, rollback, ...
+internal/spec/       coldship.yaml schema, strict parsing, validation with suggested fixes, redaction
 internal/planner/    current-vs-desired diff, destructive classification
 internal/engine/     plan / approve / apply / rollback / diagnose (the control plane)
 internal/store/      SQLite persistence
@@ -65,15 +65,15 @@ scripts/             screenshots.sh: regenerates the docs screenshots
 Requires Go 1.26+ (older Go downloads it automatically), [Bun](https://bun.sh), and Docker.
 
 ```sh
-make build                     # builds the dashboard, embeds it, builds bin/hangar
-./bin/hangar server            # prints a one-time admin token on first start
+make build                     # builds the dashboard, embeds it, builds bin/coldship
+./bin/coldship server            # prints a one-time admin token on first start
                                # dashboard: http://127.0.0.1:7070
-export HANGAR_TOKEN=hgr_...    # the admin token
+export COLDSHIP_TOKEN=cst_...    # the admin token
 
-./bin/hangar plan   -f examples/hello/hangar.yaml
-./bin/hangar deploy -f examples/hello/hangar.yaml --reason "first deploy"
-./bin/hangar diagnose hello
-./bin/hangar audit
+./bin/coldship plan   -f examples/hello/coldship.yaml
+./bin/coldship deploy -f examples/hello/coldship.yaml --reason "first deploy"
+./bin/coldship diagnose hello
+./bin/coldship audit
 ```
 
 ### Give an agent access
@@ -81,12 +81,12 @@ export HANGAR_TOKEN=hgr_...    # the admin token
 Create a `deploy`-scoped token for the agent. It can then plan, apply, and roll back, but never approve.
 
 ```sh
-./bin/hangar token create --name claude --scope deploy
-claude mcp add hangar -e HANGAR_URL=http://127.0.0.1:7070 -e HANGAR_TOKEN=hgr_... -- /path/to/bin/hangar mcp
+./bin/coldship token create --name claude --scope deploy
+claude mcp add coldship -e COLDSHIP_URL=http://127.0.0.1:7070 -e COLDSHIP_TOKEN=cst_... -- /path/to/bin/coldship mcp
 ```
 
-MCP tools: `hangar_list_apps`, `hangar_get_app`, `hangar_plan`, `hangar_get_plan`, `hangar_apply`,
-`hangar_rollback`, `hangar_logs`, `hangar_diagnose`, `hangar_deployments`.
+MCP tools: `coldship_list_apps`, `coldship_get_app`, `coldship_plan`, `coldship_get_plan`, `coldship_apply`,
+`coldship_rollback`, `coldship_logs`, `coldship_diagnose`, `coldship_deployments`.
 
 ### CLI contract for scripts and agents
 
@@ -109,7 +109,7 @@ volumes:
     path: /data
 ```
 
-Or build from Git instead of `image` (with your Dockerfile, or one Hangar generates for Node, Bun, Python, Go and static sites):
+Or build from Git instead of `image` (with your Dockerfile, or one Coldship generates for Node, Bun, Python, Go and static sites):
 
 ```yaml
 build:
@@ -119,7 +119,7 @@ build:
   dockerfile: Dockerfile
 ```
 
-Private repos: `hangar server --git-credentials <git-credential-store file>`, or SSH keys of the server user.
+Private repos: `coldship server --git-credentials <git-credential-store file>`, or SSH keys of the server user.
 
 ## Roadmap
 

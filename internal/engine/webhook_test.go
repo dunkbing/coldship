@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"hangar/internal/builder"
-	"hangar/internal/proxy"
-	"hangar/internal/runtime"
-	"hangar/internal/spec"
-	"hangar/internal/store"
-	"hangar/internal/webhook"
+	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/proxy"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
+	"github.com/dunkbing/coldship/internal/webhook"
 
 	"path/filepath"
 )

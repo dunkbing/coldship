@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"hangar/internal/engine"
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 func buildCmd() *cobra.Command {
@@ -16,7 +16,7 @@ func buildCmd() *cobra.Command {
 	var showDockerfile bool
 	detect := &cobra.Command{
 		Use:   "detect",
-		Short: "Show how Hangar would build an app, without building it",
+		Short: "Show how Coldship would build an app, without building it",
 		Long: "Check out the app's commit and report whether it builds from its Dockerfile or from a generated\n" +
 			"one, what was detected and why. Use -f for a spec file or --app for a deployed app.",
 		Args: cobra.NoArgs,
@@ -24,7 +24,7 @@ func buildCmd() *cobra.Command {
 			req := engine.DetectRequest{App: app}
 			if app == "" {
 				if file == "" {
-					file = "hangar.yaml"
+					file = "coldship.yaml"
 				}
 				a, err := spec.Load(file)
 				if err != nil {
@@ -53,7 +53,7 @@ func buildCmd() *cobra.Command {
 			})
 		},
 	}
-	detect.Flags().StringVarP(&file, "file", "f", "", "spec file (default hangar.yaml)")
+	detect.Flags().StringVarP(&file, "file", "f", "", "spec file (default coldship.yaml)")
 	detect.Flags().StringVar(&app, "app", "", "a deployed app instead of a spec file")
 	detect.Flags().BoolVar(&showDockerfile, "dockerfile", false, "print the generated Dockerfile")
 	cmd.AddCommand(detect)

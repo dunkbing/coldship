@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"hangar/internal/apierr"
-	"hangar/internal/runtime"
-	"hangar/internal/spec"
-	"hangar/internal/store"
+	"github.com/dunkbing/coldship/internal/apierr"
+	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 type Finding struct {
@@ -125,8 +125,8 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 	}
 	if app.Spec != nil && len(app.Spec.Domains) > 0 && e.px != nil {
 		if ps := e.px.Status(ctx); !ps.Running {
-			add("error", "proxy_down", "the proxy container (hangar-proxy) is not running, so the app's domains are unreachable",
-				map[string]any{"action": "restart hangar server, which starts the proxy"})
+			add("error", "proxy_down", "the proxy container (coldship-proxy) is not running, so the app's domains are unreachable",
+				map[string]any{"action": "restart coldship server, which starts the proxy"})
 		}
 	}
 	switch {

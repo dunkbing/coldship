@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"hangar/internal/spec"
+	"github.com/dunkbing/coldship/internal/spec"
 )
 
 const (

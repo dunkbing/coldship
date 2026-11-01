@@ -64,15 +64,15 @@ func Parse(h http.Header, body []byte, secret string) (*Push, error) {
 		p.Provider = "github"
 		p.Event = normEvent(h.Get("X-GitHub-Event"))
 		p.Delivery = h.Get("X-GitHub-Delivery")
-	case h.Get("X-Hangar-Signature") != "":
-		sig := strings.TrimPrefix(h.Get("X-Hangar-Signature"), "sha256=")
+	case h.Get("X-Coldship-Signature") != "":
+		sig := strings.TrimPrefix(h.Get("X-Coldship-Signature"), "sha256=")
 		if !validHMAC(body, secret, sig) {
 			return nil, ErrBadSignature
 		}
 		p, err = parseGitHubShaped(jsonBody(h, body))
 		p.Provider = "generic"
-		p.Event = normEvent(first(h.Get("X-Hangar-Event"), "push"))
-		p.Delivery = h.Get("X-Hangar-Delivery")
+		p.Event = normEvent(first(h.Get("X-Coldship-Event"), "push"))
+		p.Delivery = h.Get("X-Coldship-Delivery")
 	default:
 		return nil, ErrNoSignature
 	}

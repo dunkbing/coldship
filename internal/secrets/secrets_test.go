@@ -51,7 +51,7 @@ func TestRotationKeyring(t *testing.T) {
 }
 
 func TestKeyFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hangar.key")
+	path := filepath.Join(t.TempDir(), "coldship.key")
 	k := New()
 	if err := k.Save(path); err != nil {
 		t.Fatal(err)

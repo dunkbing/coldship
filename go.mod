@@ -1,4 +1,4 @@
-module hangar
+module github.com/dunkbing/coldship
 
 go 1.26.0
 

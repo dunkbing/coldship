@@ -3,7 +3,7 @@ package spec
 import (
 	"testing"
 
-	"hangar/internal/apierr"
+	"github.com/dunkbing/coldship/internal/apierr"
 )
 
 func TestParseRejectsUnknownFields(t *testing.T) {

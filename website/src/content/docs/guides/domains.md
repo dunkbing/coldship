@@ -7,7 +7,7 @@ description: Serve apps on their own domains with automatic HTTPS, and deploy ne
 
 Give an app one or more hostnames and the port it listens on:
 
-```yaml title="hangar.yaml"
+```yaml title="coldship.yaml"
 name: shop
 image: ghcr.io/acme/shop:1.4.2
 port: 8080
@@ -19,16 +19,16 @@ health:
   timeout: 60s
 ```
 
-Point the domains' DNS at the server and deploy. Hangar's proxy gets a certificate from Let's Encrypt the first time each hostname is requested, renews it, and redirects HTTP to HTTPS. Once deployed, `hangar status shop` (and the dashboard) lists the app's URLs.
+Point the domains' DNS at the server and deploy. Coldship's proxy gets a certificate from Let's Encrypt the first time each hostname is requested, renews it, and redirects HTTP to HTTPS. Once deployed, `coldship status shop` (and the dashboard) lists the app's URLs.
 
 - **Each domain belongs to one app.** Planning a domain another app already has fails with `domain_in_use`, naming that app.
 - **`*.localhost` names** get certificates from the proxy's own local CA, which is handy for trying things out.
-- **No public ports needed.** Apps with domains don't need a `host_port`; the proxy reaches them over Hangar's internal Docker network.
+- **No public ports needed.** Apps with domains don't need a `host_port`; the proxy reaches them over Coldship's internal Docker network.
 - **Apps can reach each other by name** on that network, e.g. `http://api:3000` from another app.
 
 ### How it works
 
-`hangar server` runs [Caddy](https://caddyserver.com) as a managed container, `hangar-proxy`, publishing ports 80 and 443. Hangar writes Caddy's whole configuration from its own state and reloads it gracefully, so in-flight requests finish. Caddy's admin API is never exposed outside the container. Certificates live in the `hangar-proxy-data` volume.
+`coldship server` runs [Caddy](https://caddyserver.com) as a managed container, `coldship-proxy`, publishing ports 80 and 443. Coldship writes Caddy's whole configuration from its own state and reloads it gracefully, so in-flight requests finish. Caddy's admin API is never exposed outside the container. Certificates live in the `coldship-proxy-data` volume.
 
 | Flag | Default | |
 |---|---|---|
@@ -43,7 +43,7 @@ If the proxy can't start (say, port 80 is taken), the server still runs, and `di
 When an app has no `host_port` and no volumes, an update never interrupts traffic:
 
 1. The new version starts **next to** the old one.
-2. Hangar waits for it to be healthy: `health.path` answers 2xx/3xx, or without a path, the port accepts connections.
+2. Coldship waits for it to be healthy: `health.path` answers 2xx/3xx, or without a path, the port accepts connections.
 3. The proxy switches to the new version.
 4. The old version gets 10 seconds to finish its requests, then stops.
 
@@ -63,4 +63,4 @@ Two kinds of app can't run two versions side by side, so they use **stop and rep
 - apps with a **`host_port`**, because two containers can't bind the same host port. Use `domains` instead.
 - apps with **volumes**, because two copies of something like a database must never write to the same data.
 
-`hangar status` and the dashboard show which strategy each app uses, and every deployment records it.
+`coldship status` and the dashboard show which strategy each app uses, and every deployment records it.

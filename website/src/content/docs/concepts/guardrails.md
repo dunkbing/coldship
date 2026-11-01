@@ -3,7 +3,7 @@ title: Guardrails
 description: Scoped tokens, human approval for destructive production changes, secret redaction and the audit log.
 ---
 
-Hangar assumes an agent will eventually try something it shouldn't, whether by mistake or because something in its context told it to. These guardrails limit what that can cost you.
+Coldship assumes an agent will eventually try something it shouldn't, whether by mistake or because something in its context told it to. These guardrails limit what that can cost you.
 
 ## Scoped tokens
 
@@ -18,7 +18,7 @@ Every request carries a bearer token, and every token has one scope:
 Give each agent its own `deploy` token, so its actions are attributed to it in the audit log:
 
 ```sh
-hangar token create --name claude --scope deploy
+coldship token create --name claude --scope deploy
 ```
 
 Admin tokens are for humans. The first one is created when the server first starts.
@@ -31,10 +31,10 @@ A plan needs approval when it is **destructive** and the app's stage is **produc
 Plan plan_0a2136c9ac8b for app "api" (update)
   - volumes.cache (was /var/cache/api)  [DESTRUCTIVE: volume cache and all data in it will be deleted]
 Destructive: yes  Downtime: yes  Requires approval: yes
-Next: Destructive change to a production app. A human must approve it (hangar approve plan_0a2136c9ac8b) before it can be applied.
+Next: Destructive change to a production app. A human must approve it (coldship approve plan_0a2136c9ac8b) before it can be applied.
 ```
 
-A human approves from the CLI (`hangar approve <plan-id>`) or the [dashboard](/guides/dashboard/). The MCP server has no approve tool at all.
+A human approves from the CLI (`coldship approve <plan-id>`) or the [dashboard](/guides/dashboard/). The MCP server has no approve tool at all.
 
 Approving doesn't apply the plan. The agent, or you, still applies it with a reason, so there are two separate, attributable steps.
 
@@ -50,14 +50,14 @@ Application logs and build logs can contain anything, including text written to 
 
 ## Dashboard sessions
 
-The dashboard never stores a token in the browser. Signing in exchanges the token for a 12-hour session in an `HttpOnly`, `SameSite=Strict` cookie that page scripts can't read. Requests that change state also need an `X-Hangar-Request` header, which a forged cross-site request can't send. Signing out deletes the session on the server.
+The dashboard never stores a token in the browser. Signing in exchanges the token for a 12-hour session in an `HttpOnly`, `SameSite=Strict` cookie that page scripts can't read. Requests that change state also need an `X-Coldship-Request` header, which a forged cross-site request can't send. Signing out deletes the session on the server.
 
 ## Audit log
 
 Every mutation is recorded with the actor (the token name), the action, the target and the reason:
 
 ```sh
-hangar audit
+coldship audit
 ```
 
 ![The audit log showing actions by the claude agent and the admin](../../../assets/screenshots/audit.png)
