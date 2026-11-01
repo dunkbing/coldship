@@ -148,7 +148,7 @@ func (e *Engine) CreatePreview(ctx context.Context, actor string, req PreviewReq
 			reason += " at " + req.Ref
 		}
 	}
-	p, err := e.plan(ctx, actor, PlanRequest{Spec: desired})
+	p, err := e.plan(ctx, actor, PlanRequest{Spec: desired, previewOf: parent.Name})
 	if err != nil {
 		return nil, err
 	}

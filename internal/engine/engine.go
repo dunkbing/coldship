@@ -167,6 +167,10 @@ type PlanRequest struct {
 	Redeploy bool      `json:"redeploy,omitempty"`
 	// Restore plans restoring a database from a snapshot.
 	Restore *RestoreRequest `json:"restore,omitempty"`
+
+	// previewOf is set only by the preview code, never from a request: it
+	// allows stage: preview for a new preview of that app.
+	previewOf string
 }
 
 type ApplyResult struct {
@@ -252,6 +256,13 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 				WithField("stage").WithFix(map[string]any{"stage": "preview"})
 		}
 	}
+	// stage: preview skips snapshots and approvals, so only real previews
+	// may have it. Apps that already have it may keep it.
+	if desired != nil && desired.Stage == spec.StagePreview && req.previewOf == "" &&
+		(app == nil || (app.PreviewOf == "" && current.Stage != spec.StagePreview)) {
+		return nil, apierr.New(400, "invalid_spec", "stage: preview is only for previews made with coldship preview create").
+			WithField("stage").WithFix(map[string]any{"stage": "staging"})
+	}
 	if current != nil && desired != nil {
 		for _, c := range current.Databases {
 			for _, d := range desired.Databases {
@@ -266,6 +277,17 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 	}
 
 	diff := planner.Diff(current, desired)
+	if current != nil && desired != nil && current.Stage == spec.StageProduction && desired.Stage != spec.StageProduction {
+		// Leaving production drops the approval requirement for everything
+		// after it, so leaving needs approval itself.
+		for i := range diff.Changes {
+			if diff.Changes[i].Path == "stage" {
+				diff.Changes[i].Destructive = true
+				diff.Changes[i].Reason = "moves the app out of production; later destructive changes won't need approval"
+			}
+		}
+		diff.Destructive = true
+	}
 	action := planner.OpUpdate
 	switch {
 	case desired == nil:
@@ -316,7 +338,7 @@ func (e *Engine) restorePlan(ctx context.Context, actor string, r *RestoreReques
 		Changes: []planner.Change{{Path: "databases." + r.Database, Op: "restore", To: sn.ID, Destructive: true,
 			Reason: fmt.Sprintf("replaces all data in %s with snapshot %s from %s (the current data is snapshotted first)",
 				r.Database, sn.ID, sn.CreatedAt.UTC().Format(time.RFC3339))}},
-		Destructive: true, Downtime: true, RequiresApproval: desired.Stage == spec.StageProduction,
+		Destructive: true, Downtime: true, RequiresApproval: desired.Stage == spec.StageProduction || app.Spec.Stage == spec.StageProduction,
 		Restore: &store.PlanRestore{Database: r.Database, Snapshot: sn.ID},
 		Status:  store.PlanPending, CreatedBy: actor, CreatedAt: now, ExpiresAt: now.Add(e.PlanTTL),
 	}
@@ -536,7 +558,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			vols = planner.RemovedVolumes(current, nil)
 			// Snapshot every database before anything is deleted; if one
 			// fails, delete nothing.
-			if current.Stage != spec.StagePreview {
+			if app.PreviewOf == "" {
 				for _, db := range current.Databases {
 					sn, err := e.snapshot(ctx, actor, p.App, db, "before deleting app "+p.App)
 					if err != nil {
@@ -609,7 +631,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 				if gone := planner.RemovedDatabases(current, p.Desired); runErr == nil && len(gone) > 0 {
 					// The new version no longer uses them. Each is snapshotted
 					// first; one whose snapshot fails is kept.
-					if err := e.removeDatabases(ctx, actor, current, gone, "removed from the spec in "+p.ID, true, deployLog); err != nil {
+					if err := e.removeDatabases(ctx, actor, current, gone, "removed from the spec in "+p.ID, app == nil || app.PreviewOf == "", deployLog); err != nil {
 						fmt.Fprintf(deployLog, "coldship: warning: %v\n", err)
 						e.audit(ctx, actor, "database.remove_failed", p.App, err.Error(), nil)
 					}

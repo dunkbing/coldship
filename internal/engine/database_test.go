@@ -242,3 +242,59 @@ func TestPreviewGetsOwnDatabaseAndRetention(t *testing.T) {
 		t.Fatalf("scheduled snapshots: %d %v", n, err)
 	}
 }
+
+// A deploy token must not be able to demote production and then delete it,
+// with its databases, without approval or snapshots.
+func TestStageDemotionNeedsApproval(t *testing.T) {
+	e, _ := dbSetup(t)
+	ctx := context.Background()
+	p, err := e.Plan(ctx, "agent", PlanRequest{Spec: withDB(spec.StageProduction, pg)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "create"); err != nil {
+		t.Fatal(err)
+	}
+
+	// stage: preview is reserved for real previews.
+	if _, err := e.Plan(ctx, "agent", PlanRequest{Spec: withDB(spec.StagePreview, pg)}); code(err) != "invalid_spec" {
+		t.Fatalf("stage: preview on a regular app: want invalid_spec, got %v", err)
+	}
+	if _, err := e.Plan(ctx, "agent", PlanRequest{Spec: &spec.App{Name: "fresh", Stage: spec.StagePreview, Image: "x:1"}}); code(err) != "invalid_spec" {
+		t.Fatalf("stage: preview on a new app: want invalid_spec, got %v", err)
+	}
+
+	// Leaving production, even with no other change, needs approval.
+	p, err = e.Plan(ctx, "agent", PlanRequest{Spec: withDB(spec.StageStaging, pg)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Destructive || !p.RequiresApproval {
+		t.Fatalf("demotion must need approval: %+v", p)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "demote"); code(err) != "approval_required" {
+		t.Fatalf("want approval_required, got %v", err)
+	}
+
+	// Once approved and demoted, deleting still snapshots the database.
+	if _, err := e.Approve(ctx, "alice", p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "demote"); err != nil {
+		t.Fatal(err)
+	}
+	p, err = e.Plan(ctx, "agent", PlanRequest{Delete: "api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "delete"); err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := e.st.ListSnapshots(ctx, "api", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) == 0 {
+		t.Fatal("deleting a non-preview app must snapshot its databases")
+	}
+}

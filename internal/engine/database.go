@@ -170,7 +170,7 @@ func (c *countWriter) Write(p []byte) (int, error) {
 // whose snapshot fails is kept.
 func (e *Engine) removeDatabases(ctx context.Context, actor string, app *spec.App, dbs []spec.Database, reason string, snapshotFirst bool, log io.Writer) error {
 	for _, d := range dbs {
-		if snapshotFirst && app.Stage != spec.StagePreview {
+		if snapshotFirst {
 			sn, err := e.snapshot(ctx, actor, app.Name, d, reason)
 			if err != nil {
 				return apierr.New(502, "snapshot_failed", "database %s was not deleted because its snapshot failed: %v", d.Name, err).
