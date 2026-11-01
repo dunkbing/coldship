@@ -45,6 +45,32 @@ func New(c *client.Client, version string) *mcp.Server {
 			return result(c.ListApps(ctx))
 		})
 
+	mcp.AddTool(s, &mcp.Tool{Name: "coldship_list_data",
+		Description: "List data services (standalone Postgres, MySQL, Redis and S3 storage) and the databases apps own, with status, which apps use each, and the env vars each gives an app.",
+		Annotations: ro},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+			return result(c.ListData(ctx))
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "coldship_create_data",
+		Description: "Create a data service: postgres, mysql, redis, or s3 (S3-compatible object storage, with a bucket named after the service). Waits until it is ready. " +
+			"Then connect an app with coldship_plan patch {name: <app>, add_uses: [<service>]}: the app gets DATABASE_URL (postgres, mysql), REDIS_URL (redis), or AWS_* and S3_* variables (s3).",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: &f}},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in engine.DataRequest) (*mcp.CallToolResult, any, error) {
+			return result(c.CreateData(ctx, in))
+		})
+
+	type snapshotDataArgs struct {
+		Name   string `json:"name" jsonschema:"data service name"`
+		Reason string `json:"reason,omitempty" jsonschema:"why, for the audit log"`
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "coldship_snapshot_data",
+		Description: "Snapshot a data service now (not S3 storage). Do this before risky changes such as migrations.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: &f}},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in snapshotDataArgs) (*mcp.CallToolResult, any, error) {
+			return result(c.SnapshotData(ctx, in.Name, in.Reason))
+		})
+
 	mcp.AddTool(s, &mcp.Tool{Name: "coldship_get_app", Description: "Get one app: spec, container status and latest deployment.", Annotations: ro},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in appArg) (*mcp.CallToolResult, any, error) {
 			return result(c.GetApp(ctx, in.App))

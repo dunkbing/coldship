@@ -419,3 +419,49 @@ func TestTokensLimitedToApps(t *testing.T) {
 		t.Fatalf("session for a limited token: want 403 for another app, got %d", resp.StatusCode)
 	}
 }
+
+func TestDataServiceAPI(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
+	defer srv.Close()
+	adminTok, _ := eng.EnsureAdminToken(ctx)
+	admin := client.New(srv.URL, adminTok)
+	tr, _ := admin.CreateToken(ctx, "agent", "deploy", "agent-*")
+	agent := client.New(srv.URL, tr.Token)
+
+	if _, err := admin.CreateData(ctx, engine.DataRequest{Name: "shared", Engine: "postgres"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.CreateData(ctx, engine.DataRequest{Name: "agent-db", Engine: "redis"}); err != nil {
+		t.Fatalf("a limited token creates services matching its patterns: %v", err)
+	}
+	if _, err := agent.CreateData(ctx, engine.DataRequest{Name: "other", Engine: "redis"}); errCode(err) != "app_not_allowed" {
+		t.Fatalf("outside its patterns: %v", err)
+	}
+	list, _ := agent.ListData(ctx)
+	if len(list) != 1 || list[0].Name != "agent-db" {
+		t.Fatalf("a limited token sees only its services: %+v", list)
+	}
+	if _, err := agent.GetData(ctx, "shared"); errCode(err) != "app_not_allowed" {
+		t.Fatalf("get another service: %v", err)
+	}
+	if _, err := agent.DataConnection(ctx, "agent-db"); errCode(err) != "insufficient_scope" {
+		t.Fatalf("credentials are admin-only: %v", err)
+	}
+	if err := agent.DeleteData(ctx, "agent-db", ""); errCode(err) != "insufficient_scope" {
+		t.Fatalf("delete is admin-only: %v", err)
+	}
+	env, err := admin.DataConnection(ctx, "shared")
+	if err != nil || !strings.HasPrefix(env["DATABASE_URL"], "postgres://app:") {
+		t.Fatalf("connection: %v %v", env, err)
+	}
+	if err := admin.DeleteData(ctx, "shared", "test"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -14,6 +14,7 @@ cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
   [ -n "${GIT_PID:-}" ] && kill "$GIT_PID" 2>/dev/null || true
   docker ps -aq --filter label=coldship.app --filter name=coldship-smoke- | xargs -r docker rm -f >/dev/null
+  docker ps -aq --filter label=coldship.data --filter name=coldship-data-smoke- | xargs -r docker rm -f >/dev/null
   docker rm -f coldship-smoke-squatter >/dev/null 2>&1 || true
   docker volume ls -q --filter name=coldship-smoke- | xargs -r docker volume rm >/dev/null 2>&1 || true
 }
@@ -84,6 +85,42 @@ docker run -d --name coldship-smoke-squatter busybox sleep 300 >/dev/null
 SQ=$(spec sq $'name: smoke-squatter\nimage: nginx:1.27-alpine\nport: 80\nhost_port: 18081\n')
 if "$H" deploy -f "$SQ" --reason smoke >/dev/null 2>&1; then fail "deploy replaced an unlabeled container"; fi
 docker inspect coldship-smoke-squatter >/dev/null 2>&1 || fail "unlabeled container was removed"
+
+echo "==> data services: postgres, mysql, redis, s3"
+for kind in postgres mysql redis s3; do
+  "$H" data create "$kind" "smoke-$kind" >/dev/null || fail "create $kind data service"
+done
+"$H" deploy --name smoke-uses --image nginx:1.27-alpine --port 80 \
+  --use smoke-postgres --use smoke-mysql=MYSQL_URL --use smoke-redis --use smoke-s3 >/dev/null || fail "connect an app to data services"
+env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' coldship-smoke-uses)
+for v in DATABASE_URL=postgres:// MYSQL_URL=mysql:// REDIS_URL=redis:// AWS_ENDPOINT_URL=http://coldship-data-smoke-s3:8333 S3_BUCKET=smoke-s3; do
+  echo "$env" | grep -q "^$v" || fail "the app didn't get $v"
+done
+docker exec coldship-smoke-uses sh -c 'wget -q -S -O /dev/null http://coldship-data-smoke-s3:8333/ 2>&1 | grep -q HTTP/' ||
+  fail "the app can't reach S3 storage"
+# A real S3 round trip, signed with the service's credentials.
+conn=$("$H" data connection smoke-s3 2>/dev/null)
+ak=$(echo "$conn" | sed -n 's/^AWS_ACCESS_KEY_ID=//p'); sk=$(echo "$conn" | sed -n 's/^AWS_SECRET_ACCESS_KEY=//p')
+ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' coldship-data-smoke-s3)
+curl -sf --aws-sigv4 "aws:amz:us-east-1:s3" --user "$ak:$sk" -X PUT --data 'hello s3' "http://$ip:8333/smoke-s3/hello.txt" >/dev/null ||
+  fail "S3 PUT failed"
+curl -sf --aws-sigv4 "aws:amz:us-east-1:s3" --user "$ak:$sk" "http://$ip:8333/smoke-s3/hello.txt" | grep -q 'hello s3' || fail "S3 GET failed"
+curl -s -o /dev/null -w '%{http_code}' "http://$ip:8333/smoke-s3/hello.txt" | grep -q '^403$' || fail "S3 must refuse unsigned requests"
+# MySQL snapshot and restore: the row dropped after the snapshot comes back.
+mypw=$("$H" data connection smoke-mysql 2>/dev/null | sed -n 's#^DATABASE_URL=mysql://app:\([^@]*\)@.*#\1#p')
+mysql_q() { docker exec -e MYSQL_PWD="$mypw" coldship-data-smoke-mysql mysql -h127.0.0.1 -uapp app -N -e "$1"; }
+mysql_q 'CREATE TABLE t (v INT); INSERT INTO t VALUES (42);' || fail "write to mysql"
+snap=$("$H" data snapshot smoke-mysql --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])') || fail "mysql snapshot"
+mysql_q 'DROP TABLE t;'
+"$H" data restore smoke-mysql "$snap" --reason smoke >/dev/null || fail "mysql restore"
+[ "$(mysql_q 'SELECT v FROM t;')" = 42 ] || fail "mysql restore didn't bring the data back"
+"$H" data snapshot smoke-postgres >/dev/null || fail "postgres snapshot"
+"$H" data delete smoke-postgres --yes >/dev/null 2>&1 && fail "deleting a data service in use must be refused"
+"$H" delete smoke-uses --yes >/dev/null || fail "delete smoke-uses"
+for kind in postgres mysql redis s3; do
+  "$H" data delete "smoke-$kind" --yes >/dev/null || fail "delete $kind data service"
+done
+[ -z "$(docker ps -aq --filter label=coldship.data)" ] || fail "data service containers left after delete"
 
 echo "==> delete"
 for app in smoke-web smoke-flags smoke-hp smoke-db smoke-git; do

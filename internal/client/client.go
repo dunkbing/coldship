@@ -253,3 +253,47 @@ func (c *Client) CreateToken(ctx context.Context, name, scope string, apps ...st
 	var out api.TokenResponse
 	return &out, c.do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: name, Scope: scope, Apps: apps}, &out)
 }
+
+// --- data services ---
+
+func (c *Client) ListData(ctx context.Context) ([]engine.DataView, error) {
+	var out []engine.DataView
+	return out, c.do(ctx, "GET", "/v1/data", nil, &out)
+}
+
+func (c *Client) CreateData(ctx context.Context, req engine.DataRequest) (*engine.DataView, error) {
+	var out engine.DataView
+	return &out, c.do(ctx, "POST", "/v1/data", req, &out)
+}
+
+func (c *Client) GetData(ctx context.Context, name string) (*engine.DataView, error) {
+	var out engine.DataView
+	return &out, c.do(ctx, "GET", "/v1/data/"+url.PathEscape(name), nil, &out)
+}
+
+func (c *Client) DeleteData(ctx context.Context, name, reason string) error {
+	return c.do(ctx, "DELETE", "/v1/data/"+url.PathEscape(name)+"?reason="+url.QueryEscape(reason), nil, nil)
+}
+
+func (c *Client) DataConnection(ctx context.Context, name string) (map[string]string, error) {
+	var out map[string]string
+	return out, c.do(ctx, "POST", "/v1/data/"+url.PathEscape(name)+"/connection", nil, &out)
+}
+
+func (c *Client) DataSnapshots(ctx context.Context, name string) ([]store.Snapshot, error) {
+	var out []store.Snapshot
+	return out, c.do(ctx, "GET", "/v1/data/"+url.PathEscape(name)+"/snapshots", nil, &out)
+}
+
+func (c *Client) SnapshotData(ctx context.Context, name, reason string) (*store.Snapshot, error) {
+	var out store.Snapshot
+	return &out, c.do(ctx, "POST", "/v1/data/"+url.PathEscape(name)+"/snapshots", api.DataSnapshotRequest{Reason: reason}, &out)
+}
+
+func (c *Client) RestoreData(ctx context.Context, name, snapshot, reason string) (string, error) {
+	var out struct {
+		Message string `json:"message"`
+	}
+	err := c.do(ctx, "POST", "/v1/data/"+url.PathEscape(name)+"/restore", api.DataRestoreRequest{Snapshot: snapshot, Reason: reason}, &out)
+	return out.Message, err
+}

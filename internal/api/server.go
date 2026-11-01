@@ -106,6 +106,14 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("POST /v1/system/secrets/rotate", store.ScopeAdmin, s.rotateSecrets)
 	s.route("POST /v1/system/check", store.ScopeAdmin, s.systemCheck)
 	s.route("POST /v1/system/upgrade", store.ScopeAdmin, s.systemUpgrade)
+	s.route("GET /v1/data", store.ScopeRead, s.listData)
+	s.route("POST /v1/data", store.ScopeDeploy, s.createData)
+	s.route("GET /v1/data/{name}", store.ScopeRead, s.getData)
+	s.route("DELETE /v1/data/{name}", store.ScopeAdmin, s.deleteData)
+	s.route("POST /v1/data/{name}/connection", store.ScopeAdmin, s.dataConnection)
+	s.route("GET /v1/data/{name}/snapshots", store.ScopeRead, s.dataSnapshots)
+	s.route("POST /v1/data/{name}/snapshots", store.ScopeDeploy, s.snapshotData)
+	s.route("POST /v1/data/{name}/restore", store.ScopeAdmin, s.restoreData)
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
 	s.route("GET /v1/tokens", store.ScopeAdmin, s.listTokens)
 	s.route("DELETE /v1/tokens/{name}", store.ScopeAdmin, s.revokeToken)
@@ -144,6 +152,10 @@ func (s *Server) route(pattern string, need store.Scope, h handler) {
 		}
 		if !p.scope.Allows(need) {
 			writeErr(w, s.log, apierr.New(403, "insufficient_scope", "token %q has scope %s; this action needs %s", p.name, p.scope, need))
+			return
+		}
+		if p.limited() && strings.Contains(pattern, "/v1/data/{name}") && !store.MatchApps(p.apps, r.PathValue("name")) {
+			writeErr(w, s.log, dataNotAllowed(p, r.PathValue("name")))
 			return
 		}
 		if p.limited() && (strings.Contains(pattern, "/v1/apps/{name}") || strings.Contains(pattern, "/v1/previews/{name}")) {
@@ -741,4 +753,88 @@ func (s *Server) revokeToken(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"name": name, "revoked": true}, nil
+}
+
+// --- data services ---
+
+func dataNotAllowed(p principal, name string) error {
+	return apierr.New(403, "app_not_allowed", "token %q can't use data service %q: it is limited to %s", p.name, name, strings.Join(p.apps, ", ")).
+		WithDetail("allowed_apps", p.apps)
+}
+
+func (s *Server) listData(r *http.Request, p principal) (any, error) {
+	list, err := s.eng.ListData(r.Context())
+	if err != nil || !p.limited() {
+		return list, err
+	}
+	out := list[:0:0]
+	for _, d := range list {
+		if (d.App == "" && store.MatchApps(p.apps, d.Name)) || (d.App != "" && s.allowApp(r.Context(), p, d.App) == nil) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+func (s *Server) createData(r *http.Request, p principal) (any, error) {
+	var req engine.DataRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	if p.limited() && !store.MatchApps(p.apps, req.Name) {
+		return nil, dataNotAllowed(p, req.Name)
+	}
+	return s.eng.CreateData(r.Context(), p.name, req)
+}
+
+func (s *Server) getData(r *http.Request, _ principal) (any, error) {
+	return s.eng.GetData(r.Context(), r.PathValue("name"))
+}
+
+func (s *Server) deleteData(r *http.Request, p principal) (any, error) {
+	name := r.PathValue("name")
+	if err := s.eng.DeleteData(r.Context(), p.name, name, r.URL.Query().Get("reason")); err != nil {
+		return nil, err
+	}
+	return map[string]any{"name": name, "deleted": true}, nil
+}
+
+func (s *Server) dataConnection(r *http.Request, p principal) (any, error) {
+	return s.eng.DataConnection(r.Context(), p.name, r.PathValue("name"))
+}
+
+func (s *Server) dataSnapshots(r *http.Request, _ principal) (any, error) {
+	return s.eng.DataSnapshots(r.Context(), r.PathValue("name"))
+}
+
+type DataSnapshotRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func (s *Server) snapshotData(r *http.Request, p principal) (any, error) {
+	var req DataSnapshotRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	return s.eng.SnapshotData(r.Context(), p.name, r.PathValue("name"), req.Reason)
+}
+
+type DataRestoreRequest struct {
+	Snapshot string `json:"snapshot"`
+	Reason   string `json:"reason"`
+}
+
+func (s *Server) restoreData(r *http.Request, p principal) (any, error) {
+	var req DataRestoreRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		return nil, apierr.New(400, "reason_required", "restoring replaces all data; give a reason")
+	}
+	msg, err := s.eng.RestoreData(r.Context(), p.name, r.PathValue("name"), req.Snapshot, req.Reason)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"message": msg}, nil
 }

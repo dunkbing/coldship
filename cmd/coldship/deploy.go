@@ -26,11 +26,12 @@ type deployFlags struct {
 	production                    bool
 	env, unsetEnv, domains        []string
 	removeDomains, dbs, volumes   []string
+	uses, unuses                  []string
 }
 
 func (f *deployFlags) any(cmd *cobra.Command) bool {
 	for _, n := range []string{"name", "image", "git", "ref", "memory", "port", "host-port", "production",
-		"env", "unset-env", "domain", "remove-domain", "db", "volume"} {
+		"env", "unset-env", "domain", "remove-domain", "db", "volume", "use", "unuse"} {
 		if cmd.Flags().Changed(n) {
 			return true
 		}
@@ -104,6 +105,8 @@ Stops with exit code 3 if the change needs a human's approval.`,
 	fl.StringArrayVar(&f.unsetEnv, "unset-env", nil, "remove an environment variable (repeatable)")
 	fl.StringArrayVar(&f.dbs, "db", nil, "add a database: postgres or redis, optionally postgres:name (repeatable)")
 	fl.StringArrayVar(&f.volumes, "volume", nil, "add a persistent volume, name:/path (repeatable)")
+	fl.StringArrayVar(&f.uses, "use", nil, "connect a data service (coldship data list), or name=ENV_VAR to rename its URL (repeatable)")
+	fl.StringArrayVar(&f.unuses, "unuse", nil, "disconnect a data service; its data stays (repeatable)")
 	fl.StringVar(&f.memory, "memory", "", "memory limit, e.g. 512m")
 	fl.BoolVar(&f.production, "production", false, "mark the app as production: destructive changes then need a human's approval")
 	return cmd
@@ -113,7 +116,7 @@ var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
 func (f *deployFlags) patch(cmd *cobra.Command) (*spec.Patch, error) {
 	p := &spec.Patch{Name: f.name, Image: f.image, Port: f.port, HostPort: f.hostPort, Memory: f.memory,
-		UnsetEnv: f.unsetEnv, AddDomains: f.domains, RemoveDomains: f.removeDomains}
+		UnsetEnv: f.unsetEnv, AddDomains: f.domains, RemoveDomains: f.removeDomains, AddUses: f.uses, RemoveUses: f.unuses}
 	if f.production {
 		p.Stage = spec.StageProduction
 	}
