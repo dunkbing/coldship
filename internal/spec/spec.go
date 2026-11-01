@@ -48,7 +48,11 @@ type Build struct {
 // Database engines Coldship manages.
 const (
 	EnginePostgres = "postgres"
+	EngineMySQL    = "mysql"
 	EngineRedis    = "redis"
+	// EngineS3 is S3-compatible object storage (SeaweedFS). It is only
+	// available as a standalone data service, not as an app's database.
+	EngineS3 = "s3"
 )
 
 // Database is a managed database attached to the app. Coldship runs it, keeps
@@ -56,15 +60,21 @@ const (
 // snapshots it before any destructive change.
 type Database struct {
 	Name    string `json:"name" yaml:"name" jsonschema:"database name, lowercase letters, digits and dashes"`
-	Engine  string `json:"engine" yaml:"engine" jsonschema:"postgres or redis"`
-	Version string `json:"version,omitempty" yaml:"version,omitempty" jsonschema:"major version, e.g. 17 for postgres or 7 for redis (default: latest supported)"`
-	Env     string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"env var the connection URL is injected as (default DATABASE_URL for postgres, REDIS_URL for redis)"`
+	Engine  string `json:"engine" yaml:"engine" jsonschema:"postgres, mysql or redis"`
+	Version string `json:"version,omitempty" yaml:"version,omitempty" jsonschema:"major version, e.g. 17 for postgres, 8.4 for mysql or 7 for redis (default: latest supported)"`
+	Env     string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"env var the connection URL is injected as (default DATABASE_URL for postgres and mysql, REDIS_URL for redis)"`
 }
 
 var supportedVersions = map[string][]string{
 	EnginePostgres: {"14", "15", "16", "17"},
+	EngineMySQL:    {"8.4"},
 	EngineRedis:    {"6", "7"},
+	EngineS3:       {"4.51"},
 }
+
+// Versions lists the supported versions of an engine, oldest first; the
+// last is the default.
+func Versions(engine string) []string { return supportedVersions[engine] }
 
 // OnPush says what a Git webhook push does. It applies only to apps built
 // from Git.
@@ -167,7 +177,7 @@ func (a *App) Normalize() {
 		}
 		if d.Env == "" {
 			switch d.Engine {
-			case EnginePostgres:
+			case EnginePostgres, EngineMySQL:
 				d.Env = "DATABASE_URL"
 			case EngineRedis:
 				d.Env = "REDIS_URL"
@@ -287,8 +297,8 @@ func (a *App) Validate() error {
 			return apierr.Invalid(f+".name", "database name %q must be lowercase letters, digits and dashes", d.Name)
 		case dbNames[d.Name]:
 			return apierr.Invalid(f+".name", "database %q is listed twice", d.Name)
-		case !ok:
-			return apierr.Invalid(f+".engine", "engine %q is not supported; use postgres or redis", d.Engine).
+		case !ok || d.Engine == EngineS3:
+			return apierr.Invalid(f+".engine", "engine %q is not supported for an app's database; use postgres, mysql or redis (S3 storage is a data service: coldship data create s3 <name>)", d.Engine).
 				WithFix(map[string]any{"engine": EnginePostgres})
 		case !contains(vs, d.Version):
 			return apierr.Invalid(f+".version", "%s version %q is not supported; use one of %s", d.Engine, d.Version, strings.Join(vs, ", ")).
