@@ -5,7 +5,7 @@ import { useSession } from '../App'
 import { fmtTime, timeUntil, useLoad } from '../hooks'
 import { DeployStatus, ErrorBox, GitIcon, HealthPill, healthOf, Mono, shortRepo, StageBadge, Time } from '../components/ui'
 
-type Tab = 'diagnose' | 'deployments' | 'logs'
+type Tab = 'diagnose' | 'deployments' | 'logs' | 'databases'
 
 export default function AppDetail() {
   const { name = '' } = useParams()
@@ -51,15 +51,16 @@ export default function AppDetail() {
       </div>
 
       <div className="tabs" role="tablist">
-        {(['diagnose', 'deployments', 'logs'] as Tab[]).map((t) => (
+        {(['diagnose', 'deployments', 'logs', ...(a.databases?.length ? ['databases'] : [])] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setParams({ tab: t })}>
-            {t === 'diagnose' ? 'Diagnose' : t === 'deployments' ? 'Deployments' : 'Logs'}
+            {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
       {tab === 'diagnose' && <DiagnoseTab name={name} />}
       {tab === 'deployments' && <DeploymentsTab name={name} />}
       {tab === 'logs' && <LogsTab name={name} />}
+      {tab === 'databases' && <DatabasesTab app={a} onChange={app.reload} />}
     </>
   )
 }
@@ -179,6 +180,20 @@ function SpecCard({ a }: { a: AppView }) {
                     {k}
                   </span>
                 ))}
+            </span>
+          ) : (
+            '—'
+          )}
+        </dd>
+        <dt>Databases</dt>
+        <dd>
+          {s.databases?.length ? (
+            <span className="chips">
+              {s.databases.map((d) => (
+                <span key={d.name} className="chip" title={`connection URL injected as ${d.env}`}>
+                  {d.name} · {d.engine} {d.version} → {d.env}
+                </span>
+              ))}
             </span>
           ) : (
             '—'
@@ -406,6 +421,125 @@ function DeployLogView({ deployment }: { deployment: string }) {
       <TailLog lines={l.data?.lines} />
     </div>
   )
+}
+
+function DatabasesTab({ app, onChange }: { app: AppView; onChange: () => void }) {
+  const me = useSession()
+  const snaps = useLoad(() => api.snapshots(app.name), [app.name], 15000)
+  const [busy, setBusy] = useState<string>()
+  const [error, setError] = useState<Error>()
+  async function snapshot(db: string) {
+    setBusy(db)
+    setError(undefined)
+    try {
+      await api.snapshot(app.name, db)
+      snaps.reload()
+      onChange()
+    } catch (e) {
+      setError(e as Error)
+    } finally {
+      setBusy(undefined)
+    }
+  }
+  return (
+    <>
+      {error && <ErrorBox error={error} />}
+      <div className="card table-card">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Database</th>
+              <th>Status</th>
+              <th>Injected as</th>
+              <th>Host</th>
+              <th>Latest snapshot</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {app.databases?.map((d) => (
+              <tr key={d.name}>
+                <td>
+                  <strong>{d.name}</strong>
+                  <div className="small muted">
+                    {d.engine} {d.version}
+                  </div>
+                </td>
+                <td>
+                  <HealthPill health={d.status.running ? 'healthy' : d.status.exists ? 'failing' : 'stopped'} />
+                </td>
+                <td>
+                  <Mono>{d.env}</Mono>
+                </td>
+                <td>
+                  <Mono>{d.host}</Mono>
+                </td>
+                <td>{d.last_snapshot ? <Time iso={d.last_snapshot.created_at} /> : <span className="muted">none yet</span>}</td>
+                <td>
+                  {me.scope !== 'read' && (
+                    <button className="btn btn-sm" disabled={busy === d.name} onClick={() => snapshot(d.name)}>
+                      {busy === d.name ? 'Snapshotting…' : 'Snapshot now'}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="small muted section-note">
+        Hangar snapshots every database daily and before any change that would delete data. Credentials are never shown; the
+        app receives the connection URL in its env.
+      </p>
+
+      <h2 className="section-title">Snapshots</h2>
+      {snaps.error && <ErrorBox error={snaps.error} />}
+      {snaps.data?.length === 0 && <div className="muted">No snapshots yet.</div>}
+      {snaps.data && snaps.data.length > 0 && (
+        <div className="card table-card">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Snapshot</th>
+                <th>Database</th>
+                <th>Size</th>
+                <th>Taken</th>
+                <th>By</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snaps.data.map((s) => (
+                <tr key={s.id}>
+                  <td>
+                    <Mono>{s.id}</Mono>
+                  </td>
+                  <td>{s.database}</td>
+                  <td>{fmtBytes(s.size)}</td>
+                  <td>
+                    <Time iso={s.created_at} />
+                  </td>
+                  <td>{s.actor}</td>
+                  <td className="reason">{s.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="small muted section-note">
+        To restore one, run <Mono>hangar db restore {app.name} &lt;database&gt; &lt;snapshot&gt; --reason "…"</Mono>. It is planned like any
+        destructive change{app.spec?.stage === 'production' ? ' and needs an admin approval' : ''}, and the current data is snapshotted first.
+      </p>
+    </>
+  )
+}
+
+function fmtBytes(n: number) {
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`
+  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`
+  return `${n} B`
 }
 
 function LogsTab({ name }: { name: string }) {

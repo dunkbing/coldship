@@ -36,6 +36,9 @@ func serverCmd() *cobra.Command {
 	var previewDomain string
 	var previewTTL, previewMaxTTL time.Duration
 	var maxPreviews int
+	var snapshotDir string
+	var snapshotKeep int
+	var snapshotInterval time.Duration
 	var httpPort, httpsPort int
 	cmd := &cobra.Command{
 		Use:   "server",
@@ -60,6 +63,14 @@ func serverCmd() *cobra.Command {
 				px = proxy.NewCaddy(filepath.Join(filepath.Dir(dataAbs), "hangar-proxy"), httpPort, httpsPort, acmeEmail)
 			}
 			eng := engine.New(st, rt, bd, px)
+			if snapshotDir == "" {
+				dataAbs, err := filepath.Abs(data)
+				if err != nil {
+					return err
+				}
+				snapshotDir = filepath.Join(filepath.Dir(dataAbs), "hangar-snapshots")
+			}
+			eng.SnapshotDir, eng.SnapshotKeep = snapshotDir, snapshotKeep
 			eng.Previews = engine.PreviewConfig{Domain: previewDomain, DefaultTTL: previewTTL, MaxTTL: previewMaxTTL, Max: maxPreviews}
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -108,6 +119,24 @@ func serverCmd() *cobra.Command {
 			}
 			apiSrv.SetUpdater(checker)
 			go checker.Run(ctx)
+			if snapshotInterval > 0 {
+				go func() {
+					t := time.NewTicker(snapshotInterval)
+					defer t.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-t.C:
+						}
+						if n, err := eng.ScheduledSnapshots(ctx); err != nil {
+							log.Error("scheduled database snapshots", "err", err, "done", n)
+						} else if n > 0 {
+							log.Info("scheduled database snapshots", "databases", n)
+						}
+					}
+				}()
+			}
 			go func() {
 				// Delete previews whose time is up.
 				t := time.NewTicker(time.Minute)
@@ -156,6 +185,9 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&previewTTL, "preview-ttl", 24*time.Hour, "default lifetime of a preview")
 	cmd.Flags().DurationVar(&previewMaxTTL, "preview-max-ttl", 7*24*time.Hour, "longest lifetime a preview may ask for")
 	cmd.Flags().IntVar(&maxPreviews, "max-previews", 20, "most previews that may exist at once")
+	cmd.Flags().StringVar(&snapshotDir, "snapshot-dir", envOr("HANGAR_SNAPSHOT_DIR", ""), "where database snapshots are kept (default: hangar-snapshots next to --data)")
+	cmd.Flags().IntVar(&snapshotKeep, "snapshot-keep", 20, "snapshots to keep per database (older ones are deleted)")
+	cmd.Flags().DurationVar(&snapshotInterval, "db-snapshot-interval", 24*time.Hour, "how often to snapshot every database (0 disables scheduled snapshots)")
 	cmd.Flags().BoolVar(&proxyOn, "proxy", true, "run the Caddy proxy that serves app domains with automatic HTTPS")
 	cmd.Flags().IntVar(&httpPort, "proxy-http-port", 80, "host port for the proxy's HTTP listener")
 	cmd.Flags().IntVar(&httpsPort, "proxy-https-port", 443, "host port for the proxy's HTTPS listener")

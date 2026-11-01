@@ -50,6 +50,9 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
 	s.route("GET /v1/deployments/{id}/log", store.ScopeRead, s.deployLog)
+	s.route("GET /v1/apps/{name}/databases", store.ScopeRead, s.databases)
+	s.route("GET /v1/apps/{name}/snapshots", store.ScopeRead, s.snapshots)
+	s.route("POST /v1/apps/{name}/databases/{db}/snapshots", store.ScopeDeploy, s.createSnapshot)
 	s.route("POST /v1/previews", store.ScopeDeploy, s.createPreview)
 	s.route("GET /v1/previews", store.ScopeRead, s.listPreviews)
 	s.route("DELETE /v1/previews/{name}", store.ScopeDeploy, s.deletePreview)
@@ -247,6 +250,26 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]bool{"signed_out": true})
+}
+
+func (s *Server) databases(r *http.Request, _ principal) (any, error) {
+	return s.eng.Databases(r.Context(), r.PathValue("name"))
+}
+
+func (s *Server) snapshots(r *http.Request, _ principal) (any, error) {
+	return s.eng.Snapshots(r.Context(), r.PathValue("name"), r.URL.Query().Get("database"))
+}
+
+type SnapshotRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func (s *Server) createSnapshot(r *http.Request, p principal) (any, error) {
+	var req SnapshotRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	return s.eng.Snapshot(r.Context(), p.name, r.PathValue("name"), r.PathValue("db"), req.Reason)
 }
 
 func (s *Server) deployLog(r *http.Request, _ principal) (any, error) {

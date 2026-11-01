@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"hangar/internal/apierr"
@@ -25,11 +26,15 @@ type Fake struct {
 	FailOutput []string
 	Deploys    int
 	LastOpts   DeployOptions
+	// DBs holds fake database contents by "app/name".
+	DBs          map[string]string
+	FailSnapshot error
+	FailDatabase error
 }
 
 func NewFake() *Fake {
 	return &Fake{Containers: map[string]spec.App{}, Volumes: map[string]bool{},
-		LogLines: map[string][]string{}, Statuses: map[string]Status{}}
+		LogLines: map[string][]string{}, Statuses: map[string]Status{}, DBs: map[string]string{}}
 }
 
 func (f *Fake) Deploy(ctx context.Context, depID string, app spec.App, opts DeployOptions) error {
@@ -108,4 +113,55 @@ func (f *Fake) Logs(_ context.Context, app string, tail int, _ string) ([]string
 		l = l[len(l)-tail:]
 	}
 	return append([]string{}, l...), nil
+}
+
+func (f *Fake) EnsureDatabase(_ context.Context, db DB, _ io.Writer) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.FailDatabase; err != nil {
+		f.FailDatabase = nil
+		return err
+	}
+	if _, ok := f.DBs[db.App+"/"+db.Name]; !ok {
+		f.DBs[db.App+"/"+db.Name] = ""
+	}
+	return nil
+}
+
+func (f *Fake) DatabaseStatus(_ context.Context, app, name string) (DBStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.DBs[app+"/"+name]; ok {
+		return DBStatus{Exists: true, Running: true, State: "running"}, nil
+	}
+	return DBStatus{}, nil
+}
+
+func (f *Fake) RemoveDatabase(_ context.Context, app, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.DBs, app+"/"+name)
+	return nil
+}
+
+func (f *Fake) SnapshotDatabase(_ context.Context, db DB, w io.Writer) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.FailSnapshot; err != nil {
+		f.FailSnapshot = nil
+		return err
+	}
+	_, err := io.WriteString(w, f.DBs[db.App+"/"+db.Name])
+	return err
+}
+
+func (f *Fake) RestoreDatabase(_ context.Context, db DB, r io.Reader, _ io.Writer) error {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.DBs[db.App+"/"+db.Name] = string(b)
+	return nil
 }

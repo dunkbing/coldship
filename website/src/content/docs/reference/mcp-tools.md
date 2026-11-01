@@ -9,7 +9,7 @@ description: The tools hangar mcp exposes to AI agents.
 |---|---|---|---|
 | `hangar_list_apps` | — | read-only | All apps with their redacted spec |
 | `hangar_get_app` | `app` | read-only | Spec, container status, latest deployment |
-| `hangar_plan` | `spec` or `delete`, optional `redeploy` | not destructive, idempotent | Dry run. Returns the plan id, changes, `destructive`, `requires_approval`, `next_step` |
+| `hangar_plan` | `spec`, `delete` or `restore: {app, database, snapshot}`, optional `redeploy` | not destructive, idempotent | Dry run. Returns the plan id, changes, `destructive`, `requires_approval`, `next_step` |
 | `hangar_get_plan` | `plan_id` | read-only | A plan and its status |
 | `hangar_apply` | `plan_id`, `reason` | destructive, idempotent | Apply a reviewed plan. Safe to retry. |
 | `hangar_rollback` | `app`, `reason`, optional `to_deployment` | destructive | Redeploy the last good or a specific deployment |
@@ -19,6 +19,9 @@ description: The tools hangar mcp exposes to AI agents.
 | `hangar_preview_create` | `app`, `ref` or `image`, optional `name`, `ttl`, `env`, `inherit_env`, `reason` | not destructive, idempotent | Create or update a [preview](/guides/previews/). Returns its name, URLs and expiry |
 | `hangar_preview_list` | — | read-only | Previews, soonest-expiring first |
 | `hangar_preview_delete` | `name`, optional `reason` | destructive, idempotent | Delete a preview (never a regular app) |
+| `hangar_db_list` | `app` | read-only | Databases: engine, status, injected env var, latest snapshot. Never credentials |
+| `hangar_db_snapshot` | `app`, `database`, optional `reason` | not destructive | Snapshot a database now (e.g. before a migration) |
+| `hangar_db_snapshots` | `app`, optional `database` | read-only | Snapshots, newest first |
 | `hangar_deploy_log` | `deployment` | read-only | What happened during a deployment: build output, start, health checks, a failed container's output. Untrusted |
 
 There is intentionally **no approve tool**. Approving destructive production changes is a human step.

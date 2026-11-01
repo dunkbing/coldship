@@ -25,6 +25,7 @@ export interface Spec {
   port?: number
   host_port?: number
   domains?: string[]
+  databases?: { name: string; engine: 'postgres' | 'redis'; version?: string; env?: string }[]
   health?: { path?: string; timeout?: string }
   memory?: string
   env?: Record<string, string>
@@ -72,10 +73,34 @@ export interface Deployment {
   finished_at?: string
 }
 
+export interface Snapshot {
+  id: string
+  app: string
+  database: string
+  engine: string
+  version: string
+  size: number
+  reason: string
+  actor: string
+  created_at: string
+}
+
+export interface DatabaseView {
+  name: string
+  engine: string
+  version: string
+  env: string
+  host: string
+  status: { exists: boolean; running: boolean; state?: string }
+  snapshots: number
+  last_snapshot?: Snapshot
+}
+
 export interface AppView extends App {
   runtime?: RuntimeStatus
   latest_deployment?: Deployment
   urls?: string[]
+  databases?: DatabaseView[]
 }
 
 export interface Change {
@@ -236,6 +261,9 @@ export const api = {
   plans: (status?: string, limit = 100) =>
     req<Plan[]>('GET', `/v1/plans?limit=${limit}${status ? `&status=${enc(status)}` : ''}`),
   approve: (id: string) => req<Plan>('POST', `/v1/plans/${enc(id)}/approve`),
+  snapshots: (app: string, database = '') => req<Snapshot[]>('GET', `/v1/apps/${enc(app)}/snapshots?database=${enc(database)}`),
+  snapshot: (app: string, database: string, reason = 'manual, from the dashboard') =>
+    req<Snapshot>('POST', `/v1/apps/${enc(app)}/databases/${enc(database)}/snapshots`, { reason }),
   previews: () => req<App[]>('GET', '/v1/previews'),
   deletePreview: (name: string, reason = 'deleted from the dashboard') =>
     req<ApplyResult>('DELETE', `/v1/previews/${enc(name)}?reason=${enc(reason)}`),

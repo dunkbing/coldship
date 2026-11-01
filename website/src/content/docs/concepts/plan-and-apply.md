@@ -38,6 +38,8 @@ For apps [built from Git](/guides/build-from-git/), planning also resolves `buil
 |---|---|
 | Deleting an app | Yes, always |
 | Removing a volume from the spec | Yes: the volume and its data are deleted |
+| Removing a database from the spec | Yes: it is snapshotted, then deleted |
+| Restoring a database snapshot | Yes: it replaces the current data (which is snapshotted first) |
 | Image, port, memory, env changes | No (but the container restarts) |
 | Adding a volume | No |
 

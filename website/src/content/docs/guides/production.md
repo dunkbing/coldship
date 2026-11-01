@@ -25,7 +25,7 @@ All platform state (apps, plans, deployments, tokens, audit log) is in one SQLit
 sqlite3 hangar.db ".backup 'hangar-backup.db'"
 ```
 
-App data lives in Docker volumes named `hangar-<app>-<volume>`. Back those up separately.
+App data lives in Docker volumes named `hangar-<app>-<volume>`. Back those up separately. [Managed databases](/guides/databases/) are snapshotted daily into `--snapshot-dir`; copy that directory off the server too, since a disk failure takes local snapshots with it.
 
 ## Git builds
 

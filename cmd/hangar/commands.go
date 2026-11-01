@@ -366,7 +366,7 @@ func tokenCmd() *cobra.Command {
 func printPlan(p *store.Plan) {
 	fmt.Printf("Plan %s for app %q (%s)\n", p.ID, p.App, p.Action)
 	for _, c := range p.Changes {
-		sym := map[string]string{planner.OpCreate: "+", planner.OpUpdate: "~", planner.OpDelete: "-", planner.OpRedeploy: "↻"}[c.Op]
+		sym := map[string]string{planner.OpCreate: "+", planner.OpUpdate: "~", planner.OpDelete: "-", planner.OpRedeploy: "↻", "restore": "⟲"}[c.Op]
 		line := fmt.Sprintf("  %s %s", sym, c.Path)
 		switch {
 		case c.From != nil && c.To != nil:

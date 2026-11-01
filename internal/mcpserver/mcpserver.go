@@ -50,15 +50,16 @@ func New(c *client.Client, version string) *mcp.Server {
 		})
 
 	type planArgs struct {
-		Spec     *spec.App `json:"spec,omitempty" jsonschema:"desired app spec, to create or update an app"`
-		Delete   string    `json:"delete,omitempty" jsonschema:"name of an app to delete (instead of spec)"`
-		Redeploy bool      `json:"redeploy,omitempty" jsonschema:"recreate the container even if the spec is unchanged"`
+		Spec     *spec.App              `json:"spec,omitempty" jsonschema:"desired app spec, to create or update an app"`
+		Delete   string                 `json:"delete,omitempty" jsonschema:"name of an app to delete (instead of spec)"`
+		Redeploy bool                   `json:"redeploy,omitempty" jsonschema:"recreate the container even if the spec is unchanged"`
+		Restore  *engine.RestoreRequest `json:"restore,omitempty" jsonschema:"plan restoring a database from a snapshot: {app, database, snapshot}. Destructive; production restores need human approval"`
 	}
 	mcp.AddTool(s, &mcp.Tool{Name: "hangar_plan",
 		Description: "Dry run: compute what would change to make an app match a spec (or to delete it). Changes nothing. Returns a plan id, the changes, and whether they are destructive or need human approval.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: &f, IdempotentHint: true}},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in planArgs) (*mcp.CallToolResult, any, error) {
-			return result(c.Plan(ctx, engine.PlanRequest{Spec: in.Spec, Delete: in.Delete, Redeploy: in.Redeploy}))
+			return result(c.Plan(ctx, engine.PlanRequest{Spec: in.Spec, Delete: in.Delete, Redeploy: in.Redeploy, Restore: in.Restore}))
 		})
 
 	type planID struct {
@@ -138,6 +139,29 @@ func New(c *client.Client, version string) *mcp.Server {
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: &t, IdempotentHint: true}},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in previewDel) (*mcp.CallToolResult, any, error) {
 			return result(c.DeletePreview(ctx, in.Name, in.Reason))
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "hangar_db_list", Description: "List an app's managed databases: engine, version, status, injected env var and latest snapshot. Credentials are never returned.", Annotations: ro},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in appArg) (*mcp.CallToolResult, any, error) {
+			return result(c.Databases(ctx, in.App))
+		})
+	type snapArgs struct {
+		App      string `json:"app" jsonschema:"app name"`
+		Database string `json:"database" jsonschema:"database name"`
+		Reason   string `json:"reason,omitempty" jsonschema:"why, for the audit log"`
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "hangar_db_snapshot", Description: "Take a snapshot of a database now (e.g. before a risky migration). Hangar also snapshots automatically before destructive changes and on a schedule.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: &f}},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in snapArgs) (*mcp.CallToolResult, any, error) {
+			return result(c.Snapshot(ctx, in.App, in.Database, in.Reason))
+		})
+	type snapsArgs struct {
+		App      string `json:"app" jsonschema:"app name"`
+		Database string `json:"database,omitempty" jsonschema:"only this database"`
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "hangar_db_snapshots", Description: "List an app's database snapshots, newest first. Restore one with hangar_plan {restore: {app, database, snapshot}} then hangar_apply.", Annotations: ro},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in snapsArgs) (*mcp.CallToolResult, any, error) {
+			return result(c.Snapshots(ctx, in.App, in.Database))
 		})
 
 	type depArg struct {

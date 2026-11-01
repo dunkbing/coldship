@@ -48,6 +48,15 @@ type Runtime interface {
 	RemoveVolumes(ctx context.Context, app string, volumes []string) error
 	Status(ctx context.Context, app string) (Status, error)
 	Logs(ctx context.Context, app string, tail int, since string) ([]string, error)
+
+	// EnsureDatabase creates or starts a managed database and waits until
+	// it accepts connections.
+	EnsureDatabase(ctx context.Context, db DB, log io.Writer) error
+	DatabaseStatus(ctx context.Context, app, name string) (DBStatus, error)
+	// RemoveDatabase deletes the database container and its data volume.
+	RemoveDatabase(ctx context.Context, app, name string) error
+	SnapshotDatabase(ctx context.Context, db DB, w io.Writer) error
+	RestoreDatabase(ctx context.Context, db DB, r io.Reader, log io.Writer) error
 }
 
 // Network is the Docker network shared by apps and the proxy. Apps can reach

@@ -39,6 +39,27 @@ type Build struct {
 	Args       map[string]string `json:"args,omitempty" yaml:"args,omitempty" jsonschema:"docker build args. Visible in plans and image history: never put secrets here"`
 }
 
+// Database engines Hangar manages.
+const (
+	EnginePostgres = "postgres"
+	EngineRedis    = "redis"
+)
+
+// Database is a managed database attached to the app. Hangar runs it, keeps
+// its data in a volume, injects its connection URL into the app's env, and
+// snapshots it before any destructive change.
+type Database struct {
+	Name    string `json:"name" yaml:"name" jsonschema:"database name, lowercase letters, digits and dashes"`
+	Engine  string `json:"engine" yaml:"engine" jsonschema:"postgres or redis"`
+	Version string `json:"version,omitempty" yaml:"version,omitempty" jsonschema:"major version, e.g. 17 for postgres or 7 for redis (default: latest supported)"`
+	Env     string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"env var the connection URL is injected as (default DATABASE_URL for postgres, REDIS_URL for redis)"`
+}
+
+var supportedVersions = map[string][]string{
+	EnginePostgres: {"14", "15", "16", "17"},
+	EngineRedis:    {"6", "7"},
+}
+
 // Health tells Hangar when a newly started container is ready for traffic.
 type Health struct {
 	Path    string `json:"path,omitempty" yaml:"path,omitempty" jsonschema:"HTTP path that returns 2xx or 3xx when the app is ready, e.g. /healthz. Without it, Hangar waits for the port to accept connections"`
@@ -56,17 +77,18 @@ func (h *Health) TimeoutOrDefault() time.Duration {
 }
 
 type App struct {
-	Name     string            `json:"name" yaml:"name" jsonschema:"app name: lowercase letters, digits and dashes, starting with a letter"`
-	Stage    Stage             `json:"stage,omitempty" yaml:"stage,omitempty" jsonschema:"production, staging (default) or preview. Destructive changes to production need human approval"`
-	Image    string            `json:"image,omitempty" yaml:"image,omitempty" jsonschema:"container image to run, e.g. nginx:1.27. Set either image or build"`
-	Build    *Build            `json:"build,omitempty" yaml:"build,omitempty" jsonschema:"build the image from a Git repository instead of using image"`
-	Port     int               `json:"port,omitempty" yaml:"port,omitempty" jsonschema:"port the app listens on inside the container"`
-	HostPort int               `json:"host_port,omitempty" yaml:"host_port,omitempty" jsonschema:"host port to publish the container port on (requires port). Apps with a host_port cannot be deployed without downtime; prefer domains"`
-	Domains  []string          `json:"domains,omitempty" yaml:"domains,omitempty" jsonschema:"hostnames routed to this app through Hangar's proxy with automatic HTTPS, e.g. app.example.com (requires port)"`
-	Health   *Health           `json:"health,omitempty" yaml:"health,omitempty" jsonschema:"readiness check used before switching traffic to a new version"`
-	Memory   string            `json:"memory,omitempty" yaml:"memory,omitempty" jsonschema:"memory limit such as 256m or 1g"`
-	Env      map[string]string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"environment variables; values are write-only and redacted in all output"`
-	Volumes  []Volume          `json:"volumes,omitempty" yaml:"volumes,omitempty" jsonschema:"persistent volumes. Removing one from the spec deletes its data"`
+	Name      string            `json:"name" yaml:"name" jsonschema:"app name: lowercase letters, digits and dashes, starting with a letter"`
+	Stage     Stage             `json:"stage,omitempty" yaml:"stage,omitempty" jsonschema:"production, staging (default) or preview. Destructive changes to production need human approval"`
+	Image     string            `json:"image,omitempty" yaml:"image,omitempty" jsonschema:"container image to run, e.g. nginx:1.27. Set either image or build"`
+	Build     *Build            `json:"build,omitempty" yaml:"build,omitempty" jsonschema:"build the image from a Git repository instead of using image"`
+	Port      int               `json:"port,omitempty" yaml:"port,omitempty" jsonschema:"port the app listens on inside the container"`
+	HostPort  int               `json:"host_port,omitempty" yaml:"host_port,omitempty" jsonschema:"host port to publish the container port on (requires port). Apps with a host_port cannot be deployed without downtime; prefer domains"`
+	Domains   []string          `json:"domains,omitempty" yaml:"domains,omitempty" jsonschema:"hostnames routed to this app through Hangar's proxy with automatic HTTPS, e.g. app.example.com (requires port)"`
+	Health    *Health           `json:"health,omitempty" yaml:"health,omitempty" jsonschema:"readiness check used before switching traffic to a new version"`
+	Memory    string            `json:"memory,omitempty" yaml:"memory,omitempty" jsonschema:"memory limit such as 256m or 1g"`
+	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"environment variables; values are write-only and redacted in all output"`
+	Volumes   []Volume          `json:"volumes,omitempty" yaml:"volumes,omitempty" jsonschema:"persistent volumes. Removing one from the spec deletes its data"`
+	Databases []Database        `json:"databases,omitempty" yaml:"databases,omitempty" jsonschema:"managed databases. Their connection URLs are injected into env. Removing one deletes its data (after a snapshot)"`
 }
 
 var (
@@ -101,7 +123,7 @@ func Parse(b []byte) (*App, error) {
 	var a App
 	if err := dec.Decode(&a); err != nil {
 		return nil, apierr.New(400, "invalid_spec", "cannot parse spec: %v", err).
-			WithHint("allowed fields: name, stage, image, build (git, ref, commit, context, dockerfile, args), port, host_port, domains, health (path, timeout), memory, env, volumes")
+			WithHint("allowed fields: name, stage, image, build (git, ref, commit, context, dockerfile, args), port, host_port, domains, health (path, timeout), memory, env, volumes, databases (name, engine, version, env)")
 	}
 	a.Normalize()
 	return &a, a.Validate()
@@ -111,6 +133,22 @@ func Parse(b []byte) (*App, error) {
 func (a *App) Normalize() {
 	if a.Stage == "" {
 		a.Stage = StageStaging
+	}
+	for i := range a.Databases {
+		d := &a.Databases[i]
+		if d.Version == "" {
+			if vs := supportedVersions[d.Engine]; len(vs) > 0 {
+				d.Version = vs[len(vs)-1]
+			}
+		}
+		if d.Env == "" {
+			switch d.Engine {
+			case EnginePostgres:
+				d.Env = "DATABASE_URL"
+			case EngineRedis:
+				d.Env = "REDIS_URL"
+			}
+		}
 	}
 	if b := a.Build; b != nil {
 		if b.Context == "" {
@@ -198,6 +236,32 @@ func (a *App) Validate() error {
 			return apierr.Invalid("port", "health is set but port is not; health checks connect to the app's port")
 		}
 	}
+	dbNames, dbEnvs := map[string]bool{}, map[string]bool{}
+	for i, d := range a.Databases {
+		f := fmt.Sprintf("databases[%d]", i)
+		vs, ok := supportedVersions[d.Engine]
+		switch {
+		case !nameRe.MatchString(d.Name):
+			return apierr.Invalid(f+".name", "database name %q must be lowercase letters, digits and dashes", d.Name)
+		case dbNames[d.Name]:
+			return apierr.Invalid(f+".name", "database %q is listed twice", d.Name)
+		case !ok:
+			return apierr.Invalid(f+".engine", "engine %q is not supported; use postgres or redis", d.Engine).
+				WithFix(map[string]any{"engine": EnginePostgres})
+		case !contains(vs, d.Version):
+			return apierr.Invalid(f+".version", "%s version %q is not supported; use one of %s", d.Engine, d.Version, strings.Join(vs, ", ")).
+				WithFix(map[string]any{"version": vs[len(vs)-1]})
+		case !envKeyRe.MatchString(d.Env):
+			return apierr.Invalid(f+".env", "env %q must match [A-Za-z_][A-Za-z0-9_]*", d.Env)
+		case dbEnvs[d.Env]:
+			return apierr.Invalid(f+".env", "two databases inject %s; give each its own env name", d.Env).
+				WithFix(map[string]any{"env": strings.ToUpper(strings.ReplaceAll(d.Name, "-", "_")) + "_URL"})
+		}
+		if _, clash := a.Env[d.Env]; clash {
+			return apierr.Invalid(f+".env", "env %s is set in env and also injected by database %s; remove one", d.Env, d.Name)
+		}
+		dbNames[d.Name], dbEnvs[d.Env] = true, true
+	}
 	if a.Memory != "" && !memoryRe.MatchString(a.Memory) {
 		return apierr.Invalid("memory", "memory %q must look like 256m or 1g", a.Memory).WithFix(map[string]any{"memory": "512m"})
 	}
@@ -260,6 +324,15 @@ func (b *Build) validate() error {
 		}
 	}
 	return nil
+}
+
+func contains(xs []string, x string) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
 }
 
 func bareHost(s string) string {
@@ -352,6 +425,7 @@ func (a *App) Redacted() *App {
 	}
 	c.Volumes = append([]Volume(nil), a.Volumes...)
 	c.Domains = append([]string(nil), a.Domains...)
+	c.Databases = append([]Database(nil), a.Databases...)
 	if a.Health != nil {
 		h := *a.Health
 		c.Health = &h
@@ -374,6 +448,7 @@ func (a *App) Clone() *App {
 	}
 	c.Volumes = append([]Volume(nil), a.Volumes...)
 	c.Domains = append([]string(nil), a.Domains...)
+	c.Databases = append([]Database(nil), a.Databases...)
 	if a.Health != nil {
 		h := *a.Health
 		c.Health = &h

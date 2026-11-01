@@ -139,6 +139,21 @@ func (c *Client) DeployLog(ctx context.Context, deployment string) (*engine.Depl
 	return &out, c.do(ctx, "GET", "/v1/deployments/"+esc(deployment)+"/log", nil, &out)
 }
 
+func (c *Client) Databases(ctx context.Context, app string) ([]engine.DatabaseView, error) {
+	var out []engine.DatabaseView
+	return out, c.do(ctx, "GET", "/v1/apps/"+esc(app)+"/databases", nil, &out)
+}
+
+func (c *Client) Snapshots(ctx context.Context, app, database string) ([]store.Snapshot, error) {
+	var out []store.Snapshot
+	return out, c.do(ctx, "GET", "/v1/apps/"+esc(app)+"/snapshots?database="+url.QueryEscape(database), nil, &out)
+}
+
+func (c *Client) Snapshot(ctx context.Context, app, database, reason string) (*store.Snapshot, error) {
+	var out store.Snapshot
+	return &out, c.do(ctx, "POST", "/v1/apps/"+esc(app)+"/databases/"+esc(database)+"/snapshots", api.SnapshotRequest{Reason: reason}, &out)
+}
+
 func (c *Client) CreatePreview(ctx context.Context, req engine.PreviewRequest) (*engine.PreviewResult, error) {
 	var out engine.PreviewResult
 	return &out, c.do(ctx, "POST", "/v1/previews", req, &out)

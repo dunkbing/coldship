@@ -34,6 +34,7 @@ volumes:
 | `health` | object | no | `{path, timeout}`: readiness check before traffic switches to a new version. Default: the port accepts connections within 60s. |
 | `memory` | string | no | Memory limit, e.g. `256m` or `1g`. Unlimited if unset. |
 | `env` | map | no | Environment variables. Keys match `[A-Za-z_][A-Za-z0-9_]*`; values are single-line. Values are write-only and redacted in all output. |
+| `databases` | list | no | Managed databases: `{name, engine: postgres\|redis, version, env}`. Connection URLs are injected into env. Removing one deletes its data after a snapshot. See [Managed databases](/guides/databases/). |
 | `volumes` | list | no | Persistent Docker volumes, each `{name, path}`. The name follows the same rules as app names, and the path must be absolute. Removing a volume from the spec **deletes it and its data**. |
 
 ## `build`

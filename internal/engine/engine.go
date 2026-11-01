@@ -32,13 +32,17 @@ type Engine struct {
 	active   atomic.Int64           // applies in progress
 	PlanTTL  time.Duration
 	Previews PreviewConfig
-	Now      func() time.Time
+	// SnapshotDir holds database snapshots; SnapshotKeep is how many to
+	// keep per database.
+	SnapshotDir  string
+	SnapshotKeep int
+	Now          func() time.Time
 }
 
 // New creates an engine. px may be nil, which disables domains.
 func New(st *store.Store, rt runtime.Runtime, bd builder.Builder, px proxy.Proxy) *Engine {
 	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{},
-		PlanTTL: 30 * time.Minute, Previews: defaultPreviewConfig(), Now: time.Now}
+		PlanTTL: 30 * time.Minute, Previews: defaultPreviewConfig(), SnapshotDir: "snapshots", SnapshotKeep: 20, Now: time.Now}
 }
 
 // StartProxy starts the proxy and loads routes for every deployed app with
@@ -159,6 +163,8 @@ type PlanRequest struct {
 	Spec     *spec.App `json:"spec,omitempty"`
 	Delete   string    `json:"delete,omitempty"`
 	Redeploy bool      `json:"redeploy,omitempty"`
+	// Restore plans restoring a database from a snapshot.
+	Restore *RestoreRequest `json:"restore,omitempty"`
 }
 
 type ApplyResult struct {
@@ -172,7 +178,8 @@ type AppView struct {
 	Runtime          *runtime.Status   `json:"runtime,omitempty"`
 	LatestDeployment *store.Deployment `json:"latest_deployment,omitempty"`
 	// URLs are the app's public addresses through the proxy.
-	URLs []string `json:"urls,omitempty"`
+	URLs      []string       `json:"urls,omitempty"`
+	Databases []DatabaseView `json:"databases,omitempty"`
 }
 
 // --- plan / approve / apply ---
@@ -191,6 +198,12 @@ func (e *Engine) Plan(ctx context.Context, actor string, req PlanRequest) (*stor
 }
 
 func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*store.Plan, error) {
+	if req.Restore != nil {
+		if req.Spec != nil || req.Delete != "" {
+			return nil, apierr.New(400, "invalid_request", "a restore plan takes only restore")
+		}
+		return e.restorePlan(ctx, actor, req.Restore)
+	}
 	var name string
 	var desired *spec.App
 	switch {
@@ -237,6 +250,18 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 				WithField("stage").WithFix(map[string]any{"stage": "preview"})
 		}
 	}
+	if current != nil && desired != nil {
+		for _, c := range current.Databases {
+			for _, d := range desired.Databases {
+				if c.Name == d.Name && (c.Engine != d.Engine || c.Version != d.Version) {
+					return nil, apierr.New(409, "database_version_change", "database %s is %s %s; changing it to %s %s needs a data migration, which Hangar doesn't do yet",
+						c.Name, c.Engine, c.Version, d.Engine, d.Version).WithField("databases").
+						WithFix(map[string]any{"databases": map[string]any{"name": c.Name, "engine": c.Engine, "version": c.Version}}).
+						WithHint("keep the current engine and version; to move data, add a new database and restore a snapshot into it")
+				}
+			}
+		}
+	}
 
 	diff := planner.Diff(current, desired)
 	action := planner.OpUpdate
@@ -275,6 +300,29 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 		return nil, err
 	}
 	e.audit(ctx, actor, "plan.create", name, "", map[string]any{"plan": p.ID, "action": action, "destructive": p.Destructive})
+	return p, nil
+}
+
+func (e *Engine) restorePlan(ctx context.Context, actor string, r *RestoreRequest) (*store.Plan, error) {
+	desired, app, sn, err := e.planRestore(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	now := e.Now()
+	p := &store.Plan{
+		ID: store.NewID("plan"), App: app.Name, Action: "restore", Desired: desired, BaseDeployment: app.CurrentDeployment,
+		Changes: []planner.Change{{Path: "databases." + r.Database, Op: "restore", To: sn.ID, Destructive: true,
+			Reason: fmt.Sprintf("replaces all data in %s with snapshot %s from %s (the current data is snapshotted first)",
+				r.Database, sn.ID, sn.CreatedAt.UTC().Format(time.RFC3339))}},
+		Destructive: true, Downtime: true, RequiresApproval: desired.Stage == spec.StageProduction,
+		Restore: &store.PlanRestore{Database: r.Database, Snapshot: sn.ID},
+		Status:  store.PlanPending, CreatedBy: actor, CreatedAt: now, ExpiresAt: now.Add(e.PlanTTL),
+	}
+	p.NextStep = nextStep(p)
+	if err := e.st.SavePlan(ctx, p); err != nil {
+		return nil, err
+	}
+	e.audit(ctx, actor, "plan.create", app.Name, "", map[string]any{"plan": p.ID, "action": "restore", "destructive": true})
 	return p, nil
 }
 
@@ -444,6 +492,18 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 	ctx = context.WithoutCancel(ctx)
 	now := e.Now()
 	p.Status, p.AppliedAt = store.PlanApplied, &now
+	if p.Action == "restore" {
+		p.NextStep = nextStep(p)
+		if err := e.st.SavePlan(ctx, p); err != nil {
+			return nil, err
+		}
+		msg, err := e.restore(ctx, actor, p, reason)
+		e.audit(ctx, actor, "plan.apply", p.App, reason, map[string]any{"plan": p.ID, "action": "restore", "ok": err == nil})
+		if err != nil {
+			return nil, err
+		}
+		return &ApplyResult{Plan: publicPlan(p), Message: msg}, nil
+	}
 	if p.Action == "noop" {
 		p.NextStep = nextStep(p)
 		if err := e.st.SavePlan(ctx, p); err != nil {
@@ -469,8 +529,28 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 		var vols []string
 		if current != nil {
 			vols = planner.RemovedVolumes(current, nil)
+			// Snapshot every database before anything is deleted; if one
+			// fails, delete nothing.
+			if current.Stage != spec.StagePreview {
+				for _, db := range current.Databases {
+					sn, err := e.snapshot(ctx, actor, p.App, db, "before deleting app "+p.App)
+					if err != nil {
+						runErr = apierr.New(502, "snapshot_failed", "app %s was not deleted because the snapshot of database %s failed: %v", p.App, db.Name, err).
+							WithHint("fix the database (see diagnose), then try again")
+						d.KeptPrevious = true
+						break
+					}
+					fmt.Fprintf(deployLog, "hangar: snapshot %s of database %s saved\n", sn.ID, db.Name)
+				}
+			}
 		}
-		if runErr = e.rt.Remove(ctx, p.App, vols); runErr == nil {
+		if runErr == nil {
+			runErr = e.rt.Remove(ctx, p.App, vols)
+		}
+		if runErr == nil && current != nil {
+			runErr = e.removeDatabases(ctx, actor, current, current.Databases, "", false, deployLog)
+		}
+		if runErr == nil {
 			d.Status = store.DeployDeleted
 			if err := e.setRoute(ctx, p.App, nil, ""); err != nil {
 				fmt.Fprintf(deployLog, "hangar: warning: removing the proxy route failed: %v\n", err)
@@ -496,6 +576,13 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			runErr = e.checkDomains(ctx, run)
 		}
 		if runErr == nil {
+			// Databases start before the app, which needs their URLs. A
+			// failure here hasn't touched the running app.
+			if runErr = e.ensureDatabases(ctx, run, deployLog); runErr != nil {
+				d.FailedIn, d.KeptPrevious = store.PhaseDeploy, current != nil
+			}
+		}
+		if runErr == nil {
 			d.Strategy = "recreate"
 			if run.ZeroDowntime() {
 				d.Strategy = "zero-downtime"
@@ -514,6 +601,14 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 					fmt.Fprintf(deployLog, "hangar: warning: updating the proxy failed: %v\n", err)
 				}
 				runErr = e.rt.RemoveVolumes(ctx, p.App, planner.RemovedVolumes(current, p.Desired))
+				if gone := planner.RemovedDatabases(current, p.Desired); runErr == nil && len(gone) > 0 {
+					// The new version no longer uses them. Each is snapshotted
+					// first; one whose snapshot fails is kept.
+					if err := e.removeDatabases(ctx, actor, current, gone, "removed from the spec in "+p.ID, true, deployLog); err != nil {
+						fmt.Fprintf(deployLog, "hangar: warning: %v\n", err)
+						e.audit(ctx, actor, "database.remove_failed", p.App, err.Error(), nil)
+					}
+				}
 			}
 			if runErr != nil {
 				d.FailedIn = store.PhaseDeploy
@@ -716,6 +811,9 @@ func (e *Engine) GetApp(ctx context.Context, name string) (*AppView, error) {
 	}
 	if deps, err := e.st.ListDeployments(ctx, name, 1); err == nil && len(deps) > 0 {
 		v.LatestDeployment = publicDeployment(&deps[0])
+	}
+	if app.Spec != nil && len(app.Spec.Databases) > 0 {
+		v.Databases, _ = e.Databases(ctx, name)
 	}
 	if app.Spec != nil && len(app.Spec.Domains) > 0 && e.px != nil {
 		suffix := ""

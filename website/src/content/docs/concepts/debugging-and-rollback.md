@@ -37,6 +37,7 @@ App demo-worker: healthy=false state=restarting restarts=5
 | `last_deploy_failed` | error | The newest deployment failed after its container was replaced |
 | `build_failed` | warning | The newest deployment failed to build. The previous version is still running |
 | `new_version_unhealthy` | warning | The newest deployment never passed its health check, so traffic stayed on the previous version. Log checks (port mismatch, missing env) run against the failed container's captured output |
+| `database_down` | error | One of the app's databases isn't running |
 | `proxy_down` | error | The app has domains but the `hangar-proxy` container isn't running |
 | `not_running` | error | No container exists for the app |
 | `oom_killed` | error | The container was killed for running out of memory. The fix doubles `memory` |

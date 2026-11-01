@@ -111,6 +111,18 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 			add("error", "last_deploy_failed", fmt.Sprintf("latest deployment %s failed (%s): %s", ld.ID, ld.ErrorCode, ld.Error), rollbackFix)
 		}
 	}
+	if app.Spec != nil {
+		for _, db := range app.Spec.Databases {
+			if st, err := e.rt.DatabaseStatus(ctx, name, db.Name); err == nil && !st.Running {
+				state := st.State
+				if !st.Exists {
+					state = "missing"
+				}
+				add("error", "database_down", fmt.Sprintf("database %s (%s %s) is %s, so the app can't reach it", db.Name, db.Engine, db.Version, state),
+					map[string]any{"tool": "plan", "redeploy": true})
+			}
+		}
+	}
 	if app.Spec != nil && len(app.Spec.Domains) > 0 && e.px != nil {
 		if ps := e.px.Status(ctx); !ps.Running {
 			add("error", "proxy_down", "the proxy container (hangar-proxy) is not running, so the app's domains are unreachable",

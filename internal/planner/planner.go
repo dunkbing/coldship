@@ -42,8 +42,15 @@ func Diff(cur, des *spec.App) Result {
 		cs = append(cs, Change{Path: "app", Op: OpCreate, To: des.Name})
 	case des == nil:
 		c := Change{Path: "app", Op: OpDelete, From: cur.Name, Destructive: true, Reason: "stops and removes the app"}
+		var parts []string
 		if len(cur.Volumes) > 0 {
-			c.Reason = fmt.Sprintf("stops and removes the app and deletes volumes %s with all their data", strings.Join(volNames(cur.Volumes), ", "))
+			parts = append(parts, "volumes "+strings.Join(volNames(cur.Volumes), ", "))
+		}
+		if len(cur.Databases) > 0 {
+			parts = append(parts, "databases "+strings.Join(dbNames(cur.Databases), ", ")+" (snapshotted first)")
+		}
+		if len(parts) > 0 {
+			c.Reason = fmt.Sprintf("stops and removes the app and deletes %s with all their data", strings.Join(parts, " and "))
 		}
 		cs = append(cs, c)
 	default:
@@ -65,6 +72,7 @@ func Diff(cur, des *spec.App) Result {
 		cs = scalar(cs, "health.timeout", ch.Timeout, dh.Timeout)
 		cs = envDiff(cs, cur.Env, des.Env)
 		cs = volDiff(cs, cur.Volumes, des.Volumes)
+		cs = dbDiff(cs, cur.Databases, des.Databases)
 	}
 	r := Result{Changes: cs, NoOp: len(cs) == 0}
 	for _, c := range cs {
@@ -206,6 +214,63 @@ func volDiff(cs []Change, cur, des []spec.Volume) []Change {
 		}
 	}
 	return cs
+}
+
+func dbDiff(cs []Change, cur, des []spec.Database) []Change {
+	cm, dm := map[string]spec.Database{}, map[string]spec.Database{}
+	keys := map[string]bool{}
+	for _, d := range cur {
+		cm[d.Name] = d
+		keys[d.Name] = true
+	}
+	for _, d := range des {
+		dm[d.Name] = d
+		keys[d.Name] = true
+	}
+	for _, k := range sortedKeys(keys) {
+		c, inCur := cm[k]
+		d, inDes := dm[k]
+		switch {
+		case inCur && !inDes:
+			cs = append(cs, Change{Path: "databases." + k, Op: OpDelete, From: c.Engine + " " + c.Version, Destructive: true,
+				Reason: "database " + k + " and all its data will be deleted (a snapshot is taken first)"})
+		case !inCur && inDes:
+			cs = append(cs, Change{Path: "databases." + k, Op: OpCreate, To: d.Engine + " " + d.Version, Reason: "connection URL injected as " + d.Env})
+		default:
+			cs = scalar(cs, "databases."+k+".engine", c.Engine, d.Engine)
+			cs = scalar(cs, "databases."+k+".version", c.Version, d.Version)
+			cs = scalar(cs, "databases."+k+".env", c.Env, d.Env)
+		}
+	}
+	return cs
+}
+
+// RemovedDatabases lists databases in cur but not in des.
+func RemovedDatabases(cur, des *spec.App) []spec.Database {
+	if cur == nil {
+		return nil
+	}
+	keep := map[string]bool{}
+	if des != nil {
+		for _, d := range des.Databases {
+			keep[d.Name] = true
+		}
+	}
+	var out []spec.Database
+	for _, d := range cur.Databases {
+		if !keep[d.Name] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func dbNames(ds []spec.Database) []string {
+	out := make([]string, len(ds))
+	for i, d := range ds {
+		out[i] = d.Name
+	}
+	return out
 }
 
 // RemovedVolumes lists volumes present in cur but not in des.

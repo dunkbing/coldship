@@ -811,3 +811,7 @@ select:focus,
   padding: 10px 14px;
   margin-bottom: 16px;
 }
+
+.section-note {
+  margin: 10px 2px 0;
+}

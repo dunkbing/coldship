@@ -83,7 +83,14 @@ type Plan struct {
 	ExpiresAt        time.Time        `json:"expires_at"`
 	AppliedAt        *time.Time       `json:"applied_at,omitempty"`
 	Deployment       string           `json:"deployment,omitempty"`
-	NextStep         string           `json:"next_step"`
+	// Restore is set for plans that restore a database from a snapshot.
+	Restore  *PlanRestore `json:"restore,omitempty"`
+	NextStep string       `json:"next_step"`
+}
+
+type PlanRestore struct {
+	Database string `json:"database"`
+	Snapshot string `json:"snapshot"`
 }
 
 // Deployment statuses.
@@ -149,6 +156,12 @@ CREATE TABLE IF NOT EXISTS deployments (
 CREATE INDEX IF NOT EXISTS deployments_by_app ON deployments(app, created_at);
 CREATE TABLE IF NOT EXISTS deploy_logs (
   deployment TEXT PRIMARY KEY, lines TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS databases (
+  app TEXT NOT NULL, name TEXT NOT NULL, engine TEXT NOT NULL, version TEXT NOT NULL, password TEXT NOT NULL,
+  created_at TEXT NOT NULL, PRIMARY KEY (app, name));
+CREATE TABLE IF NOT EXISTS snapshots (
+  id TEXT PRIMARY KEY, app TEXT NOT NULL, database TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS snapshots_by_db ON snapshots(app, database, created_at);
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY, token_name TEXT NOT NULL, scope TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (
@@ -281,6 +294,116 @@ func (s *Store) LookupSession(ctx context.Context, plain string) (*Token, error)
 
 func (s *Store) DeleteSession(ctx context.Context, plain string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE hash = ?`, hashToken(plain))
+	return err
+}
+
+// --- managed databases ---
+
+// Database holds a managed database's generated credentials. The password
+// is only ever injected into the app and the database container.
+type Database struct {
+	App       string
+	Name      string
+	Engine    string
+	Version   string
+	Password  string
+	CreatedAt time.Time
+}
+
+func (s *Store) GetDatabase(ctx context.Context, app, name string) (*Database, error) {
+	var d Database
+	var created string
+	err := s.db.QueryRowContext(ctx, `SELECT app, name, engine, version, password, created_at FROM databases WHERE app = ? AND name = ?`, app, name).
+		Scan(&d.App, &d.Name, &d.Engine, &d.Version, &d.Password, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	d.CreatedAt, _ = time.Parse(tsFormat, created)
+	return &d, nil
+}
+
+func (s *Store) SaveDatabase(ctx context.Context, d *Database) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO databases(app, name, engine, version, password, created_at) VALUES(?,?,?,?,?,?)
+		ON CONFLICT(app, name) DO UPDATE SET engine=excluded.engine, version=excluded.version`,
+		d.App, d.Name, d.Engine, d.Version, d.Password, ts(d.CreatedAt))
+	return err
+}
+
+func (s *Store) DeleteDatabase(ctx context.Context, app, name string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM databases WHERE app = ? AND name = ?`, app, name)
+	return err
+}
+
+type Snapshot struct {
+	ID        string    `json:"id"`
+	App       string    `json:"app"`
+	Database  string    `json:"database"`
+	Engine    string    `json:"engine"`
+	Version   string    `json:"version"`
+	Path      string    `json:"path"`
+	Size      int64     `json:"size"`
+	SHA256    string    `json:"sha256"`
+	Reason    string    `json:"reason"`
+	Actor     string    `json:"actor"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *Store) SaveSnapshot(ctx context.Context, sn *Snapshot) error {
+	b, err := json.Marshal(sn)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO snapshots(id, app, database, body, created_at) VALUES(?,?,?,?,?)`,
+		sn.ID, sn.App, sn.Database, string(b), ts(sn.CreatedAt))
+	return err
+}
+
+func (s *Store) GetSnapshot(ctx context.Context, id string) (*Snapshot, error) {
+	var body string
+	err := s.db.QueryRowContext(ctx, `SELECT body FROM snapshots WHERE id = ?`, id).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var sn Snapshot
+	return &sn, json.Unmarshal([]byte(body), &sn)
+}
+
+// ListSnapshots returns an app's snapshots, newest first. An empty database
+// name lists all of the app's databases.
+func (s *Store) ListSnapshots(ctx context.Context, app, database string) ([]Snapshot, error) {
+	q, args := `SELECT body FROM snapshots WHERE app = ?`, []any{app}
+	if database != "" {
+		q += ` AND database = ?`
+		args = append(args, database)
+	}
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY created_at DESC, rowid DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Snapshot{}
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var sn Snapshot
+		if err := json.Unmarshal([]byte(body), &sn); err != nil {
+			return nil, err
+		}
+		out = append(out, sn)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteSnapshot(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM snapshots WHERE id = ?`, id)
 	return err
 }
 

@@ -40,6 +40,9 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--preview-domain` | `HANGAR_PREVIEW_DOMAIN` | | Previews get `https://<name>.<domain>` (needs wildcard DNS) |
 | `--preview-ttl` / `--preview-max-ttl` | | `24h` / `168h` | Default and maximum preview lifetime |
 | `--max-previews` | | `20` | Most previews at once |
+| `--snapshot-dir` | `HANGAR_SNAPSHOT_DIR` | `hangar-snapshots` next to `--data` | Where database snapshots are stored |
+| `--snapshot-keep` | | `20` | Snapshots kept per database |
+| `--db-snapshot-interval` | | `24h` | Scheduled snapshots of every database (`0` disables) |
 | `--proxy-http-port` / `--proxy-https-port` | | `80` / `443` | Host ports for the proxy |
 | `--acme-email` | `HANGAR_ACME_EMAIL` | | Email for Let's Encrypt notices |
 | `--update-url` | `HANGAR_UPDATE_URL` | built in | Signed release manifest to check |
@@ -75,6 +78,15 @@ Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tool
 | `hangar diagnose <app>` | Findings and suggested fixes |
 | `hangar deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
 | `hangar version` | CLI and server versions, and whether an update is available |
+
+## Databases
+
+| Command | Description |
+|---|---|
+| `hangar db list <app>` | Databases with status, injected env var and latest snapshot |
+| `hangar db snapshot <app> <database> [--reason "..."]` | Snapshot now |
+| `hangar db snapshots <app> [--database D]` | Snapshots, newest first |
+| `hangar db restore <app> <database> <snapshot> --reason "..."` | Plan and apply a restore. Stops with exit 3 if approval is needed. |
 
 ## Previews
 

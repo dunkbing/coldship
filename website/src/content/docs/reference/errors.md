@@ -51,6 +51,11 @@ Every error from every interface has the same shape:
 | `build_failed` | 422 | `docker build` failed. Read the build log. The running app is untouched (`failed_in: build`). |
 | `build_timeout` | 504 | The build exceeded the server's `--build-timeout` |
 | `health_check_failed` | 502 | The new container never became healthy. With zero-downtime deploys the previous version keeps serving (`details.previous_version_running`). |
+| `database_version_change` | 409 | Changing a database's engine or major version needs a migration Hangar doesn't do yet |
+| `database_start_failed`, `database_not_ready` | 502 | A database couldn't start or accept connections. The running app is untouched; see the deploy log. |
+| `snapshot_failed` | 502 | A snapshot failed. Nothing was deleted. |
+| `snapshot_not_found`, `snapshot_missing`, `snapshot_corrupt` | 404/500 | The snapshot doesn't exist, its file is gone, or it doesn't match its checksum. Nothing is restored. |
+| `restore_failed` | 502 | The restore itself failed. The data from before is saved as a snapshot. |
 | `preview_limit` | 409 | All preview slots are used. `details.previews` lists them, soonest-expiring first. |
 | `not_a_preview` | 400 | Preview commands only delete previews; delete regular apps with a plan |
 | `name_in_use` | 409 | A regular app already has the preview's name; pass another `--name` |
