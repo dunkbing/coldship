@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -153,6 +154,14 @@ type AuditEntry struct {
 type Store struct {
 	db *sql.DB
 	kr atomic.Pointer[secrets.Keyring]
+	// mu orders encrypting writes against key rotation: a write holds it
+	// shared from sealing a value until it is stored, and rotation holds it
+	// exclusively, so no value sealed with a superseded keyring lands after
+	// the rotation has re-encrypted everything.
+	mu sync.RWMutex
+	// ScrubWarning is set when removing old plaintext copies failed after
+	// encryption. It is retried on the next start.
+	ScrubWarning error
 }
 
 // ErrKeyMismatch means the configured key cannot read this database.
@@ -258,50 +267,64 @@ func Open(path string, kr *secrets.Keyring) (*Store, error) {
 	}
 	st := &Store{db: db}
 	st.kr.Store(kr)
-	if err := st.checkKey(); err != nil {
+	needMarker, err := st.checkKey()
+	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	n, err := st.reseal(context.Background(), false)
-	if err != nil {
+	// Encrypt leftover plaintext and, for a new database, the key check, in
+	// one transaction: either both happen or neither.
+	if _, err := st.reseal(context.Background(), false, needMarker); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("encrypting stored secrets: %w", err)
 	}
-	if n > 0 {
+	// The data is encrypted now; a failed scrub only leaves old copies in
+	// free pages. Warn, and try again on the next start.
+	var pending string
+	if db.QueryRow(`SELECT v FROM meta WHERE k = 'scrub_pending'`).Scan(&pending) == nil {
 		if err := st.scrub(); err != nil {
-			db.Close()
-			return nil, err
+			st.ScrubWarning = err
+		} else {
+			db.Exec(`DELETE FROM meta WHERE k = 'scrub_pending'`)
 		}
 	}
 	return st, nil
 }
 
-// checkKey verifies the keyring against a value sealed when the database
-// was first encrypted, and creates that value for a new database.
-func (s *Store) checkKey() error {
-	const aad = "meta:key_check"
+const keyCheckAAD = "meta:key_check"
+
+// checkKey verifies the keyring against the key-check value sealed when the
+// database was first encrypted. It reports whether that value still needs
+// creating, which it refuses if the database holds encrypted values: their
+// key would be unknown.
+func (s *Store) checkKey() (needMarker bool, err error) {
+	kr := s.kr.Load()
 	var v string
-	err := s.db.QueryRow(`SELECT v FROM meta WHERE k = 'key_check'`).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		sealed, err := s.seal([]byte("hangar"), aad)
-		if err != nil {
-			return err
+	err = s.db.QueryRow(`SELECT v FROM meta WHERE k = 'key_check'`).Scan(&v)
+	if err == nil {
+		if _, err := kr.Open(v, keyCheckAAD); err != nil {
+			return false, fmt.Errorf("%w: this database was encrypted with key %s, but the configured keys are %s",
+				ErrKeyMismatch, secrets.KeyID(v), strings.Join(kr.IDs(), ", "))
 		}
-		_, err = s.db.Exec(`INSERT INTO meta(k, v) VALUES('key_check', ?)`, sealed)
-		return err
+		return false, nil
 	}
-	if err != nil {
-		return err
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
 	}
-	if _, err := s.kr.Load().Open(v, aad); err != nil {
-		return fmt.Errorf("%w: %v", ErrKeyMismatch, err)
+	for _, c := range sealedColumns {
+		var sample string
+		e := s.db.QueryRow(`SELECT ` + c.col + ` FROM ` + c.table + ` WHERE substr(` + c.col + `, 1, 5) = 'hgs1:' LIMIT 1`).Scan(&sample)
+		if e == nil {
+			return false, fmt.Errorf("%w: the database holds values encrypted with key %s, but its key check is missing",
+				ErrKeyMismatch, secrets.KeyID(sample))
+		}
 	}
-	return nil
+	return true, nil
 }
 
 // reseal encrypts plaintext values (all=false) or re-encrypts every value
 // with the current key (all=true), in one transaction.
-func (s *Store) reseal(ctx context.Context, all bool) (int, error) {
+func (s *Store) reseal(ctx context.Context, all, createMarker bool) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -309,6 +332,15 @@ func (s *Store) reseal(ctx context.Context, all bool) (int, error) {
 	defer tx.Rollback()
 	kr := s.kr.Load()
 	n := 0
+	if createMarker {
+		sealed, err := kr.Seal([]byte("hangar"), keyCheckAAD)
+		if err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(k, v) VALUES('key_check', ?)`, sealed); err != nil {
+			return 0, err
+		}
+	}
 	for _, c := range sealedColumns {
 		cols := strings.Join(c.keys, ", ")
 		rows, err := tx.QueryContext(ctx, `SELECT `+cols+`, `+c.col+` FROM `+c.table+` WHERE `+c.col+` IS NOT NULL`)
@@ -378,6 +410,11 @@ func (s *Store) reseal(ctx context.Context, all bool) (int, error) {
 			}
 		}
 	}
+	if n > 0 {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(k, v) VALUES('scrub_pending', '1') ON CONFLICT(k) DO NOTHING`); err != nil {
+			return 0, err
+		}
+	}
 	return n, tx.Commit()
 }
 
@@ -395,12 +432,45 @@ func (s *Store) scrub() error {
 // RotateKey switches to next (which must also hold the old key), then
 // re-encrypts every secret with its current key and scrubs old copies.
 func (s *Store) RotateKey(ctx context.Context, next *secrets.Keyring) (int, error) {
+	s.mu.Lock()
 	s.kr.Store(next)
-	n, err := s.reseal(ctx, true)
+	n, err := s.reseal(ctx, true, false)
+	s.mu.Unlock()
 	if err != nil {
 		return 0, err
 	}
-	return n, s.scrub()
+	if err := s.scrub(); err != nil {
+		s.ScrubWarning = err
+	} else {
+		s.db.ExecContext(ctx, `DELETE FROM meta WHERE k = 'scrub_pending'`)
+	}
+	return n, nil
+}
+
+// KeyIDsInUse counts stored values by the key that encrypted them. Before
+// a key is dropped, it must not appear here.
+func (s *Store) KeyIDsInUse(ctx context.Context) (map[string]int, error) {
+	ids := map[string]int{}
+	cols := append([]struct{ table, col string }{{"meta", "v"}}, []struct{ table, col string }{}...)
+	for _, c := range sealedColumns {
+		cols = append(cols, struct{ table, col string }{c.table, c.col})
+	}
+	for _, c := range cols {
+		rows, err := s.db.QueryContext(ctx, `SELECT `+c.col+` FROM `+c.table+` WHERE substr(`+c.col+`, 1, 5) = 'hgs1:'`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			ids[secrets.KeyID(v)]++
+		}
+		rows.Close()
+	}
+	return ids, nil
 }
 
 // DecryptAll opens the database at path and writes every secret back as
@@ -630,6 +700,8 @@ func (s *Store) GetDatabase(ctx context.Context, app, name string) (*Database, e
 }
 
 func (s *Store) SaveDatabase(ctx context.Context, d *Database) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	pw, err := s.seal([]byte(d.Password), "databases.password:"+d.App+"/"+d.Name)
 	if err != nil {
 		return err
@@ -743,6 +815,8 @@ func (s *Store) GetWebhook(ctx context.Context, app string) (*Webhook, error) {
 }
 
 func (s *Store) SaveWebhook(ctx context.Context, w *Webhook) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	secret, err := s.seal([]byte(w.Secret), "webhooks.secret:"+w.App)
 	if err != nil {
 		return err
@@ -828,6 +902,8 @@ func (s *Store) PruneDeliveries(ctx context.Context, app string, keep int) error
 // --- deployment logs (build output, startup, health checks) ---
 
 func (s *Store) SaveDeployLog(ctx context.Context, deployment string, lines []string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	b, err := json.Marshal(lines)
 	if err != nil {
 		return err
@@ -917,6 +993,8 @@ func (s *Store) scanApp(r scanner) (*App, error) {
 }
 
 func (s *Store) UpsertApp(ctx context.Context, a *App) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var specJSON sql.NullString
 	if a.Spec != nil {
 		b, err := json.Marshal(a.Spec)
@@ -1038,6 +1116,8 @@ func (s *Store) ListDeployments(ctx context.Context, app string, limit int) ([]D
 }
 
 func (s *Store) saveDoc(ctx context.Context, table, id, app, status string, created time.Time, v any) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -289,4 +290,154 @@ func TestDecryptAllForDowngrade(t *testing.T) {
 	}
 	checkSecrets(t, st)
 	st.Close()
+}
+
+// Writes racing a rotation must not leave values under the dropped key.
+func TestRotateKeyWithConcurrentWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "h.db")
+	old := secrets.New()
+	st, _ := Open(path, old)
+	writeSecrets(t, st)
+	ctx := context.Background()
+	stop := make(chan struct{})
+	done := make(chan int)
+	go func() {
+		n := 0
+		for {
+			select {
+			case <-stop:
+				done <- n
+				return
+			default:
+			}
+			if err := st.SaveDeployLog(ctx, fmt.Sprintf("race_%d", n), []string{"line"}); err != nil {
+				t.Error(err)
+			}
+			n++
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	next := old.WithNewKey()
+	for i := 0; i < 3; i++ {
+		if _, err := st.RotateKey(ctx, next); err != nil {
+			t.Fatal(err)
+		}
+		next = next.WithNewKey()
+	}
+	close(stop)
+	n := <-done
+	// What the rotator checks before dropping old keys.
+	inUse, err := st.KeyIDsInUse(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := st.kr.Load().CurrentID()
+	for id := range inUse {
+		if id != current {
+			t.Fatalf("values still use key %s after rotation: %v", id, inUse)
+		}
+	}
+	only := st.kr.Load().OnlyCurrent()
+	st.Close()
+	st, err = Open(path, only)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	checkSecrets(t, st)
+	for i := 0; i < n; i++ {
+		if _, err := st.GetDeployLog(ctx, fmt.Sprintf("race_%d", i)); err != nil {
+			t.Fatalf("log %d written during rotation is unreadable with the new key alone: %v", i, err)
+		}
+	}
+	if n == 0 {
+		t.Fatal("the writer should have run during rotation")
+	}
+}
+
+func TestMissingKeyCheckWithEncryptedValuesFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "h.db")
+	keys := secrets.New()
+	st, _ := Open(path, keys)
+	writeSecrets(t, st)
+	st.db.Exec(`DELETE FROM meta WHERE k = 'key_check'`)
+	st.Close()
+	_, err := Open(path, secrets.New())
+	if !errors.Is(err, ErrKeyMismatch) || !strings.Contains(err.Error(), keys.CurrentID()) {
+		t.Fatalf("a lost key check must not let a new key take over: %v", err)
+	}
+}
+
+func TestMismatchNamesKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "h.db")
+	a := secrets.New()
+	st, _ := Open(path, a)
+	st.Close()
+	b := secrets.New()
+	_, err := Open(path, b)
+	if err == nil || !strings.Contains(err.Error(), a.CurrentID()) || !strings.Contains(err.Error(), b.CurrentID()) {
+		t.Fatalf("the error should name both key ids: %v", err)
+	}
+}
+
+func TestScrubRetriedOnNextStart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "h.db")
+	keys := secrets.New()
+	st, _ := Open(path, keys)
+	st.db.Exec(`INSERT INTO meta(k, v) VALUES('scrub_pending', '1')`) // as if the scrub had failed
+	st.Close()
+	st, err := Open(path, keys)
+	if err != nil || st.ScrubWarning != nil {
+		t.Fatalf("reopen: %v %v", err, st.ScrubWarning)
+	}
+	var v string
+	if st.db.QueryRow(`SELECT v FROM meta WHERE k = 'scrub_pending'`).Scan(&v) == nil {
+		t.Fatal("a successful scrub should clear the pending flag")
+	}
+	st.Close()
+}
+
+// Deterministic version of the race: a write that sealed its value with the
+// old key and hasn't stored it yet must finish before rotation re-encrypts,
+// so its value ends up under the new key.
+func TestRotationWaitsForInFlightWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "h.db")
+	old := secrets.New()
+	st, _ := Open(path, old)
+	defer st.Close()
+	ctx := context.Background()
+
+	st.mu.RLock()                                                              // an in-flight write...
+	sealed, err := st.seal([]byte(`["in flight"]`), "deploy_logs.lines:dep_x") // ...sealed with the old key
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := old.WithNewKey()
+	rotated := make(chan error, 1)
+	go func() {
+		_, err := st.RotateKey(ctx, next)
+		rotated <- err
+	}()
+	select {
+	case <-rotated:
+		t.Fatal("rotation must wait for in-flight writes")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := st.db.Exec(`INSERT INTO deploy_logs(deployment, lines) VALUES('dep_x', ?)`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	st.mu.RUnlock()
+	if err := <-rotated; err != nil {
+		t.Fatal(err)
+	}
+	inUse, _ := st.KeyIDsInUse(ctx)
+	for id := range inUse {
+		if id != next.CurrentID() {
+			t.Fatalf("a value still uses the old key %s after rotation: %v", id, inUse)
+		}
+	}
+	st.SetKeyring(next.OnlyCurrent())
+	if l, err := st.GetDeployLog(ctx, "dep_x"); err != nil || l[0] != "in flight" {
+		t.Fatalf("the in-flight write must be readable with the new key alone: %v %v", l, err)
+	}
 }

@@ -62,3 +62,16 @@ func TestKeyRotatorRefusesEnvKey(t *testing.T) {
 		t.Fatalf("env keys can't be rotated in place: %v", err)
 	}
 }
+
+func TestNewKeyKeptOnOtherErrors(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HANGAR_SECRET_KEY", "")
+	keyFile := filepath.Join(dir, "hangar.key")
+	data := filepath.Join(dir, "missing-dir", "hangar.db") // can't be created
+	if _, _, err := openStore(data, keyFile, quiet); err == nil {
+		t.Fatal("expected an error")
+	}
+	if _, err := os.Stat(keyFile); err != nil {
+		t.Fatal("a new key file must only be removed when the key provably wasn't used")
+	}
+}

@@ -99,6 +99,16 @@ func (k *Keyring) OnlyCurrent() *Keyring {
 	return &Keyring{current: k.current, keys: map[string][]byte{k.current: k.keys[k.current]}, Source: k.Source}
 }
 
+// KeyID returns the id of the key a sealed value was encrypted with.
+func KeyID(sealed string) string {
+	rest, ok := strings.CutPrefix(sealed, prefix)
+	if !ok {
+		return ""
+	}
+	id, _, _ := strings.Cut(rest, ":")
+	return id
+}
+
 // Sealed reports whether s is an encrypted value.
 func Sealed(s string) bool { return strings.HasPrefix(s, prefix) }
 

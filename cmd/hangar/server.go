@@ -54,6 +54,9 @@ func serverCmd() *cobra.Command {
 				return err
 			}
 			defer st.Close()
+			if st.ScrubWarning != nil {
+				log.Warn("secrets are encrypted, but old plaintext copies may remain in free space; retrying on next start", "err", st.ScrubWarning)
+			}
 			rotator := &keyRotator{st: st, kr: kr, keyFile: keyFile, fromEnv: os.Getenv("HANGAR_SECRET_KEY") != ""}
 			rt := runtime.NewDocker()
 			rt.StartupGrace = grace

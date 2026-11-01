@@ -61,12 +61,14 @@ func openStore(data, keyFile string, log *slog.Logger) (*store.Store, *secrets.K
 	}
 	st, err := store.Open(data, kr)
 	if err != nil {
-		os.Remove(keyFile)
 		if errors.Is(err, store.ErrKeyMismatch) {
+			// Nothing was written with the new key, so it is safe to drop.
+			os.Remove(keyFile)
 			return nil, nil, fmt.Errorf("the secrets in %s are encrypted, but the key file %s is missing. Restore it from your backup, "+
-				"or set HANGAR_SECRET_KEY. Hangar did not create a new key, because it could not read the existing secrets", data, keyFile)
+				"or set HANGAR_SECRET_KEY. Hangar did not create a new key, because it could not read the existing secrets (%v)", data, keyFile, err)
 		}
-		return nil, nil, err
+		// Keep the key: some values may already be encrypted with it.
+		return nil, nil, fmt.Errorf("%w (the new key file %s was kept; do not delete it)", err, keyFile)
 	}
 	log.Warn("created a new secret key: back it up separately from the database; without it, stored secrets cannot be recovered",
 		"key_file", keyFile)
@@ -99,6 +101,17 @@ func (r *keyRotator) rotate(ctx context.Context) (map[string]any, error) {
 	n, err := r.st.RotateKey(ctx, next)
 	if err != nil {
 		return nil, fmt.Errorf("re-encrypting failed; the key file still holds both keys, so nothing is lost: %w", err)
+	}
+	// Drop the old key only if nothing uses it any more.
+	inUse, err := r.st.KeyIDsInUse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for id, count := range inUse {
+		if id != next.CurrentID() {
+			r.kr = next
+			return nil, fmt.Errorf("%d stored values still use key %s, so the key file keeps both keys; run rotate-key again", count, id)
+		}
 	}
 	final := next.OnlyCurrent()
 	if err := final.Save(r.keyFile); err != nil {

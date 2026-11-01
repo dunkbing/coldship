@@ -35,9 +35,13 @@ Without the key, the stored secrets can't be recovered: env values, database pas
 
 ## Upgrading to encryption
 
-The first start of a version with encryption encrypts all existing secrets in one transaction. Then it scrubs the old plaintext: SQLite would otherwise keep it in freed pages and in the write-ahead log. Freed pages are zeroed from then on.
+The first start of a version with encryption encrypts all existing secrets in one transaction. Then it scrubs the old plaintext out of the SQLite files: SQLite would otherwise keep it in freed pages and in the write-ahead log. Freed pages are zeroed from then on. If the scrub fails (for example, the disk is full), the secrets are still encrypted, Hangar logs a warning, and it retries on the next start.
 
-Backups taken **before** the upgrade still contain the plaintext. Replace or delete them.
+The scrub covers the SQLite files only. Copies elsewhere still hold the plaintext: backups taken before the upgrade, filesystem or VM snapshots, and old blocks on copy-on-write filesystems. Replace or delete them.
+
+:::note[This upgrade changes the on-disk format]
+Older versions can't read an encrypted database, so roll back only through [Downgrading](#downgrading). Release it as a new major version, so [automatic upgrades](/guides/upgrades/) don't install it unattended.
+:::
 
 ## Status and rotation
 
@@ -51,7 +55,12 @@ Rotation is crash-safe:
 2. Every secret is re-encrypted in one transaction.
 3. Only then is the old key dropped.
 
-If the process dies at any step, the key file on disk still opens the database. Back up the key file again after rotating.
+If the process dies at any step, the key file on disk still opens the database. Writes that are in progress during a rotation finish first and are re-encrypted with the new key. Before the old key is dropped, Hangar checks that no stored value still uses it; if one does, the key file keeps both keys and it asks you to run the rotation again.
+
+**After rotating:**
+- Back up the new key file.
+- **Keep the old key with the database backups from before the rotation.** Restoring one of those backups needs the key it was encrypted with. If the keys don't match, the startup error names both key ids.
+- Rotation protects what's written from now on. Anyone who already has an old database copy *and* the old key can still read that copy.
 
 A key from `HANGAR_SECRET_KEY` can't be rewritten by Hangar. To rotate one: stop the server, run `hangar secrets decrypt --yes`, set the new key, and start the server again.
 
