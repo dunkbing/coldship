@@ -8,12 +8,15 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -243,9 +246,13 @@ func Config(routes []Route, email string) map[string]any {
 	cfg := map[string]any{
 		"admin": map[string]any{"listen": "localhost:2019"},
 		"apps": map[string]any{
-			"http": map[string]any{"servers": map[string]any{
-				"coldship": map[string]any{"listen": []string{":80", ":443"}, "routes": rs},
-			}},
+			"http": map[string]any{
+				// Per-host request metrics, for each app's HTTP charts.
+				"metrics": map[string]any{"per_host": true},
+				"servers": map[string]any{
+					"coldship": map[string]any{"listen": []string{":80", ":443"}, "routes": rs},
+				},
+			},
 		},
 	}
 	if email != "" {
@@ -269,9 +276,17 @@ type Fake struct {
 	FailNext error
 	// Sites is the static sites directory; "" means no static sites.
 	Sites string
+	Hosts map[string]HostCounters
 }
 
 func (f *Fake) SitesDir() string { return f.Sites }
+
+// HTTPStats returns Hosts, standing in for the proxy's request counters.
+func (f *Fake) HTTPStats(context.Context) (map[string]HostCounters, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Hosts, nil
+}
 
 // Root returns the static site root routed for app, or "".
 func (f *Fake) Root(app string) string {
@@ -311,4 +326,60 @@ func (f *Fake) Upstream(app string) string {
 		}
 	}
 	return ""
+}
+
+// HostCounters are cumulative request counts and time for one host.
+type HostCounters struct {
+	Requests    uint64
+	ByClass     map[string]uint64 // "2xx", "4xx", "5xx", ...
+	DurationSec float64
+}
+
+var metricLine = regexp.MustCompile(`^caddy_http_request_duration_seconds_(count|sum)\{([^}]*)\} (\S+)$`)
+var labelRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
+
+// HTTPStats reads the proxy's per-host request counters.
+func (c *Caddy) HTTPStats(ctx context.Context) (map[string]HostCounters, error) {
+	var out bytes.Buffer
+	code, se, err := c.Docker.Exec(ctx, containerName, []string{"wget", "-qO-", "http://localhost:2019/metrics"}, runtime.ExecIO{Stdout: &out})
+	if err != nil || code != 0 {
+		return nil, fmt.Errorf("reading proxy metrics: %s %v", se, err)
+	}
+	return parseHTTPStats(out.String()), nil
+}
+
+func parseHTTPStats(text string) map[string]HostCounters {
+	hosts := map[string]HostCounters{}
+	for _, line := range strings.Split(text, "\n") {
+		m := metricLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		labels := map[string]string{}
+		for _, l := range labelRe.FindAllStringSubmatch(m[2], -1) {
+			labels[l[1]] = l[2]
+		}
+		host := labels["host"]
+		if host == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(m[3], 64)
+		if err != nil {
+			continue
+		}
+		h := hosts[host]
+		if h.ByClass == nil {
+			h.ByClass = map[string]uint64{}
+		}
+		if m[1] == "count" {
+			h.Requests += uint64(v)
+			if code := labels["code"]; len(code) == 3 {
+				h.ByClass[code[:1]+"xx"] += uint64(v)
+			}
+		} else {
+			h.DurationSec += v
+		}
+		hosts[host] = h
+	}
+	return hosts
 }

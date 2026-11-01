@@ -32,11 +32,13 @@ type Fake struct {
 	FailDatabase error
 	// Ports holds images' declared ports (EXPOSE), by image.
 	Ports map[string][]int
+	// Stats holds containers' counters, by container name.
+	Stats map[string]RawStats
 }
 
 func NewFake() *Fake {
 	return &Fake{Containers: map[string]spec.App{}, Volumes: map[string]bool{},
-		LogLines: map[string][]string{}, Statuses: map[string]Status{}, DBs: map[string]string{}, Ports: map[string][]int{}}
+		LogLines: map[string][]string{}, Statuses: map[string]Status{}, DBs: map[string]string{}, Ports: map[string][]int{}, Stats: map[string]RawStats{}}
 }
 
 func (f *Fake) Deploy(ctx context.Context, depID string, app spec.App, opts DeployOptions) error {
@@ -173,4 +175,11 @@ func (f *Fake) ImagePorts(_ context.Context, image string) ([]int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.Ports[image], nil
+}
+
+// ContainerStats returns Stats[name], standing in for the engine's counters.
+func (f *Fake) ContainerStats(_ context.Context, name string) (RawStats, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Stats[name], nil
 }

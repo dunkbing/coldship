@@ -200,6 +200,7 @@ func serverCmd() *cobra.Command {
 					}
 				}()
 			}
+			go eng.RunMetrics(ctx)
 			go func() {
 				// Delete previews whose time is up.
 				t := time.NewTicker(time.Minute)

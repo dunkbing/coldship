@@ -1,3 +1,4 @@
+import { MetricsTab } from './MetricsTab'
 import { LiveLog } from '../components/LiveLog'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -6,7 +7,7 @@ import { useSession } from '../App'
 import { fmtTime, timeUntil, useLoad } from '../hooks'
 import { DeployStatus, ErrorBox, GitIcon, HealthPill, healthOf, Mono, shortRepo, StageBadge, Time } from '../components/ui'
 
-type Tab = 'diagnose' | 'deployments' | 'logs' | 'databases' | 'webhook'
+type Tab = 'diagnose' | 'metrics' | 'deployments' | 'logs' | 'databases' | 'webhook'
 
 export default function AppDetail() {
   const { name = '' } = useParams()
@@ -59,13 +60,14 @@ export default function AppDetail() {
       </div>
 
       <div className="tabs" role="tablist">
-        {(['diagnose', 'deployments', 'logs', ...(a.databases?.length ? ['databases'] : []), ...(a.spec?.build && !a.preview_of ? ['webhook'] : [])] as Tab[]).map((t) => (
+        {(['diagnose', 'metrics', 'deployments', 'logs', ...(a.databases?.length ? ['databases'] : []), ...(a.spec?.build && !a.preview_of ? ['webhook'] : [])] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setParams({ tab: t })}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
       {tab === 'diagnose' && <DiagnoseTab name={name} />}
+      {tab === 'metrics' && <MetricsTab app={a} />}
       {tab === 'deployments' && <DeploymentsTab name={name} />}
       {tab === 'logs' && <LogsTab name={name} />}
       {tab === 'databases' && <DatabasesTab app={a} onChange={app.reload} />}

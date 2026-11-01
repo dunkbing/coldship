@@ -26,3 +26,17 @@ func TestConfig(t *testing.T) {
 		t.Error("apps without domains must not be routed")
 	}
 }
+
+func TestParseHTTPStats(t *testing.T) {
+	text := `# HELP caddy_http_request_duration_seconds ...
+caddy_http_request_duration_seconds_count{code="200",handler="reverse_proxy",host="a.test",method="GET",server="coldship"} 7
+caddy_http_request_duration_seconds_count{code="502",handler="reverse_proxy",host="a.test",method="GET",server="coldship"} 3
+caddy_http_request_duration_seconds_sum{code="200",handler="reverse_proxy",host="a.test",method="GET",server="coldship"} 0.5
+caddy_http_request_duration_seconds_count{code="404",handler="static_response",host="b.test",method="GET",server="coldship"} 1
+caddy_http_request_duration_seconds_bucket{code="200",host="a.test",le="0.005"} 7`
+	h := parseHTTPStats(text)
+	a := h["a.test"]
+	if a.Requests != 10 || a.ByClass["2xx"] != 7 || a.ByClass["5xx"] != 3 || a.DurationSec != 0.5 || h["b.test"].ByClass["4xx"] != 1 {
+		t.Fatalf("%+v", h)
+	}
+}

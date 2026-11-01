@@ -38,6 +38,7 @@ type Engine struct {
 	DataDir string
 	started time.Time
 	// live holds the logs of deployments in progress, for following.
+	metrics  metricsStore
 	liveMu   sync.Mutex
 	live     map[string]*builder.LogTail
 	locksMu  sync.Mutex
@@ -55,7 +56,7 @@ type Engine struct {
 
 // New creates an engine. px may be nil, which disables domains.
 func New(st *store.Store, rt runtime.Runtime, bd builder.Builder, px proxy.Proxy) *Engine {
-	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{}, live: map[string]*builder.LogTail{}, started: time.Now(),
+	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{}, live: map[string]*builder.LogTail{}, started: time.Now(), metrics: metricsStore{apps: map[string]*appSeries{}},
 		PlanTTL: 30 * time.Minute, Previews: defaultPreviewConfig(), SnapshotDir: "snapshots", SnapshotKeep: 20, Now: time.Now}
 }
 

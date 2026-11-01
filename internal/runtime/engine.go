@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -343,4 +344,57 @@ func (d *Docker) ImagePorts(ctx context.Context, image string) ([]int, error) {
 	}
 	sort.Ints(ports)
 	return ports, nil
+}
+
+// RawStats are a container's cumulative counters at one moment.
+type RawStats struct {
+	At                time.Time
+	CPUNanos, SysNano uint64 // container and whole-host CPU time
+	CPUs              uint32
+	Mem, MemLimit     uint64
+	NetRx, NetTx      uint64
+	DiskRead, DiskOut uint64
+}
+
+// ContainerStats reads a container's counters once.
+func (d *Docker) ContainerStats(ctx context.Context, name string) (RawStats, error) {
+	cli, err := d.api()
+	if err != nil {
+		return RawStats{}, err
+	}
+	res, err := cli.ContainerStats(ctx, name, client.ContainerStatsOptions{})
+	if err != nil {
+		return RawStats{}, err
+	}
+	defer res.Body.Close()
+	var s container.StatsResponse
+	if err := json.NewDecoder(res.Body).Decode(&s); err != nil {
+		return RawStats{}, err
+	}
+	r := RawStats{At: s.Read, CPUNanos: s.CPUStats.CPUUsage.TotalUsage, SysNano: s.CPUStats.SystemUsage,
+		CPUs: s.CPUStats.OnlineCPUs, MemLimit: s.MemoryStats.Limit}
+	if r.At.IsZero() {
+		r.At = time.Now()
+	}
+	// Like docker stats: page cache the kernel can drop doesn't count.
+	cache := s.MemoryStats.Stats["inactive_file"]
+	if v, ok := s.MemoryStats.Stats["total_inactive_file"]; ok {
+		cache = v
+	}
+	if s.MemoryStats.Usage > cache {
+		r.Mem = s.MemoryStats.Usage - cache
+	}
+	for _, n := range s.Networks {
+		r.NetRx += n.RxBytes
+		r.NetTx += n.TxBytes
+	}
+	for _, e := range s.BlkioStats.IoServiceBytesRecursive {
+		switch strings.ToLower(e.Op) {
+		case "read":
+			r.DiskRead += e.Value
+		case "write":
+			r.DiskOut += e.Value
+		}
+	}
+	return r, nil
 }

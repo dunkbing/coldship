@@ -81,6 +81,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}", store.ScopeRead, s.getApp)
 	s.route("GET /v1/apps/{name}/logs", store.ScopeRead, s.logs)
 	s.route("GET /v1/apps/{name}/diagnose", store.ScopeRead, s.diagnose)
+	s.route("GET /v1/apps/{name}/metrics", store.ScopeRead, s.metrics)
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
 	s.route("GET /v1/deployments/{id}/log", store.ScopeRead, s.deployLog)
@@ -926,4 +927,8 @@ func (s *Server) version() string {
 		return "unknown"
 	}
 	return s.upd.Status().Version
+}
+
+func (s *Server) metrics(r *http.Request, _ principal) (any, error) {
+	return s.eng.AppMetrics(r.Context(), r.PathValue("name"))
 }

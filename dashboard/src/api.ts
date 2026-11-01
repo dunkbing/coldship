@@ -122,6 +122,28 @@ export interface Snapshot {
   created_at: string
 }
 
+export interface MetricPoint {
+  t: string
+  cpu_percent: number
+  memory_bytes: number
+  memory_limit_bytes: number
+  net_in_bps: number
+  net_out_bps: number
+  disk_read_bps: number
+  disk_write_bps: number
+  requests_per_s: number
+  errors_4xx_per_s: number
+  errors_5xx_per_s: number
+  avg_latency_ms: number
+}
+
+export interface AppMetrics {
+  interval_seconds: number
+  container: boolean
+  http: boolean
+  points: MetricPoint[]
+}
+
 export interface Usage {
   total: number
   used: number
@@ -383,6 +405,7 @@ export const api = {
   restoreData: (name: string, snapshot: string, reason: string) =>
     req<{ message: string }>('POST', `/v1/data/${enc(name)}/restore`, { snapshot, reason }),
   system: () => req<SystemStatus>('GET', '/v1/system'),
+  metrics: (name: string) => req<AppMetrics>('GET', `/v1/apps/${enc(name)}/metrics`),
   serverStatus: () => req<ServerStatus>('GET', '/v1/system/status'),
   upgrade: () => req<SystemStatus>('POST', '/v1/system/upgrade'),
   audit: (limit = 200) => req<AuditEntry[]>('GET', `/v1/audit?limit=${limit}`),
