@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -130,7 +131,11 @@ func appsCmd() *cobra.Command {
 					if a.Spec != nil {
 						stage, image = string(a.Spec.Stage), a.Spec.Source()
 					}
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Name, stage, image, orDash(a.CurrentDeployment))
+					dep := a.CurrentDeployment
+					if dep == "" {
+						dep = "not deployed yet (coldship status " + a.Name + ")"
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Name, stage, image, dep)
 				}
 				w.Flush()
 			})
@@ -148,7 +153,7 @@ func statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return emit(v, nil)
+			return emit(v, func() { printStatus(v) })
 		},
 	}
 }
@@ -354,7 +359,16 @@ func tokenCmd() *cobra.Command {
 // --- human output ---
 
 func printPlan(p *store.Plan) {
-	fmt.Printf("Plan %s for app %q (%s)\n", p.ID, p.App, p.Action)
+	printChanges(p, true)
+	fmt.Printf("Status: %s  Expires: %s\nNext: %s\n", p.Status, p.ExpiresAt.Local().Format("15:04:05"), p.NextStep)
+}
+
+// printChanges prints what a plan changes. header adds the plan id line,
+// for commands where the user handles plans themselves.
+func printChanges(p *store.Plan, header bool) {
+	if header {
+		fmt.Printf("Plan %s for app %q (%s)\n", p.ID, p.App, p.Action)
+	}
 	for _, c := range p.Changes {
 		sym := map[string]string{planner.OpCreate: "+", planner.OpUpdate: "~", planner.OpDelete: "-", planner.OpRedeploy: "↻", "restore": "⟲"}[c.Op]
 		line := fmt.Sprintf("  %s %s", sym, c.Path)
@@ -377,7 +391,7 @@ func printPlan(p *store.Plan) {
 	if p.ApprovedBy != "" {
 		fmt.Printf(" (approved by %s)", p.ApprovedBy)
 	}
-	fmt.Printf("\nStatus: %s  Expires: %s\nNext: %s\n", p.Status, p.ExpiresAt.Local().Format("15:04:05"), p.NextStep)
+	fmt.Println()
 }
 
 func printApply(r *engine.ApplyResult) {
@@ -399,4 +413,64 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func printStatus(v *engine.AppView) {
+	fmt.Printf("App %s", v.Name)
+	if v.PreviewOf != "" {
+		fmt.Printf(" (preview of %s)", v.PreviewOf)
+	}
+	fmt.Println()
+	if s := v.Spec; s != nil {
+		fmt.Printf("  Stage:    %s\n  Source:   %s\n", s.Stage, s.Source())
+		if s.Port > 0 {
+			fmt.Printf("  Port:     %d", s.Port)
+			if s.HostPort > 0 {
+				fmt.Printf(" (published on the server's port %d)", s.HostPort)
+			}
+			fmt.Println()
+		}
+		if len(s.Env) > 0 {
+			keys := make([]string, 0, len(s.Env))
+			for k := range s.Env {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			fmt.Printf("  Env:      %s\n", strings.Join(keys, ", "))
+		}
+		for _, db := range s.Databases {
+			fmt.Printf("  Database: %s (%s %s, in %s)\n", db.Name, db.Engine, db.Version, db.Env)
+		}
+		for _, vol := range s.Volumes {
+			fmt.Printf("  Volume:   %s at %s\n", vol.Name, vol.Path)
+		}
+	}
+	for _, u := range v.URLs {
+		fmt.Printf("  URL:      %s\n", u)
+	}
+	if rt := v.Runtime; rt != nil {
+		state := "not running"
+		switch {
+		case rt.Running:
+			state = "running"
+		case rt.Exists:
+			state = rt.State
+			if rt.Error != "" {
+				state += ": " + rt.Error
+			}
+		}
+		fmt.Printf("  Container: %s\n", state)
+	}
+	if d := v.LatestDeployment; d != nil {
+		fmt.Printf("  Latest deployment: %s, %s by %s, %s", d.ID, d.Status, d.Actor, d.CreatedAt.Local().Format("2006-01-02 15:04"))
+		if d.Error != "" {
+			fmt.Printf("\n    %s", d.Error)
+		}
+		fmt.Println()
+		if d.Status == store.DeployFailed {
+			fmt.Printf("  Next: coldship deploy-log %s, or coldship diagnose %s\n", d.ID, v.Name)
+		}
+	} else {
+		fmt.Println("  Not deployed yet.")
+	}
 }

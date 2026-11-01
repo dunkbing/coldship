@@ -839,6 +839,13 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			return nil, ae.WithDetail(runtime.DetailPreviousRunning, true).
 				WithFix(map[string]any{"tool": "deploy_log", "deployment": d.ID})
 		}
+		if p.BaseDeployment == "" {
+			// A first deploy: there is no earlier version to roll back to.
+			if ae.Hint == "" {
+				ae.Hint = "read the deploy log, fix the problem, then deploy again"
+			}
+			return nil, ae.WithFix(map[string]any{"tool": "deploy_log", "deployment": d.ID})
+		}
 		if ae.Hint == "" {
 			ae.Hint = "call diagnose for this app, or roll back to the last good deployment"
 		}

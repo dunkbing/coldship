@@ -83,31 +83,33 @@ func (c *Caddy) Ensure(ctx context.Context) error {
 		}
 	}
 
+	abs, err := filepath.Abs(c.ConfigDir)
+	if err != nil {
+		return err
+	}
 	info, err := c.Docker.InspectContainer(ctx, containerName)
 	if err != nil {
 		return err
 	}
 	if info.Exists {
-		if info.Running && info.Labels["coldship.proxy.ports"] == c.portsLabel() {
+		if info.Running && info.Labels["coldship.proxy.ports"] == c.portsLabel() && info.Labels["coldship.proxy.config"] == abs {
 			return nil
 		}
-		// Wrong ports or stopped: recreate. Certificates live in a volume.
+		// Wrong ports, another config directory (say, a proxy started by an
+		// earlier `coldship server` elsewhere), or stopped: recreate.
+		// Certificates live in a volume, so they survive.
 		if err := c.Docker.ForceRemove(ctx, containerName); err != nil {
 			return apierr.New(502, "proxy_unavailable", "could not replace the proxy container: %v", err)
 		}
-	}
-	abs, err := filepath.Abs(c.ConfigDir)
-	if err != nil {
-		return err
 	}
 	if err := c.Docker.EnsureImage(ctx, c.Image, nil); err != nil {
 		return apierr.New(502, "proxy_unavailable", "could not pull %s: %v", c.Image, err)
 	}
 	se, err := c.Docker.RunContainer(ctx, runtime.ContainerSpec{Name: containerName, Image: c.Image,
 		Cmd:    []string{"caddy", "run", "--config", "/etc/coldship/caddy.json"},
-		Labels: map[string]string{"coldship.proxy.ports": c.portsLabel()},
+		Labels: map[string]string{"coldship.proxy.ports": c.portsLabel(), "coldship.proxy.config": abs},
 		Ports:  map[int]int{c.HTTPPort: 80, c.HTTPSPort: 443},
-		Binds:  []string{"coldship-proxy-data:/data", "coldship-proxy-config:/config", abs + ":/etc/coldship:ro"}})
+		Binds:  []string{"coldship-proxy-data:/data", "coldship-proxy-config:/config", abs + ":/etc/coldship:ro,z"}})
 	if err != nil {
 		e := apierr.New(502, "proxy_unavailable", "could not start the proxy container: %s", se)
 		if strings.Contains(se, "port is already allocated") || strings.Contains(se, "address already in use") {

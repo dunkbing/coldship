@@ -202,7 +202,7 @@ if [ "$fresh" = yes ] && as_root test -f "$token_file"; then
 fi
 
 printf '\n%s%sColdship is ready.%s\n\n' "$bold" "$green" "$reset"
-printf '  Deploy something:  %scoldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8080%s\n' "$bold" "$reset"
+printf '  Deploy something:  %scoldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8090%s\n' "$bold" "$reset"
 printf '  Dashboard:         %s%s%s %s(on your laptop: ssh -L 7070:127.0.0.1:7070 <this server>)%s\n' "$bold" "$url" "$reset" "$dim" "$reset"
 if [ -n "$token" ]; then
   printf '\n  Admin token (shown once; for the dashboard and other machines, keep it in a password manager):\n\n    %s%s%s\n' "$bold" "$token" "$reset"

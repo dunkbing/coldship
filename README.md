@@ -77,6 +77,7 @@ coldship apps                       # list apps
 coldship diagnose web               # what's wrong, and how to fix it
 coldship logs web                   # recent logs
 coldship rollback web --reason ...  # back to the last good version
+coldship delete web                 # delete an app (asks first)
 coldship approve <plan-id>          # approve a risky change
 coldship export web > coldship.yaml # the app as a config file, if you want one in Git
 ```

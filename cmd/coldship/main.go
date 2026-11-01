@@ -46,7 +46,7 @@ func main() {
 	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "machine-readable JSON output")
 
 	root.AddCommand(serverCmd(), mcpCmd())
-	root.AddCommand(loginCmd(), logoutCmd(), deployCmd(), exportCmd(), planCmd(), applyCmd(), approveCmd(), rollbackCmd())
+	root.AddCommand(loginCmd(), logoutCmd(), deployCmd(), deleteCmd(), exportCmd(), planCmd(), applyCmd(), approveCmd(), rollbackCmd())
 	root.AddCommand(appsCmd(), statusCmd(), logsCmd(), diagnoseCmd(), deploymentsCmd(), deployLogCmd(), auditCmd(), tokenCmd())
 	root.AddCommand(secretsCmd(), buildCmd(), webhookCmd(), dbCmd(), previewCmd(), versionCmd(), upgradeCmd(), selfUpdateCmd(), uninstallCmd(), releaseCmd())
 	root.PersistentPostRun = func(cmd *cobra.Command, _ []string) { maybeNotice(cmd) }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -188,14 +189,20 @@ func buildFromHere() (*spec.Build, error) {
 	case ref == "":
 		ref = gitOut("rev-parse", "HEAD") // detached: build this commit
 	case gitOut("rev-parse", "--abbrev-ref", "@{u}") == "":
+		unpushed = true
 		warn("branch %s isn't pushed; the server builds what's on %s", ref, remote)
 	default:
 		if n, _ := strconv.Atoi(gitOut("rev-list", "--count", "@{u}..HEAD")); n > 0 {
+			unpushed = true
 			warn("%d commit(s) on %s aren't pushed yet; the server builds what's pushed", n, ref)
 		}
 	}
 	return &spec.Build{Git: httpsRemote(remote), Ref: ref}, nil
 }
+
+// unpushed is set when the repository being deployed has commits the server
+// can't see yet.
+var unpushed bool
 
 var scpRemote = regexp.MustCompile(`^git@(github\.com|gitlab\.com|codeberg\.org|bitbucket\.org):(.+)$`)
 
@@ -239,12 +246,15 @@ func planAndApply(cmd *cobra.Command, req engine.PlanRequest, reason string) err
 	}
 	if p.Action == "noop" {
 		return emit(p, func() {
+			if unpushed {
+				fmt.Printf("Nothing deployed: %s already runs the latest pushed commit. Push your new commits, then run coldship deploy again.\n", p.App)
+				return
+			}
 			fmt.Printf("Nothing to do: %s is already up to date (--redeploy restarts it anyway).\n", p.App)
 		})
 	}
 	if !flagJSON {
-		printPlan(p)
-		fmt.Println()
+		printChanges(p, false)
 	}
 	res, err := c.Apply(cmd.Context(), p.ID, reason)
 	if err != nil {
@@ -287,4 +297,55 @@ deploying the file with -f keeps the current values for those.`,
 			return nil
 		},
 	}
+}
+
+func deleteCmd() *cobra.Command {
+	var yes bool
+	var reason string
+	cmd := &cobra.Command{
+		Use:   "delete <app>",
+		Short: "Delete an app, its volumes and its databases (snapshotted first)",
+		Long: `Delete an app: its containers, volumes and databases. Databases are
+snapshotted first. It shows what will be removed and asks you to type the
+app's name, unless --yes. Production apps need a human's approval.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			c := newClient()
+			p, err := c.Plan(cmd.Context(), engine.PlanRequest{Delete: name})
+			if err != nil {
+				return err
+			}
+			if p.RequiresApproval {
+				if !flagJSON {
+					printPlan(p)
+				}
+				return apierr.New(403, "approval_required", "deleting production app %s needs human approval (plan %s)", name, p.ID).
+					WithHint("an admin runs `coldship approve " + p.ID + "`, then `coldship apply " + p.ID + " --reason ...`")
+			}
+			if !yes {
+				if !isTerminal(os.Stdin) || flagJSON {
+					return apierr.New(400, "confirmation_required", "deleting %s needs confirmation", name).WithHint("run it in a terminal, or pass --yes")
+				}
+				printChanges(p, false)
+				fmt.Printf("\nType %q to delete it: ", name)
+				line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+				if strings.TrimSpace(line) != name {
+					fmt.Println("Nothing was deleted.")
+					return nil
+				}
+			}
+			if reason == "" {
+				reason = "coldship delete"
+			}
+			res, err := c.Apply(cmd.Context(), p.ID, reason)
+			if err != nil {
+				return err
+			}
+			return emit(res, func() { fmt.Printf("Deleted %s.\n", name) })
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "don't ask for confirmation")
+	cmd.Flags().StringVar(&reason, "reason", "", "why, for the audit log")
+	return cmd
 }
