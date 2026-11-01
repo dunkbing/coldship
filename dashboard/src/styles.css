@@ -116,6 +116,8 @@ pre {
   display: grid;
   grid-template-columns: 220px 1fr;
   min-height: 100vh;
+  /* Paint the sidebar column the full height of the page, not just the viewport. */
+  background: linear-gradient(90deg, var(--surface) 219px, var(--border) 219px 220px, transparent 220px);
 }
 .sidebar {
   background: var(--surface);
@@ -191,6 +193,7 @@ pre {
 @media (max-width: 760px) {
   .shell {
     grid-template-columns: 1fr;
+    background: none;
   }
   .sidebar {
     position: static;
@@ -385,7 +388,8 @@ h1 .badge {
 }
 .badge.warn,
 .sev-warning.badge,
-.dep-deploying {
+.dep-deploying,
+.dep-building {
   background: var(--warn-soft);
   color: var(--warn);
   border-color: transparent;
@@ -719,4 +723,22 @@ select:focus,
   flex-direction: column;
   gap: 14px;
   padding: 28px;
+}
+
+/* Git source */
+.source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.git-icon {
+  color: var(--muted);
+  flex: none;
+}
+.build-log {
+  margin-top: 16px;
+}
+.table tr.expanded td {
+  background: var(--surface-2);
 }

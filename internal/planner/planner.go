@@ -49,6 +49,7 @@ func Diff(cur, des *spec.App) Result {
 	default:
 		cs = scalar(cs, "stage", cur.Stage, des.Stage)
 		cs = scalar(cs, "image", cur.Image, des.Image)
+		cs = buildDiff(cs, cur.Build, des.Build)
 		cs = scalar(cs, "port", cur.Port, des.Port)
 		cs = scalar(cs, "host_port", cur.HostPort, des.HostPort)
 		cs = scalar(cs, "memory", cur.Memory, des.Memory)
@@ -76,7 +77,41 @@ func scalar[T comparable](cs []Change, path string, from, to T) []Change {
 	}
 }
 
+func buildDiff(cs []Change, cur, des *spec.Build) []Change {
+	switch {
+	case cur == nil && des == nil:
+		return cs
+	case cur == nil:
+		return append(cs, Change{Path: "build", Op: OpCreate, To: buildSummary(des)})
+	case des == nil:
+		return append(cs, Change{Path: "build", Op: OpDelete, From: buildSummary(cur)})
+	}
+	cs = scalar(cs, "build.git", cur.Git, des.Git)
+	cs = scalar(cs, "build.ref", cur.Ref, des.Ref)
+	cs = scalar(cs, "build.commit", cur.Commit, des.Commit)
+	cs = scalar(cs, "build.context", cur.Context, des.Context)
+	cs = scalar(cs, "build.dockerfile", cur.Dockerfile, des.Dockerfile)
+	return mapDiff(cs, "build.args.", cur.Args, des.Args, false)
+}
+
+func buildSummary(b *spec.Build) string {
+	s := b.Git
+	if b.Ref != "" {
+		s += "@" + b.Ref
+	}
+	if b.Commit != "" {
+		s += " " + b.Commit
+	}
+	return s
+}
+
 func envDiff(cs []Change, cur, des map[string]string) []Change {
+	return mapDiff(cs, "env.", cur, des, true)
+}
+
+// mapDiff diffs two string maps. With redact, values never appear in the
+// output, only which keys changed.
+func mapDiff(cs []Change, prefix string, cur, des map[string]string, redact bool) []Change {
 	keys := map[string]bool{}
 	for k := range cur {
 		keys[k] = true
@@ -89,11 +124,21 @@ func envDiff(cs []Change, cur, des map[string]string) []Change {
 		dv, inDes := des[k]
 		switch {
 		case inCur && !inDes:
-			cs = append(cs, Change{Path: "env." + k, Op: OpDelete})
+			c := Change{Path: prefix + k, Op: OpDelete}
+			if !redact {
+				c.From = cv
+			}
+			cs = append(cs, c)
 		case !inCur && inDes:
-			cs = append(cs, Change{Path: "env." + k, Op: OpCreate})
+			c := Change{Path: prefix + k, Op: OpCreate}
+			if !redact {
+				c.To = dv
+			}
+			cs = append(cs, c)
+		case cv != dv && redact:
+			cs = append(cs, Change{Path: prefix + k, Op: OpUpdate, Reason: "value changed (redacted)"})
 		case cv != dv:
-			cs = append(cs, Change{Path: "env." + k, Op: OpUpdate, Reason: "value changed (redacted)"})
+			cs = append(cs, Change{Path: prefix + k, Op: OpUpdate, From: cv, To: dv})
 		}
 	}
 	return cs

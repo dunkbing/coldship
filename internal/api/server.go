@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"hangar/internal/apierr"
 	"hangar/internal/engine"
@@ -33,6 +34,8 @@ type Server struct {
 func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler) *Server {
 	s := &Server{eng: eng, st: st, mux: http.NewServeMux(), log: log}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
+	s.mux.HandleFunc("POST /v1/sessions", s.createSession)
+	s.mux.HandleFunc("DELETE /v1/sessions", s.deleteSession)
 	s.route("GET /v1/whoami", store.ScopeRead, s.whoami)
 	s.route("GET /v1/apps", store.ScopeRead, s.listApps)
 	s.route("GET /v1/apps/{name}", store.ScopeRead, s.getApp)
@@ -40,6 +43,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}/diagnose", store.ScopeRead, s.diagnose)
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
+	s.route("GET /v1/deployments/{id}/build-log", store.ScopeRead, s.buildLog)
 	s.route("POST /v1/plans", store.ScopeDeploy, s.createPlan)
 	s.route("GET /v1/plans", store.ScopeRead, s.listPlans)
 	s.route("GET /v1/plans/{id}", store.ScopeRead, s.getPlan)
@@ -84,11 +88,36 @@ func (s *Server) route(pattern string, need store.Scope, h handler) {
 	})
 }
 
+// SessionCookie holds the dashboard's session id. It is HttpOnly, so page
+// scripts (and any XSS) cannot read it.
+const SessionCookie = "hangar_session"
+
+// CSRFHeader must accompany cookie-authenticated requests that change state.
+// Browsers only send custom headers cross-origin after a CORS preflight, which
+// this server never allows, so a forged cross-site request cannot carry it.
+const CSRFHeader = "X-Hangar-Request"
+
+const sessionTTL = 12 * time.Hour
+
 func (s *Server) auth(r *http.Request) (principal, error) {
 	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || tok == "" {
-		return principal{}, apierr.New(401, "unauthenticated", "missing bearer token").
-			WithHint("set HANGAR_TOKEN or pass --token")
+		c, err := r.Cookie(SessionCookie)
+		if err != nil || c.Value == "" {
+			return principal{}, apierr.New(401, "unauthenticated", "missing bearer token").
+				WithHint("set HANGAR_TOKEN or pass --token")
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get(CSRFHeader) == "" {
+			return principal{}, apierr.New(403, "csrf_check_failed", "cookie-authenticated requests that change state need the %s header", CSRFHeader)
+		}
+		t, err := s.st.LookupSession(r.Context(), c.Value)
+		if err != nil {
+			return principal{}, err
+		}
+		if t == nil {
+			return principal{}, apierr.New(401, "unauthenticated", "session expired or signed out")
+		}
+		return principal{name: t.Name, scope: t.Scope}, nil
 	}
 	t, err := s.st.LookupToken(r.Context(), tok)
 	if err != nil {
@@ -152,6 +181,63 @@ func (s *Server) listPlans(r *http.Request, _ principal) (any, error) {
 		return nil, err
 	}
 	return s.eng.ListPlans(r.Context(), r.URL.Query().Get("status"), limit)
+}
+
+type SessionRequest struct {
+	Token string `json:"token"`
+}
+
+// createSession exchanges an API token for an HttpOnly session cookie, so the
+// dashboard never keeps the token itself.
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+	var req SessionRequest
+	if err := decode(r, &req); err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	t, err := s.st.LookupToken(r.Context(), strings.TrimSpace(req.Token))
+	if err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	if t == nil {
+		writeErr(w, s.log, apierr.New(401, "unauthenticated", "unknown token"))
+		return
+	}
+	id, err := s.st.CreateSession(r.Context(), t, sessionTTL)
+	if err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	_ = s.st.AddAudit(r.Context(), store.AuditEntry{Actor: t.Name, Action: "session.create", Target: t.Name})
+	http.SetCookie(w, &http.Cookie{
+		Name: SessionCookie, Value: id, Path: "/", MaxAge: int(sessionTTL.Seconds()),
+		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+	})
+	writeJSON(w, http.StatusOK, WhoAmI{Name: t.Name, Scope: t.Scope})
+}
+
+// deleteSession signs the dashboard out: the session is deleted server-side
+// and the cookie cleared.
+func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.auth(r); err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	if c, err := r.Cookie(SessionCookie); err == nil {
+		if err := s.st.DeleteSession(r.Context(), c.Value); err != nil {
+			writeErr(w, s.log, err)
+			return
+		}
+	}
+	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	writeJSON(w, http.StatusOK, map[string]bool{"signed_out": true})
+}
+
+func (s *Server) buildLog(r *http.Request, _ principal) (any, error) {
+	return s.eng.BuildLog(r.Context(), r.PathValue("id"))
 }
 
 func (s *Server) listApps(r *http.Request, _ principal) (any, error) {

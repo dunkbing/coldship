@@ -170,11 +170,11 @@ func appsCmd() *cobra.Command {
 			}
 			return emit(apps, func() {
 				w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(w, "NAME\tSTAGE\tIMAGE\tDEPLOYMENT")
+				fmt.Fprintln(w, "NAME\tSTAGE\tSOURCE\tDEPLOYMENT")
 				for _, a := range apps {
 					stage, image := "-", "-"
 					if a.Spec != nil {
-						stage, image = string(a.Spec.Stage), a.Spec.Image
+						stage, image = string(a.Spec.Stage), a.Spec.Source()
 					}
 					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Name, stage, image, orDash(a.CurrentDeployment))
 				}
@@ -238,6 +238,13 @@ func diagnoseCmd() *cobra.Command {
 						fmt.Printf("      suggested fix: %s\n", b)
 					}
 				}
+				if len(d.BuildLog) > 0 {
+					n := min(len(d.BuildLog), 20)
+					fmt.Printf("\nLast %d build log lines:\n", n)
+					for _, l := range d.BuildLog[len(d.BuildLog)-n:] {
+						fmt.Println("  " + l)
+					}
+				}
 				if len(d.RecentLogs) > 0 {
 					n := min(len(d.RecentLogs), 15)
 					fmt.Printf("\nLast %d log lines:\n", n)
@@ -263,13 +270,17 @@ func deploymentsCmd() *cobra.Command {
 			}
 			return emit(deps, func() {
 				w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(w, "ID\tSTATUS\tIMAGE\tACTOR\tCREATED\tREASON")
+				fmt.Fprintln(w, "ID\tSTATUS\tIMAGE\tCOMMIT\tACTOR\tCREATED\tREASON")
 				for _, d := range deps {
-					image := "-"
-					if d.Spec != nil {
-						image = d.Spec.Image
+					image := d.Image
+					if image == "" && d.Spec != nil {
+						image = d.Spec.Source()
 					}
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, d.Status, image, d.Actor, d.CreatedAt.Format("2006-01-02 15:04:05"), d.Reason)
+					commit := "-"
+					if len(d.Commit) >= 12 {
+						commit = d.Commit[:12]
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, d.Status, orDash(image), commit, d.Actor, d.CreatedAt.Format("2006-01-02 15:04:05"), d.Reason)
 				}
 				w.Flush()
 			})
@@ -277,6 +288,27 @@ func deploymentsCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "max deployments")
 	return cmd
+}
+
+func buildLogCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "build-log <deployment-id>",
+		Short: "Show the build log of a deployment built from Git",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			l, err := newClient().BuildLog(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			return emit(l, func() {
+				if len(l.Lines) == 0 {
+					fmt.Println(l.Note)
+					return
+				}
+				fmt.Println(strings.Join(l.Lines, "\n"))
+			})
+		},
+	}
 }
 
 func auditCmd() *cobra.Command {

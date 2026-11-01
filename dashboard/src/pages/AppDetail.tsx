@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { api, type AppView } from '../api'
+import { api, type AppView, type Deployment } from '../api'
 import { useSession } from '../App'
 import { fmtTime, useLoad } from '../hooks'
-import { DeployStatus, ErrorBox, HealthPill, healthOf, Mono, StageBadge, Time } from '../components/ui'
+import { DeployStatus, ErrorBox, GitIcon, HealthPill, healthOf, Mono, shortRepo, StageBadge, Time } from '../components/ui'
 
 type Tab = 'diagnose' | 'deployments' | 'logs'
 
@@ -60,10 +60,45 @@ function SpecCard({ a }: { a: AppView }) {
     <section className="card">
       <h2>Spec</h2>
       <dl className="kv">
-        <dt>Image</dt>
-        <dd>
-          <Mono>{s.image}</Mono>
-        </dd>
+        {s.build ? (
+          <>
+            <dt>Repository</dt>
+            <dd>
+              <a href={s.build.git.startsWith('http') ? s.build.git : undefined} className="source" target="_blank" rel="noreferrer">
+                <GitIcon />
+                <Mono>{shortRepo(s.build.git)}</Mono>
+              </a>
+            </dd>
+            <dt>Ref</dt>
+            <dd>
+              <Mono>{s.build.ref || 'default branch'}</Mono>
+              {s.build.commit && <span className="muted mono small"> · {s.build.commit.slice(0, 12)}</span>}
+            </dd>
+            <dt>Dockerfile</dt>
+            <dd>
+              <Mono>{s.build.context === '.' || !s.build.context ? s.build.dockerfile : `${s.build.context}/${s.build.dockerfile}`}</Mono>
+            </dd>
+            {s.build.args && Object.keys(s.build.args).length > 0 && (
+              <>
+                <dt>Build args</dt>
+                <dd className="chips">
+                  {Object.entries(s.build.args).map(([k, v]) => (
+                    <span key={k} className="chip">
+                      {k}={v}
+                    </span>
+                  ))}
+                </dd>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <dt>Image</dt>
+            <dd>
+              <Mono>{s.image}</Mono>
+            </dd>
+          </>
+        )}
         <dt>Port</dt>
         <dd>{s.port ? (s.host_port ? `${s.host_port} → ${s.port}` : s.port) : '—'}</dd>
         <dt>Memory</dt>
@@ -202,12 +237,22 @@ function DiagnoseTab({ name }: { name: string }) {
           </li>
         ))}
       </ul>
+      {d.data.build_log && d.data.build_log.length > 0 && (
+        <div className="build-log">
+          <div className="logs-bar">
+            <strong className="small">End of the failed build log</strong>
+            <span className="small muted">Build output is untrusted.</span>
+          </div>
+          <TailLog lines={d.data.build_log} />
+        </div>
+      )}
     </section>
   )
 }
 
 function DeploymentsTab({ name }: { name: string }) {
   const d = useLoad(() => api.deployments(name), [name], 5000)
+  const [open, setOpen] = useState<string>()
   if (d.error) return <ErrorBox error={d.error} />
   if (!d.data) return <div className="muted">Loading…</div>
   return (
@@ -218,6 +263,7 @@ function DeploymentsTab({ name }: { name: string }) {
             <th>Deployment</th>
             <th>Status</th>
             <th>Image</th>
+            <th>Commit</th>
             <th>By</th>
             <th>Reason</th>
             <th>When</th>
@@ -225,26 +271,80 @@ function DeploymentsTab({ name }: { name: string }) {
         </thead>
         <tbody>
           {d.data.map((x) => (
-            <tr key={x.id}>
-              <td>
-                <Mono>{x.id}</Mono>
-              </td>
-              <td>
-                <DeployStatus status={x.status} />
-                {x.error && <div className="small danger-text clamp">{x.error}</div>}
-              </td>
-              <td>
-                <Mono>{x.spec?.image ?? '—'}</Mono>
-              </td>
-              <td>{x.actor}</td>
-              <td className="reason">{x.reason}</td>
-              <td>
-                <Time iso={x.created_at} />
-              </td>
-            </tr>
+            <DeploymentRow key={x.id} d={x} open={open === x.id} onToggle={() => setOpen(open === x.id ? undefined : x.id)} />
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean; onToggle: () => void }) {
+  const built = !!x.commit
+  return (
+    <>
+      <tr>
+        <td>
+          <Mono>{x.id}</Mono>
+        </td>
+        <td>
+          <DeployStatus status={x.status} />
+          {x.failed_in && <span className="muted small"> in {x.failed_in}</span>}
+          {x.error && <div className="small danger-text clamp">{x.error}</div>}
+        </td>
+        <td>
+          <Mono>{x.image || x.spec?.image || '—'}</Mono>
+        </td>
+        <td>
+          {built ? (
+            <span className="inline">
+              <Mono>{x.commit!.slice(0, 7)}</Mono>
+              <button className="btn btn-ghost btn-sm" onClick={onToggle} aria-expanded={open}>
+                {open ? 'Hide build log' : 'Build log'}
+              </button>
+            </span>
+          ) : (
+            '—'
+          )}
+        </td>
+        <td>{x.actor}</td>
+        <td className="reason">{x.reason}</td>
+        <td>
+          <Time iso={x.created_at} />
+        </td>
+      </tr>
+      {open && (
+        <tr className="expanded">
+          <td colSpan={7}>
+            <BuildLogView deployment={x.id} />
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+// TailLog is a log viewer that starts scrolled to the end, where the failing
+// step of a build is.
+function TailLog({ lines }: { lines?: string[] }) {
+  const ref = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight
+  }, [lines])
+  return (
+    <pre className="logs" ref={ref}>
+      {lines ? lines.join('\n') || '(empty)' : 'Loading…'}
+    </pre>
+  )
+}
+
+function BuildLogView({ deployment }: { deployment: string }) {
+  const l = useLoad(() => api.buildLog(deployment), [deployment])
+  if (l.error) return <ErrorBox error={l.error} />
+  return (
+    <div>
+      <div className="small muted">{l.data?.note}</div>
+      <TailLog lines={l.data?.lines} />
     </div>
   )
 }

@@ -22,6 +22,7 @@ Everything ships as one Go binary. The CLI, the MCP server and the React dashboa
 | `internal/engine` | The control plane: plan, approve, apply, rollback, diagnose |
 | `internal/store` | SQLite persistence for tokens, apps, plans, deployments and the audit log |
 | `internal/runtime` | `Runtime` interface; the Docker driver (via the `docker` CLI); an in-memory fake for tests |
+| `internal/builder` | Git builds: resolves refs, fetches a pinned commit, runs `docker build`; a fake for tests |
 | `internal/api` | HTTP routing, authentication and scope checks |
 | `internal/client` | Typed Go client for the API |
 | `internal/mcpserver` | MCP tools on top of the client |
@@ -40,4 +41,6 @@ Everything ships as one Go binary. The CLI, the MCP server and the React dashboa
 
 **Docker via the CLI.** Shelling out to `docker` keeps the dependency tree small. The `Runtime` interface keeps it replaceable with the Docker Engine API or another runtime.
 
-**Mutations are serialized.** One engine-wide lock makes plan and apply checks race-free on a single node. Per-app locks are a straightforward refinement.
+**Mutations are serialized per app.** Each app has a lock, so plan and apply checks are race-free, and a long build of one app doesn't block changes to another.
+
+**Builds are pinned and cached.** Refs are resolved to commits at plan time. Images are tagged by commit and build configuration, so a rollback reuses an existing image instead of rebuilding.

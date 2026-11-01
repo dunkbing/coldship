@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
-import { api, setToken, type WhoAmI } from '../api'
+import { api, type WhoAmI } from '../api'
 import { ErrorBox } from '../components/ui'
 
-export default function Login({ onLogin }: { onLogin: (w: WhoAmI) => void }) {
+export default function Login({ onLogin, initialError }: { onLogin: (w: WhoAmI) => void; initialError?: Error }) {
   const [token, setTok] = useState('')
-  const [error, setError] = useState<Error>()
+  const [error, setError] = useState<Error | undefined>(initialError)
   const [busy, setBusy] = useState(false)
 
   async function submit(e: FormEvent) {
@@ -12,8 +12,8 @@ export default function Login({ onLogin }: { onLogin: (w: WhoAmI) => void }) {
     setBusy(true)
     setError(undefined)
     try {
-      const me = await api.whoami(token.trim())
-      setToken(token.trim())
+      const me = await api.login(token.trim())
+      setTok('')
       onLogin(me)
     } catch (err) {
       setError(err as Error)
@@ -32,7 +32,10 @@ export default function Login({ onLogin }: { onLogin: (w: WhoAmI) => void }) {
           </svg>
           <span>Hangar</span>
         </div>
-        <p className="muted">Sign in with an API token. Use an admin token to approve plans.</p>
+        <p className="muted">
+          Sign in with an API token. Use an admin token to approve plans. The token is exchanged for a 12-hour session and is not
+          stored in the browser.
+        </p>
         <label className="field">
           <span>API token</span>
           <input

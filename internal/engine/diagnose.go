@@ -31,6 +31,9 @@ type Diagnosis struct {
 	LatestDeployment *store.Deployment `json:"latest_deployment,omitempty"`
 	RecentLogs       []string          `json:"recent_logs"`
 	LogsNote         string            `json:"logs_note"`
+	// BuildLog is the tail of the latest deployment's build log when that
+	// build failed.
+	BuildLog []string `json:"build_log,omitempty"`
 }
 
 var (
@@ -66,7 +69,7 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 	// The container that produced the logs runs the latest deployment's spec,
 	// which differs from the last good spec when the latest deploy failed.
 	running := app.Spec
-	if ld := d.LatestDeployment; ld != nil && ld.Status == store.DeployFailed {
+	if ld := d.LatestDeployment; ld != nil && ld.Status == store.DeployFailed && ld.FailedIn != store.PhaseBuild {
 		if deps, err := e.st.ListDeployments(ctx, name, 1); err == nil && len(deps) > 0 && deps[0].Spec != nil {
 			running = deps[0].Spec
 		}
@@ -78,7 +81,21 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 	rollbackFix := map[string]any{"tool": "rollback", "app": name}
 
 	if ld := d.LatestDeployment; ld != nil && ld.Status == store.DeployFailed {
-		add("error", "last_deploy_failed", fmt.Sprintf("latest deployment %s failed: %s", ld.ID, ld.Error), rollbackFix)
+		if ld.FailedIn == store.PhaseBuild {
+			// A failed build never touched the container: the previous
+			// version keeps running, so this is not an outage.
+			add("warning", "build_failed", fmt.Sprintf("latest deployment %s failed to build, so the previous version is still running: %s",
+				ld.ID, ld.Error), map[string]any{"tool": "build_log", "deployment": ld.ID})
+			if lines, err := e.st.GetBuildLog(ctx, ld.ID); err == nil && len(lines) > 0 {
+				if len(lines) > 40 {
+					lines = lines[len(lines)-40:]
+				}
+				d.BuildLog = lines
+				d.LogsNote += " " + buildLogNote
+			}
+		} else {
+			add("error", "last_deploy_failed", fmt.Sprintf("latest deployment %s failed (%s): %s", ld.ID, ld.ErrorCode, ld.Error), rollbackFix)
+		}
 	}
 	switch {
 	case !st.Exists:

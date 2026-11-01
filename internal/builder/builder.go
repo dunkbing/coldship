@@ -1,0 +1,413 @@
+// Package builder turns a spec.Build (a Git repository with a Dockerfile)
+// into a local container image.
+//
+// Builds are pinned: the engine resolves a ref to a commit at plan time, and
+// Build always builds exactly that commit. Images are tagged by commit and
+// build configuration, so redeploys and rollbacks reuse them.
+package builder
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"hangar/internal/apierr"
+	"hangar/internal/spec"
+)
+
+type Builder interface {
+	// Resolve turns b.Ref (or the default branch) into a full commit SHA
+	// without cloning the repository.
+	Resolve(ctx context.Context, b spec.Build) (string, error)
+	// Build produces a local image for b, whose Commit must be set, and
+	// returns its tag. Progress and errors are written to log.
+	Build(ctx context.Context, app string, b spec.Build, log io.Writer) (string, error)
+}
+
+// ImageTag is the deterministic local tag for a build: the same commit and
+// build configuration always map to the same tag.
+func ImageTag(app string, b spec.Build) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00", b.Git, b.Context, b.Dockerfile)
+	keys := make([]string, 0, len(b.Args))
+	for k := range b.Args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(h, "%s=%s\x00", k, b.Args[k])
+	}
+	commit := b.Commit
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	return "hangar-build/" + app + ":" + commit + "-" + hex.EncodeToString(h.Sum(nil))[:8]
+}
+
+// Git builds with the git and docker CLIs.
+type Git struct {
+	GitBin    string
+	DockerBin string
+	// CredentialsFile is a git-credential-store file used for private
+	// https repositories. SSH uses the server user's keys.
+	CredentialsFile string
+	// AllowedProtocols is passed as GIT_ALLOW_PROTOCOL. The default blocks
+	// file:// and ext:: transports.
+	AllowedProtocols string
+	// WorkDir holds temporary checkouts (default: the OS temp dir).
+	WorkDir string
+	// Timeout bounds one build, including the fetch.
+	Timeout time.Duration
+}
+
+func NewGit() *Git {
+	return &Git{GitBin: "git", DockerBin: "docker", AllowedProtocols: "http:https:ssh", Timeout: 20 * time.Minute}
+}
+
+func (g *Git) env() []string {
+	return append(os.Environ(),
+		"GIT_ALLOW_PROTOCOL="+g.AllowedProtocols,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+		"DOCKER_BUILDKIT=1",
+	)
+}
+
+// gitArgs prefixes args with config that disables interactive credential
+// helpers and, if configured, uses the server's credential store.
+func (g *Git) gitArgs(args ...string) []string {
+	pre := []string{"-c", "credential.helper=", "-c", "core.hooksPath=/dev/null", "-c", "protocol.version=2"}
+	if g.CredentialsFile != "" {
+		pre = append(pre, "-c", "credential.helper=store --file="+g.CredentialsFile)
+	}
+	return append(pre, args...)
+}
+
+func (g *Git) run(ctx context.Context, dir string, log io.Writer, bin string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
+	cmd.Env = g.env()
+	var out bytes.Buffer
+	if log != nil {
+		cmd.Stdout = io.MultiWriter(&out, log)
+		cmd.Stderr = io.MultiWriter(&out, log)
+	} else {
+		cmd.Stdout, cmd.Stderr = &out, &out
+	}
+	err := cmd.Run()
+	return out.String(), err
+}
+
+func (g *Git) Resolve(ctx context.Context, b spec.Build) (string, error) {
+	if spec.IsCommitSHA(b.Commit) {
+		return b.Commit, nil
+	}
+	if spec.IsCommitSHA(b.Ref) {
+		return b.Ref, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	want := b.Ref
+	if want == "" {
+		want = "HEAD"
+	}
+	// Ask for the peeled form too: for an annotated tag, ls-remote filtered by
+	// "v1" alone returns the tag object, not the commit it points to.
+	out, err := g.run(ctx, "", nil, g.GitBin, g.gitArgs("ls-remote", "--", b.Git, want, want+"^{}")...)
+	if err != nil {
+		return "", unreachable(b.Git, out)
+	}
+	refs := parseLsRemote(out)
+	candidates := []string{want}
+	if b.Ref != "" && !strings.HasPrefix(b.Ref, "refs/") {
+		candidates = []string{"refs/heads/" + b.Ref, "refs/tags/" + b.Ref + "^{}", "refs/tags/" + b.Ref}
+	}
+	for _, c := range candidates {
+		if sha, ok := refs[c]; ok {
+			return sha, nil
+		}
+	}
+	e := apierr.New(422, "git_ref_not_found", "ref %q was not found in %s", b.Ref, b.Git).WithField("build.ref")
+	if out, err := g.run(ctx, "", nil, g.GitBin, g.gitArgs("ls-remote", "--heads", "--tags", "--", b.Git)...); err == nil {
+		var names []string
+		for name := range parseLsRemote(out) {
+			name = strings.TrimSuffix(name, "^{}")
+			name = strings.TrimPrefix(strings.TrimPrefix(name, "refs/heads/"), "refs/tags/")
+			if !contains(names, name) {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		if len(names) > 25 {
+			names = names[:25]
+		}
+		e.WithDetail("available_refs", names)
+	}
+	return "", e.WithHint("use an existing branch or tag, or a full 40-character commit SHA")
+}
+
+func unreachable(url, out string) error {
+	msg := lastLine(out)
+	e := apierr.New(422, "git_unreachable", "cannot read repository %s: %s", url, msg).WithField("build.git")
+	switch {
+	case strings.Contains(out, "Authentication failed"), strings.Contains(out, "could not read Username"),
+		strings.Contains(out, "Permission denied"), strings.Contains(out, "terminal prompts disabled"):
+		e.Code = "git_auth_failed"
+		e.Hint = "the repository needs credentials: start the server with --git-credentials for https, or give the server user an SSH key"
+	case strings.Contains(out, "not found"), strings.Contains(out, "does not appear to be a git repository"):
+		e.Hint = "check the repository URL"
+	default:
+		e.Hint = "check the URL and that the server can reach the host"
+	}
+	return e
+}
+
+func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer) (string, error) {
+	if !spec.IsCommitSHA(b.Commit) {
+		return "", apierr.New(400, "invalid_spec", "build.commit must be resolved before building").WithField("build.commit")
+	}
+	tag := ImageTag(app, b)
+	if _, err := g.run(ctx, "", nil, g.DockerBin, "image", "inspect", tag); err == nil {
+		fmt.Fprintf(log, "hangar: image %s for commit %s already exists, reusing it\n", tag, b.Commit)
+		return tag, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, g.Timeout)
+	defer cancel()
+	timeout := func(err error) error {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return apierr.New(504, "build_timeout", "build did not finish within %s", g.Timeout).
+				WithHint("speed up the Dockerfile (smaller context, cached layers) or raise the server's --build-timeout")
+		}
+		return err
+	}
+
+	work, err := os.MkdirTemp(g.WorkDir, "hangar-build-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(work)
+	repo := filepath.Join(work, "src")
+
+	fmt.Fprintf(log, "hangar: fetching %s at %s\n", b.Git, b.Commit)
+	if out, err := g.run(ctx, "", log, g.GitBin, "init", "-q", repo); err != nil {
+		return "", apierr.New(500, "git_clone_failed", "git init failed: %s", lastLine(out))
+	}
+	if out, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("remote", "add", "origin", b.Git)...); err != nil {
+		return "", apierr.New(500, "git_clone_failed", "git remote add failed: %s", lastLine(out))
+	}
+	// Fast path: shallow fetch of exactly the commit. Not every server allows
+	// fetching by SHA (and dumb HTTP cannot do shallow fetches), so fall back
+	// to a full fetch.
+	if _, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("fetch", "-q", "--depth", "1", "origin", b.Commit)...); err != nil {
+		fmt.Fprintln(log, "hangar: shallow fetch by commit not supported, fetching all branches")
+		if out, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("fetch", "-q", "--tags", "origin", "+refs/heads/*:refs/remotes/origin/*")...); err != nil {
+			if err := timeout(nil); err != nil {
+				return "", err
+			}
+			return "", unreachable(b.Git, out)
+		}
+	}
+	if out, err := g.run(ctx, repo, log, g.GitBin, "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", b.Commit, "--"); err != nil {
+		if err := timeout(nil); err != nil {
+			return "", err
+		}
+		return "", apierr.New(422, "git_commit_not_found", "commit %s is not in %s: %s", b.Commit, b.Git, lastLine(out)).
+			WithField("build.commit").WithHint("the commit may have been force-pushed away; plan again to resolve the ref to a current commit")
+	}
+
+	ctxDir, err := inside(repo, b.Context)
+	if err != nil {
+		return "", apierr.Invalid("build.context", "build.context %q is not a directory inside the repository", b.Context)
+	}
+	dockerfile, err := inside(ctxDir, b.Dockerfile)
+	if err != nil {
+		return "", missingDockerfile(repo, b)
+	}
+	if st, err := os.Stat(dockerfile); err != nil || st.IsDir() {
+		return "", missingDockerfile(repo, b)
+	}
+
+	args := []string{"build", "--progress=plain", "-t", tag, "-f", dockerfile,
+		"--label", "hangar.app=" + app, "--label", "hangar.commit=" + b.Commit, "--label", "hangar.git=" + b.Git}
+	keys := make([]string, 0, len(b.Args))
+	for k := range b.Args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--build-arg", k+"="+b.Args[k])
+	}
+	args = append(args, ctxDir)
+	fmt.Fprintf(log, "hangar: docker build -f %s %s\n", b.Dockerfile, b.Context)
+	if _, err := g.run(ctx, "", log, g.DockerBin, args...); err != nil {
+		if err := timeout(nil); err != nil {
+			return "", err
+		}
+		return "", apierr.New(422, "build_failed", "docker build failed for commit %s", b.Commit[:12]).
+			WithHint("read the build log for the failing step, fix the repository, then plan again")
+	}
+	fmt.Fprintf(log, "hangar: built %s\n", tag)
+	return tag, nil
+}
+
+// inside joins base and rel and checks that the result, after resolving
+// symlinks, is still inside base. This stops a repository from pointing the
+// build context or Dockerfile at files elsewhere on the host.
+func inside(base, rel string) (string, error) {
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return "", err
+	}
+	p, err := filepath.EvalSymlinks(filepath.Join(base, rel))
+	if err != nil {
+		return "", err
+	}
+	if p != realBase && !strings.HasPrefix(p, realBase+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s escapes %s", rel, base)
+	}
+	return p, nil
+}
+
+var projectMarkers = []struct{ file, kind string }{
+	{"package.json", "Node.js"}, {"go.mod", "Go"}, {"requirements.txt", "Python"}, {"pyproject.toml", "Python"},
+	{"Gemfile", "Ruby"}, {"Cargo.toml", "Rust"}, {"pom.xml", "Java"}, {"build.gradle", "Java"}, {"composer.json", "PHP"},
+}
+
+func missingDockerfile(repo string, b spec.Build) error {
+	e := apierr.New(422, "dockerfile_not_found", "no Dockerfile at %s in the repository",
+		filepath.ToSlash(filepath.Join(b.Context, b.Dockerfile))).WithField("build.dockerfile")
+	ctxDir := filepath.Join(repo, b.Context)
+	for _, m := range projectMarkers {
+		if _, err := os.Stat(filepath.Join(ctxDir, m.file)); err == nil {
+			e.Message += fmt.Sprintf(" (this looks like a %s project: found %s)", m.kind, m.file)
+			break
+		}
+	}
+	// Suggest Dockerfiles that do exist, a few levels deep.
+	var found []string
+	filepath.WalkDir(repo, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || len(found) >= 10 {
+			return filepath.SkipDir
+		}
+		rel, _ := filepath.Rel(repo, p)
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "node_modules" || strings.Count(rel, string(filepath.Separator)) >= 3 {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == "Dockerfile" || strings.HasPrefix(d.Name(), "Dockerfile.") || strings.HasSuffix(d.Name(), ".Dockerfile") {
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if len(found) > 0 {
+		e.WithDetail("dockerfiles_found", found)
+		dir, file := filepath.Split(found[0])
+		fix := map[string]any{"dockerfile": file}
+		if dir = strings.TrimSuffix(dir, "/"); dir != "" {
+			fix["context"] = dir
+		} else {
+			fix["context"] = "."
+		}
+		e.WithFix(map[string]any{"build": fix})
+		e.Hint = "point build.context and build.dockerfile at one of the Dockerfiles found"
+	} else {
+		e.Hint = "add a Dockerfile to the repository; builds without a Dockerfile are not supported yet"
+	}
+	return e
+}
+
+func parseLsRemote(out string) map[string]string {
+	refs := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		sha, name, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if ok && spec.IsCommitSHA(sha) {
+			refs[name] = sha
+		}
+	}
+	return refs
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+func contains(xs []string, x string) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
+}
+
+// LogTail is an io.Writer that keeps the last N lines written to it, each
+// truncated, so build logs stay bounded in storage and in agent context.
+type LogTail struct {
+	mu      sync.Mutex
+	max     int
+	lines   []string
+	partial []byte
+	dropped int
+}
+
+func NewLogTail(maxLines int) *LogTail { return &LogTail{max: maxLines} }
+
+const maxLineLen = 2000
+
+func (t *LogTail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.partial = append(t.partial, p...)
+	for {
+		i := bytes.IndexByte(t.partial, '\n')
+		if i < 0 {
+			break
+		}
+		t.add(string(t.partial[:i]))
+		t.partial = t.partial[i+1:]
+	}
+	return len(p), nil
+}
+
+func (t *LogTail) add(line string) {
+	line = strings.TrimRight(line, "\r")
+	if len(line) > maxLineLen {
+		line = line[:maxLineLen] + "…"
+	}
+	t.lines = append(t.lines, line)
+	if len(t.lines) > t.max {
+		t.lines = t.lines[1:]
+		t.dropped++
+	}
+}
+
+// Lines returns the kept lines, prefixed by a note if earlier lines were dropped.
+func (t *LogTail) Lines() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := []string{}
+	if t.dropped > 0 {
+		out = append(out, fmt.Sprintf("hangar: %d earlier lines omitted", t.dropped))
+	}
+	out = append(out, t.lines...)
+	if len(t.partial) > 0 {
+		out = append(out, string(t.partial))
+	}
+	return out
+}

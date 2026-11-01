@@ -31,16 +31,25 @@ Every error from every interface has the same shape:
 | `invalid_scope` | 400 | Token scope must be `read`, `deploy` or `admin` |
 | `invalid_token_name` | 400 | Token names are lowercase letters, digits and dashes |
 | `invalid_rollback_target` | 400 | `to_deployment` isn't a successful deployment of this app |
-| `unauthenticated` | 401 | Missing or unknown token |
+| `unauthenticated` | 401 | Missing or unknown token, or an expired session |
+| `csrf_check_failed` | 403 | Cookie-authenticated request that changes state, without the `X-Hangar-Request` header |
 | `insufficient_scope` | 403 | The token's scope is too low for this action |
 | `approval_required` | 403 | Destructive production change. A human must run `hangar approve <plan>`. CLI exit code 3. |
-| `app_not_found` / `plan_not_found` | 404 | Check the name or id |
+| `app_not_found` / `plan_not_found` / `deployment_not_found` | 404 | Check the name or id |
 | `route_not_found` | 404 | Unknown API path |
 | `plan_stale` | 409 | The app changed since planning. Plan again. CLI exit code 4. |
 | `plan_expired` | 409 | Plans live 30 minutes. Plan again. CLI exit code 4. |
 | `no_rollback_target` | 409 | There is no earlier successful deployment |
 | `token_exists` | 409 | A token with that name exists |
 | `image_pull_failed` | 422 | Check the image name, tag and registry access. The running app is untouched. |
+| `git_unreachable` | 422 | The repository can't be read. Check the URL and network. |
+| `git_auth_failed` | 422 | The repository needs credentials: `--git-credentials` or an SSH key |
+| `git_ref_not_found` | 422 | At plan time. `details.available_refs` lists real branches and tags. |
+| `git_commit_not_found` | 422 | The pinned commit is gone (force-pushed?). Plan again. |
+| `git_clone_failed` | 500 | Setting up the checkout failed |
+| `dockerfile_not_found` | 422 | No Dockerfile at `context/dockerfile`. The suggested fix names one found elsewhere in the repository. |
+| `build_failed` | 422 | `docker build` failed. Read the build log. The running app is untouched (`failed_in: build`). |
+| `build_timeout` | 504 | The build exceeded the server's `--build-timeout` |
 | `container_exited` | 502 | The new container didn't stay up. Call `diagnose`, then fix or roll back. |
 | `container_start_failed` | 502 | Docker refused to start the container |
 | `host_port_in_use` | 502 | Another process uses `host_port`. Pick another. |

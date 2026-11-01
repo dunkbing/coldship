@@ -42,7 +42,7 @@ func main() {
 
 	root.AddCommand(serverCmd(), mcpCmd())
 	root.AddCommand(planCmd(), applyCmd(), deployCmd(), approveCmd(), rollbackCmd())
-	root.AddCommand(appsCmd(), statusCmd(), logsCmd(), diagnoseCmd(), deploymentsCmd(), auditCmd(), tokenCmd())
+	root.AddCommand(appsCmd(), statusCmd(), logsCmd(), diagnoseCmd(), deploymentsCmd(), buildLogCmd(), auditCmd(), tokenCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(reportError(err))

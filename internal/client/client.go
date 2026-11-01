@@ -26,8 +26,9 @@ type Client struct {
 }
 
 func New(baseURL, token string) *Client {
-	// Apply waits for the container's startup grace period, so allow time.
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{Timeout: 5 * time.Minute}}
+	// Apply may build an image from Git (bounded by the server's build
+	// timeout, 20 minutes by default), so allow plenty of time.
+	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{Timeout: 45 * time.Minute}}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
@@ -130,6 +131,11 @@ func (c *Client) Diagnose(ctx context.Context, app string) (*engine.Diagnosis, e
 func (c *Client) Deployments(ctx context.Context, app string, limit int) ([]store.Deployment, error) {
 	var out []store.Deployment
 	return out, c.do(ctx, "GET", fmt.Sprintf("/v1/apps/%s/deployments?limit=%d", esc(app), limit), nil, &out)
+}
+
+func (c *Client) BuildLog(ctx context.Context, deployment string) (*engine.BuildLog, error) {
+	var out engine.BuildLog
+	return &out, c.do(ctx, "GET", "/v1/deployments/"+esc(deployment)+"/build-log", nil, &out)
 }
 
 func (c *Client) WhoAmI(ctx context.Context) (*api.WhoAmI, error) {

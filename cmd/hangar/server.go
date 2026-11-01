@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"hangar/internal/api"
+	"hangar/internal/builder"
 	"hangar/internal/engine"
 	"hangar/internal/mcpserver"
 	"hangar/internal/runtime"
@@ -24,8 +25,8 @@ import (
 )
 
 func serverCmd() *cobra.Command {
-	var addr, data string
-	var grace time.Duration
+	var addr, data, gitCreds, buildDir string
+	var grace, buildTimeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run the Hangar control plane (API server + Docker runtime)",
@@ -38,7 +39,9 @@ func serverCmd() *cobra.Command {
 			defer st.Close()
 			rt := runtime.NewDocker()
 			rt.StartupGrace = grace
-			eng := engine.New(st, rt)
+			bd := builder.NewGit()
+			bd.CredentialsFile, bd.WorkDir, bd.Timeout = gitCreds, buildDir, buildTimeout
+			eng := engine.New(st, rt, bd)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -67,6 +70,9 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", envOr("HANGAR_ADDR", "127.0.0.1:7070"), "listen address")
 	cmd.Flags().StringVar(&data, "data", envOr("HANGAR_DATA", "hangar.db"), "SQLite state file")
 	cmd.Flags().DurationVar(&grace, "startup-grace", 3*time.Second, "how long a new container must stay up to count as deployed")
+	cmd.Flags().DurationVar(&buildTimeout, "build-timeout", 20*time.Minute, "maximum time for one Git build")
+	cmd.Flags().StringVar(&gitCreds, "git-credentials", envOr("HANGAR_GIT_CREDENTIALS", ""), "git-credential-store file for private https repositories")
+	cmd.Flags().StringVar(&buildDir, "build-dir", envOr("HANGAR_BUILD_DIR", ""), "directory for temporary build checkouts (default: system temp dir)")
 	return cmd
 }
 

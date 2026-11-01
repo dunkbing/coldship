@@ -11,7 +11,7 @@ An agent working on your codebase should be able to ship and operate what it bui
 
 Hangar gives agents a small set of operations that are safe to call repeatedly, and keeps humans in the loop for the changes that matter:
 
-1. The agent edits a declarative [spec](/reference/spec/) and asks for a **plan**. A plan is a dry run that returns a diff with each change marked destructive or not.
+1. The agent edits a declarative [spec](/reference/spec/) and asks for a **plan**. A plan is a dry run that returns a diff with each change marked destructive or not. For apps built from Git, it also pins the exact commit.
 2. The agent **applies** the plan by its id, with a reason. If anything changed in the meantime, the plan is stale and the agent has to re-plan.
 3. If the plan is destructive and touches a production app, it waits for a **human approval**.
 4. If the deploy fails, the agent calls **diagnose**, then fixes the spec or **rolls back**.
@@ -30,4 +30,4 @@ All four go through the same HTTP API, so the same permissions, guardrails and a
 
 ## Status
 
-Hangar is an early starter project. It deploys container images to a single Docker host. Building from Git, domains with TLS, preview environments and multi-node support are on the [roadmap](/project/roadmap/).
+Hangar is an early starter project. It deploys container images, or [builds them from Git](/guides/build-from-git/), on a single Docker host. Domains with TLS, preview environments and multi-node support are on the [roadmap](/project/roadmap/).

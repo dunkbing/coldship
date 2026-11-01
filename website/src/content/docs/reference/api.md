@@ -5,11 +5,15 @@ description: Endpoints, authentication and request shapes for the Hangar HTTP AP
 
 All endpoints are under `/v1`, take and return JSON, and need `Authorization: Bearer <token>`. Errors use the [structured error format](/reference/errors/) with a matching HTTP status.
 
+The dashboard authenticates with a session cookie instead. It gets one from `POST /v1/sessions`, and must send `X-Hangar-Request: 1` on requests that change state. See [Dashboard sessions](/concepts/guardrails/#dashboard-sessions).
+
 ## Endpoints
 
 | Method | Path | Scope | Description |
 |---|---|---|---|
 | `GET` | `/healthz` | none | Liveness: returns `ok` |
+| `POST` | `/v1/sessions` | none | Body `{token}`. Sets the `hangar_session` cookie and returns `{name, scope}`. |
+| `DELETE` | `/v1/sessions` | session | Sign out: deletes the session and clears the cookie |
 | `GET` | `/v1/whoami` | read | `{name, scope}` of the calling token |
 | `GET` | `/v1/apps` | read | List apps |
 | `GET` | `/v1/apps/{name}` | read | App with `runtime` status and `latest_deployment` |
@@ -17,6 +21,7 @@ All endpoints are under `/v1`, take and return JSON, and need `Authorization: Be
 | `GET` | `/v1/apps/{name}/logs?tail=100&since=10m` | read | `{lines, untrusted: true, note}` (tail max 5000) |
 | `GET` | `/v1/apps/{name}/diagnose` | read | Findings, runtime status, recent logs |
 | `POST` | `/v1/apps/{name}/rollback` | deploy | Body `{reason, to_deployment?}` |
+| `GET` | `/v1/deployments/{id}/build-log` | read | `{lines, commit, untrusted: true, note}` |
 | `POST` | `/v1/plans` | deploy | Body `{spec}`, `{delete: "<app>"}`, optionally `redeploy: true` |
 | `GET` | `/v1/plans?status=pending&limit=50` | read | List plans. `status` is `pending`, `applied` or `expired` |
 | `GET` | `/v1/plans/{id}` | read | One plan |

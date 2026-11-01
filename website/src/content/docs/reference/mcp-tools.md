@@ -15,7 +15,8 @@ description: The tools hangar mcp exposes to AI agents.
 | `hangar_rollback` | `app`, `reason`, optional `to_deployment` | destructive | Redeploy the last good or a specific deployment |
 | `hangar_logs` | `app`, optional `tail`, `since` | read-only | Recent logs, marked untrusted |
 | `hangar_diagnose` | `app` | read-only | Findings with suggested fixes, plus state and logs |
-| `hangar_deployments` | `app` | read-only | Deployment history |
+| `hangar_deployments` | `app` | read-only | Deployment history, with the commit and `failed_in` |
+| `hangar_build_log` | `deployment` | read-only | Build log of a Git deployment, marked untrusted |
 
 There is intentionally **no approve tool**. Approving destructive production changes is a human step.
 
@@ -36,7 +37,7 @@ Successful calls return JSON as structured content (lists are wrapped as `{"item
 
 ## The `spec` argument
 
-`hangar_plan` takes the same shape as [`hangar.yaml`](/reference/spec/), as JSON:
+`hangar_plan` takes the same shape as [`hangar.yaml`](/reference/spec/), as JSON. Use either `image` or `build`:
 
 ```json
 {
@@ -47,6 +48,16 @@ Successful calls return JSON as structured content (lists are wrapped as `{"item
     "port": 80,
     "host_port": 8080,
     "env": { "GREETING": "hi" }
+  }
+}
+```
+
+```json
+{
+  "spec": {
+    "name": "site",
+    "port": 80,
+    "build": { "git": "https://github.com/acme/site.git", "ref": "main" }
   }
 }
 ```

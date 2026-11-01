@@ -33,6 +33,9 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--addr` | `HANGAR_ADDR` | `127.0.0.1:7070` | Listen address |
 | `--data` | `HANGAR_DATA` | `hangar.db` | SQLite state file |
 | `--startup-grace` | | `3s` | How long a new container must stay up for the deploy to count as successful |
+| `--build-timeout` | | `20m` | Maximum time for one Git build |
+| `--git-credentials` | `HANGAR_GIT_CREDENTIALS` | | git-credential-store file for private HTTPS repositories |
+| `--build-dir` | `HANGAR_BUILD_DIR` | system temp dir | Where temporary build checkouts go |
 
 On first start, with no tokens in the database, it creates an `admin` token and prints it once.
 
@@ -60,6 +63,7 @@ Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tool
 | `hangar deployments <app> [--limit 20]` | Deployment history, newest first |
 | `hangar logs <app> [--tail 100] [--since 10m]` | Container logs |
 | `hangar diagnose <app>` | Findings and suggested fixes |
+| `hangar build-log <deployment-id>` | Build log of a Git deployment (untrusted output) |
 | `hangar audit [--limit 50]` | Audit log |
 
 ## Tokens

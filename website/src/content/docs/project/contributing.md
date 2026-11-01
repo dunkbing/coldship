@@ -17,7 +17,7 @@ description: Build, test and develop Hangar, its dashboard and these docs.
 | `make go` | Builds only the Go binary (uses whatever dashboard build is present) |
 | `make test` | Go tests |
 | `make run` | Build and start the server |
-| `make website` | Build this docs site into `website/dist` |
+| `make website` | Build this docs site into `website/dist`. Set `SITE_URL` to the public address to generate the sitemap. |
 | `make website-dev` | Docs dev server with live reload |
 | `make screenshots` | Regenerate the dashboard screenshots used in these docs |
 
@@ -40,7 +40,7 @@ make screenshots
 `scripts/screenshots.sh`:
 
 1. builds the binary and starts a throwaway server on port 7272 with its own state file
-2. seeds demo apps (`demo-web`, `demo-api`, `demo-worker`) on your local Docker as an agent called `claude`, including a deliberately failing deploy and a plan waiting for approval
+2. seeds demo apps (`demo-web`, `demo-api`, `demo-worker`, and `demo-site` built from a local Git repository served over HTTP) on your local Docker as an agent called `claude`, including a failing deploy, a failing build and a plan waiting for approval
 3. runs `dashboard/scripts/screenshots.mjs` with Playwright inside the official `mcr.microsoft.com/playwright` Docker image, so no browser libraries are needed on the host
 4. writes PNGs to `website/src/assets/screenshots/` and removes the demo containers and volumes
 

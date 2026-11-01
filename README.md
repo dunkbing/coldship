@@ -17,6 +17,7 @@ and a web dashboard embedded in the binary.
 | Guardrails | Tokens have scopes (`read` < `deploy` < `admin`). A destructive change to a `production` app needs a human `approve`, and agents get no approve tool. |
 | One-call debugging | `diagnose` returns container state, latest deploy, logs, and likely causes such as crash loops, OOM, port mismatches, or missing env. |
 | Rollback | `rollback` redeploys the last good deployment. A failed deploy never replaces the "current" spec. |
+| Build from Git | `build: {git, ref}` instead of `image`. Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
 | No secret leaks | Env values are redacted in all output. The runtime gets them through a 0600 env file, never argv. |
 | Prompt-injection hygiene | Logs are labeled untrusted data in every response and tool description. |
 | Accountability | Every mutation is audited with the actor (token name) and a required `reason`. |
@@ -41,6 +42,7 @@ internal/planner/    current-vs-desired diff, destructive classification
 internal/engine/     plan / approve / apply / rollback / diagnose (the control plane)
 internal/store/      SQLite persistence
 internal/runtime/    Runtime interface, Docker driver (via docker CLI), in-memory fake for tests
+internal/builder/    Git builds: resolve ref -> commit, fetch, docker build (with symlink/protocol guards)
 internal/api/        HTTP API + auth/scopes
 internal/client/     Go API client (used by the CLI and MCP)
 internal/mcpserver/  MCP tools for agents
@@ -100,9 +102,23 @@ volumes:
     path: /data
 ```
 
+Or build from Git instead of `image` (a Dockerfile is required):
+
+```yaml
+build:
+  git: https://github.com/acme/web.git   # https, http or ssh; no credentials in the URL
+  ref: main                               # resolved to a commit at plan time
+  context: .
+  dockerfile: Dockerfile
+```
+
+Private repos: `hangar server --git-credentials <git-credential-store file>`, or SSH keys of the server user.
+
 ## Roadmap
 
-- [ ] Build from a Git repo (Nixpacks/Buildpacks-style detection) in addition to images
+- [x] Build from a Git repo with a Dockerfile
+- [ ] Builds without a Dockerfile (Nixpacks/Buildpacks-style detection)
+- [ ] Git webhooks: plan automatically on push
 - [ ] Reverse proxy + automatic TLS (embedded Caddy) with domains in the spec
 - [ ] Zero-downtime deploys (start new container, health check, then swap)
 - [ ] Ephemeral preview environments with a TTL (`stage: preview`, `ttl: 2h`)
@@ -118,7 +134,7 @@ volumes:
 |---|---|
 | `make build` | Dashboard + Go binary |
 | `make test` | Go tests |
-| `make website-dev` / `make website` | Docs site dev server / static build |
+| `make website-dev` / `make website` | Docs site dev server / static build (set `SITE_URL` for the sitemap) |
 | `make screenshots` | Regenerate docs screenshots (Docker; uses the Playwright image) |
 
 Use `bun add` to add JS dependencies rather than editing `package.json` by hand.

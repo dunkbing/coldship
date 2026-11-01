@@ -8,10 +8,20 @@ export interface Volume {
   path: string
 }
 
+export interface Build {
+  git: string
+  ref?: string
+  commit?: string
+  context?: string
+  dockerfile?: string
+  args?: Record<string, string>
+}
+
 export interface Spec {
   name: string
   stage: Stage
-  image: string
+  image?: string
+  build?: Build
   port?: number
   host_port?: number
   memory?: string
@@ -44,8 +54,12 @@ export interface Deployment {
   app: string
   plan_id: string
   spec?: Spec
-  status: 'deploying' | 'running' | 'superseded' | 'failed' | 'deleted'
+  status: 'building' | 'deploying' | 'running' | 'superseded' | 'failed' | 'deleted'
+  image?: string
+  commit?: string
   error?: string
+  error_code?: string
+  failed_in?: 'build' | 'deploy'
   actor: string
   reason: string
   created_at: string
@@ -102,6 +116,16 @@ export interface Diagnosis {
   latest_deployment?: Deployment
   recent_logs: string[]
   logs_note: string
+  build_log?: string[]
+}
+
+export interface BuildLog {
+  deployment: string
+  app: string
+  commit?: string
+  lines: string[]
+  untrusted: boolean
+  note: string
 }
 
 export interface LogsResult {
@@ -151,47 +175,22 @@ export class ApiError extends Error {
   }
 }
 
-const TOKEN_KEY = 'hangar.token'
-
-export function getToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-export function setToken(t: string) {
-  try {
-    localStorage.setItem(TOKEN_KEY, t)
-  } catch {
-    /* storage unavailable: token lives for this page only */
-  }
-  memoryToken = t
-}
-
-export function clearToken() {
-  try {
-    localStorage.removeItem(TOKEN_KEY)
-  } catch {
-    /* ignore */
-  }
-  memoryToken = ''
-}
-
-let memoryToken = getToken()
-
-async function req<T>(method: string, path: string, body?: unknown, token = memoryToken): Promise<T> {
+// The dashboard signs in by exchanging an API token for an HttpOnly session
+// cookie (POST /v1/sessions). The token itself is never stored in the browser.
+// State-changing requests carry X-Hangar-Request, the server's CSRF check.
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
+    credentials: 'same-origin',
     headers: {
-      Authorization: `Bearer ${token}`,
+      'X-Hangar-Request': '1',
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   const text = await res.text()
   const data = text ? JSON.parse(text) : null
+  if (res.status === 401 && path !== '/v1/sessions') window.dispatchEvent(new Event('hangar:signed-out'))
   if (!res.ok) throw new ApiError(res.status, data?.error ?? {})
   return data as T
 }
@@ -199,10 +198,13 @@ async function req<T>(method: string, path: string, body?: unknown, token = memo
 const enc = encodeURIComponent
 
 export const api = {
-  whoami: (token?: string) => req<WhoAmI>('GET', '/v1/whoami', undefined, token),
+  login: (token: string) => req<WhoAmI>('POST', '/v1/sessions', { token }),
+  logout: () => req<{ signed_out: boolean }>('DELETE', '/v1/sessions'),
+  whoami: () => req<WhoAmI>('GET', '/v1/whoami'),
   apps: () => req<App[]>('GET', '/v1/apps'),
   app: (name: string) => req<AppView>('GET', `/v1/apps/${enc(name)}`),
   deployments: (name: string, limit = 50) => req<Deployment[]>('GET', `/v1/apps/${enc(name)}/deployments?limit=${limit}`),
+  buildLog: (deployment: string) => req<BuildLog>('GET', `/v1/deployments/${enc(deployment)}/build-log`),
   diagnose: (name: string) => req<Diagnosis>('GET', `/v1/apps/${enc(name)}/diagnose`),
   logs: (name: string, tail = 200) => req<LogsResult>('GET', `/v1/apps/${enc(name)}/logs?tail=${tail}`),
   rollback: (name: string, reason: string, toDeployment?: string) =>

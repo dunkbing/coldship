@@ -4,12 +4,15 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"hangar/internal/api"
 	"hangar/internal/apierr"
+	"hangar/internal/builder"
 	"hangar/internal/client"
 	"hangar/internal/engine"
 	"hangar/internal/runtime"
@@ -25,7 +28,7 @@ func TestAPIEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	eng := engine.New(st, runtime.NewFake())
+	eng := engine.New(st, runtime.NewFake(), builder.NewFake())
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 
@@ -93,4 +96,68 @@ func errCode(err error) string {
 		return err.Error()
 	}
 	return ""
+}
+
+func TestDashboardSessions(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	eng := engine.New(st, runtime.NewFake(), builder.NewFake())
+	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
+	defer srv.Close()
+	admin, _ := eng.EnsureAdminToken(ctx)
+
+	do := func(method, path, body string, cookie *http.Cookie, csrf bool) *http.Response {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		if csrf {
+			req.Header.Set(api.CSRFHeader, "1")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+
+	if r := do("POST", "/v1/sessions", `{"token":"hgr_wrong"}`, nil, false); r.StatusCode != 401 {
+		t.Fatalf("bad token: want 401, got %d", r.StatusCode)
+	}
+	r := do("POST", "/v1/sessions", `{"token":"`+admin+`"}`, nil, false)
+	var c *http.Cookie
+	for _, x := range r.Cookies() {
+		if x.Name == api.SessionCookie {
+			c = x
+		}
+	}
+	if r.StatusCode != 200 || c == nil || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("login should set an HttpOnly SameSite=Strict cookie: %d %+v", r.StatusCode, c)
+	}
+	if c.Value == admin {
+		t.Fatal("the cookie must not contain the API token")
+	}
+
+	if r := do("GET", "/v1/whoami", "", c, false); r.StatusCode != 200 {
+		t.Fatalf("GET with session cookie: want 200, got %d", r.StatusCode)
+	}
+	plan := `{"spec":{"name":"web","image":"nginx"}}`
+	if r := do("POST", "/v1/plans", plan, c, false); r.StatusCode != 403 {
+		t.Fatalf("cookie POST without CSRF header: want 403, got %d", r.StatusCode)
+	}
+	if r := do("POST", "/v1/plans", plan, c, true); r.StatusCode != 200 {
+		t.Fatalf("cookie POST with CSRF header: want 200, got %d", r.StatusCode)
+	}
+
+	if r := do("DELETE", "/v1/sessions", "", c, true); r.StatusCode != 200 {
+		t.Fatalf("sign out: want 200, got %d", r.StatusCode)
+	}
+	if r := do("GET", "/v1/whoami", "", c, false); r.StatusCode != 401 {
+		t.Fatalf("after sign out the session must be dead, got %d", r.StatusCode)
+	}
 }

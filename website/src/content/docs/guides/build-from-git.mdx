@@ -1,0 +1,114 @@
+---
+title: Build from Git
+description: Deploy straight from a Git repository with a Dockerfile, with every build pinned to a commit.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components'
+
+Instead of a prebuilt `image`, an app can name a Git repository with a Dockerfile. Hangar fetches the repository, builds the image on the server and deploys it.
+
+```yaml title="hangar.yaml"
+name: site
+stage: staging
+port: 80
+host_port: 8080
+build:
+  git: https://github.com/acme/site.git
+  ref: main                 # branch, tag or full commit SHA (default: the default branch)
+  context: .                # directory to build in (default .)
+  dockerfile: Dockerfile    # relative to context (default Dockerfile)
+  args:                     # docker build args: visible, never secrets
+    SITE_ENV: staging
+```
+
+Then deploy it like any other app:
+
+```sh
+hangar deploy -f hangar.yaml --reason "Deploy the site from Git"
+```
+
+## Builds are pinned to a commit
+
+A branch name is a moving target, so the plan resolves it. When you plan, Hangar runs `git ls-remote` to turn `ref` into a full commit SHA and records it as `build.commit` in the plan. Apply then builds **exactly that commit**, even if someone pushes in between.
+
+So a push shows up as an ordinary diff:
+
+```txt
+Plan plan_28179e6371e5 for app "site" (update)
+  ~ build.commit: 75604a0a75ef87063ecf0472afdca7409b355dec -> 4d87143c7879d3178e1a47c0f21ccc673dbe1cdd
+Destructive: no  Downtime: yes  Requires approval: no
+```
+
+If the branch hasn't moved, the plan is a `noop`. To pin a commit yourself, set `build.commit` in the spec.
+
+A mistyped ref fails at plan time and lists the refs that do exist:
+
+```json
+{ "error": { "code": "git_ref_not_found", "message": "ref \"mian\" was not found in https://github.com/acme/site.git",
+  "field": "build.ref", "details": { "available_refs": ["main", "v1.0.0"] } } }
+```
+
+## Image cache, redeploys and rollbacks
+
+Built images are tagged `hangar-build/<app>:<commit>-<config hash>`, where the hash covers the repository URL, context, Dockerfile path and build args. If an image with that tag already exists, Hangar reuses it. As a result, rolling back to an earlier deployment, or redeploying the current one, takes seconds instead of a rebuild.
+
+## When a build fails
+
+A build runs **before** the running container is touched. If it fails, the previous version keeps serving and nothing is rolled back, because nothing changed.
+
+<Steps>
+
+1. Apply fails with a build error, saying where it failed and what to read:
+
+   ```txt
+   error [build_failed]: docker build failed for commit 658fcbaa43f6
+     hint: read the build log for the failing step, fix the repository, then plan again. The previous version is still running
+     suggested fix: {"deployment":"dep_c5c1de1f0ba5","tool":"build_log"}
+     failed_in: build
+   ```
+
+2. `hangar diagnose` reports the app as still healthy, with a `build_failed` warning and the end of the build log.
+
+3. Read the full log with `hangar build-log <deployment>` (or the `hangar_build_log` MCP tool), fix the repository, push, and plan again.
+
+</Steps>
+
+In the dashboard, failed builds are marked **failed in build**, and each built deployment has a **Build log** button. The log opens scrolled to the end, where the failing step is.
+
+![Deployments of a Git-built app, with the failed build's log expanded](../../../assets/screenshots/app-git-deployments.png)
+
+![Diagnose for a Git-built app whose latest build failed: still healthy, with a build_failed warning](../../../assets/screenshots/app-git-diagnose.png)
+
+## Private repositories
+
+Credentials never go in the spec. URLs with embedded passwords or tokens are rejected, because specs are stored in plans and audit entries.
+
+- **HTTPS:** give the server a [git credential store](https://git-scm.com/docs/git-credential-store) file:
+
+  ```sh
+  printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > /etc/hangar/git-credentials
+  chmod 600 /etc/hangar/git-credentials
+  hangar server --git-credentials /etc/hangar/git-credentials
+  ```
+
+- **SSH** (`git@github.com:acme/site.git`): the server uses its user's SSH keys. Host keys are accepted on first use.
+
+## Security
+
+Building someone's repository on your server is code execution by design: the Dockerfile runs. Hangar limits what the repository can reach beyond that:
+
+- **Only `https://`, `http://` and `ssh` URLs.** `GIT_ALLOW_PROTOCOL` blocks `file://` and git's `ext::` transport, which can run arbitrary commands or read the server's own files.
+- **The checkout is contained.** If `context` or `dockerfile` resolves, through a symlink in the repository, to a path outside the checkout, the build is refused before Docker runs. Otherwise a repository could include host files such as `/etc` in an image.
+- **No hooks, no prompts, no submodules.** Git runs non-interactively with hooks disabled, and submodules are not fetched.
+- **Build output is untrusted.** Build logs are marked untrusted everywhere, like application logs, because a Dockerfile can print anything.
+- **Builds are bounded.** Each build has a timeout (`--build-timeout`, default 20 minutes), and the stored log keeps its last 500 lines.
+
+<Aside>
+  Builds happen inside the apply call. The CLI waits up to 45 minutes. Under the hood the build carries on even if the
+  client disconnects, and calling apply again returns the result once it has finished.
+</Aside>
+
+## Limits
+
+- A Dockerfile is required. If none is found, the error names the kind of project it found (from files such as `package.json` or `go.mod`) and suggests any Dockerfiles elsewhere in the repository. Building without a Dockerfile is on the [roadmap](/project/roadmap/).
+- Builds run on the Hangar server's Docker daemon with BuildKit.

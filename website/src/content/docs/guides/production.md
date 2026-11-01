@@ -9,6 +9,8 @@ Hangar is an early project. Before relying on it, go through this list.
 
 The server binds to `127.0.0.1:7070` by default and speaks plain HTTP. To reach it from elsewhere, put it behind a reverse proxy that terminates TLS (Caddy, nginx or Traefik), or reach it over a private network such as WireGuard or Tailscale. Don't expose port 7070 directly.
 
+Have the proxy send `X-Forwarded-Proto: https`, so the dashboard's session cookie gets the `Secure` flag.
+
 ## Tokens
 
 - Store the bootstrap admin token in a password manager. It is shown only once.
@@ -24,6 +26,12 @@ sqlite3 hangar.db ".backup 'hangar-backup.db'"
 ```
 
 App data lives in Docker volumes named `hangar-<app>-<volume>`. Back those up separately.
+
+## Git builds
+
+- Private repositories: use `--git-credentials` (HTTPS) or an SSH key for the server user. See [Build from Git](/guides/build-from-git/#private-repositories).
+- Builds use disk space for checkouts (`--build-dir`, default the system temp directory) and images. Prune old `hangar-build/*` images now and then; ones you might roll back to are rebuilt automatically if missing.
+- Only build repositories you trust. A Dockerfile runs code on your build host.
 
 ## Secrets
 

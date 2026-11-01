@@ -41,8 +41,12 @@ Most self-hosting platforms are built for people clicking through a dashboard. A
     context. [Debugging](/concepts/debugging-and-rollback/)
   </Card>
   <Card title="MCP built in" icon="puzzle">
-    `hangar mcp` exposes nine tools to Claude Code and other MCP clients, acting under the agent's own scoped token.
+    `hangar mcp` exposes ten tools to Claude Code and other MCP clients, acting under the agent's own scoped token.
     [MCP tools](/reference/mcp-tools/)
+  </Card>
+  <Card title="Deploy from Git" icon="github">
+    Point an app at a repository with a Dockerfile. Plans pin the commit, failed builds never touch the running app, and
+    rollbacks reuse built images. [Build from Git](/guides/build-from-git/)
   </Card>
   <Card title="One binary, self-hosted" icon="laptop">
     Server, CLI, MCP server and dashboard ship as a single Go binary. State lives in one SQLite file next to Docker.

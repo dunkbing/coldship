@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
-import { api, ApiError, clearToken, getToken, type WhoAmI } from './api'
+import { api, ApiError, type WhoAmI } from './api'
 import { useLoad } from './hooks'
 import Login from './pages/Login'
 import Apps from './pages/Apps'
@@ -13,24 +13,31 @@ export const useSession = () => useContext(SessionContext)!
 
 export default function App() {
   const [me, setMe] = useState<WhoAmI | null>(null)
-  const [checking, setChecking] = useState(() => getToken() !== '')
+  const [checking, setChecking] = useState(true)
+  const [bootError, setBootError] = useState<Error>()
 
   useEffect(() => {
-    if (!getToken()) return
     api.whoami().then(
       (w) => {
         setMe(w)
         setChecking(false)
       },
       (e) => {
-        if (e instanceof ApiError && e.status === 401) clearToken()
+        if (!(e instanceof ApiError && e.status === 401)) setBootError(e)
         setChecking(false)
       },
     )
   }, [])
 
+  // Any 401 later on (session expired, signed out elsewhere) returns to sign-in.
+  useEffect(() => {
+    const onSignedOut = () => setMe(null)
+    window.addEventListener('hangar:signed-out', onSignedOut)
+    return () => window.removeEventListener('hangar:signed-out', onSignedOut)
+  }, [])
+
   if (checking) return <div className="boot">Loading…</div>
-  if (!me) return <Login onLogin={setMe} />
+  if (!me) return <Login onLogin={setMe} initialError={bootError} />
 
   return (
     <SessionContext.Provider value={me}>
@@ -38,8 +45,7 @@ export default function App() {
         <Sidebar
           me={me}
           onSignOut={() => {
-            clearToken()
-            setMe(null)
+            api.logout().finally(() => setMe(null))
           }}
         />
         <main className="main">

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { api, type AppView } from '../api'
 import { useLoad } from '../hooks'
-import { DeployStatus, Empty, ErrorBox, HealthPill, healthOf, Mono, StageBadge, Time } from '../components/ui'
+import { DeployStatus, Empty, ErrorBox, HealthPill, healthOf, Source, StageBadge, Time } from '../components/ui'
 
 async function loadApps(): Promise<AppView[]> {
   const apps = await api.apps()
@@ -60,7 +60,7 @@ export default function Apps() {
                 <th>App</th>
                 <th>Status</th>
                 <th>Stage</th>
-                <th>Image</th>
+                <th>Source</th>
                 <th>Last deployment</th>
               </tr>
             </thead>
@@ -79,7 +79,7 @@ export default function Apps() {
                     <StageBadge stage={a.spec?.stage} />
                   </td>
                   <td>
-                    <Mono>{a.spec?.image ?? '—'}</Mono>
+                    <Source spec={a.spec} />
                   </td>
                   <td>
                     {a.latest_deployment ? (

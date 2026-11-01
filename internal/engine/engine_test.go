@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hangar/internal/apierr"
+	"hangar/internal/builder"
 	"hangar/internal/runtime"
 	"hangar/internal/spec"
 	"hangar/internal/store"
@@ -21,7 +22,7 @@ func setup(t *testing.T) (*Engine, *runtime.Fake) {
 	}
 	t.Cleanup(func() { st.Close() })
 	rt := runtime.NewFake()
-	return New(st, rt), rt
+	return New(st, rt, builder.NewFake()), rt
 }
 
 func web(stage spec.Stage, image string, vols ...string) *spec.App {
@@ -257,4 +258,113 @@ func TestMissingEnvVar(t *testing.T) {
 			t.Errorf("%q: got %q, want %q", line, got, want)
 		}
 	}
+}
+
+func gitApp(ref string) *spec.App {
+	return &spec.App{Name: "api", Stage: spec.StageStaging, Port: 8080,
+		Build: &spec.Build{Git: "https://github.com/acme/api.git", Ref: ref}}
+}
+
+func TestGitBuildFlow(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	rt, bd := runtime.NewFake(), builder.NewFake()
+	e := New(st, rt, bd)
+	ctx := context.Background()
+	shaA, shaB := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	bd.Refs["https://github.com/acme/api.git@main"] = shaA
+
+	// The plan pins the commit; the deploy runs the built image.
+	p, err := e.Plan(ctx, "agent", PlanRequest{Spec: gitApp("main")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Desired.Build.Commit != shaA {
+		t.Fatalf("plan should pin commit %s, got %+v", shaA, p.Desired.Build)
+	}
+	res, err := e.Apply(ctx, "agent", p.ID, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Deployment.Commit != shaA || !strings.HasPrefix(res.Deployment.Image, "hangar-build/api:aaaaaaaaaaaa-") {
+		t.Fatalf("deployment should record commit and built image: %+v", res.Deployment)
+	}
+	if rt.Containers["api"].Image != res.Deployment.Image || rt.Containers["api"].Build != nil {
+		t.Fatalf("runtime should get the built image, got %+v", rt.Containers["api"])
+	}
+	logRes, err := e.BuildLog(ctx, res.Deployment.ID)
+	if err != nil || len(logRes.Lines) == 0 || !logRes.Untrusted {
+		t.Fatalf("build log should be stored and marked untrusted: %+v %v", logRes, err)
+	}
+
+	// Same branch, no new commits: nothing to do.
+	p, _ = e.Plan(ctx, "agent", PlanRequest{Spec: gitApp("main")})
+	if p.Action != "noop" {
+		t.Fatalf("want noop, got %s %+v", p.Action, p.Changes)
+	}
+
+	// The branch moved: the plan shows the commit change.
+	bd.Refs["https://github.com/acme/api.git@main"] = shaB
+	p, _ = e.Plan(ctx, "agent", PlanRequest{Spec: gitApp("main")})
+	if p.Action != "update" || len(p.Changes) != 1 || p.Changes[0].Path != "build.commit" || p.Changes[0].To != shaB {
+		t.Fatalf("want a build.commit change, got %+v", p.Changes)
+	}
+
+	// A failed build leaves the running version alone.
+	before := rt.Containers["api"]
+	bd.FailNext = apierr.New(422, "build_failed", "docker build failed for commit bbbbbbbbbbbb")
+	_, err = e.Apply(ctx, "agent", p.ID, "upgrade")
+	ae, _ := apierr.As(err)
+	if code(err) != "build_failed" || ae.Details["failed_in"] != store.PhaseBuild || ae.SuggestedFix.(map[string]any)["tool"] != "build_log" {
+		t.Fatalf("want build_failed pointing at the build log, got %+v", err)
+	}
+	if rt.Containers["api"].Image != before.Image {
+		t.Fatal("a failed build must not touch the running container")
+	}
+	diag, _ := e.Diagnose(ctx, "api")
+	if !diag.Healthy || !hasFinding(diag, "build_failed") || len(diag.BuildLog) == 0 {
+		t.Fatalf("diagnose: app still healthy, with a build_failed warning and the build log; got %+v", diag)
+	}
+	if hasFinding(diag, "last_deploy_failed") {
+		t.Fatal("a build failure is not a deploy failure")
+	}
+
+	// Rolling back to the first deployment reuses its pinned commit.
+	if _, err := e.Plan(ctx, "agent", PlanRequest{Spec: gitApp("main")}); err != nil {
+		t.Fatal(err)
+	}
+	app, _ := e.GetApp(ctx, "api")
+	if app.Spec.Build.Commit != shaA {
+		t.Fatalf("current spec should still be commit A, got %s", app.Spec.Build.Commit)
+	}
+}
+
+func TestGitBuildBadRef(t *testing.T) {
+	e, _ := setup(t)
+	if _, err := e.Plan(context.Background(), "agent", PlanRequest{Spec: gitApp("nope")}); code(err) != "git_ref_not_found" {
+		t.Fatalf("want git_ref_not_found at plan time, got %v", err)
+	}
+}
+
+func TestPerAppLocking(t *testing.T) {
+	e, _ := setup(t)
+	ctx := context.Background()
+	unlock := e.lockApp("web")
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.Plan(ctx, "agent", PlanRequest{Spec: &spec.App{Name: "other", Image: "nginx"}})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a lock on one app must not block another app")
+	}
+	unlock()
 }

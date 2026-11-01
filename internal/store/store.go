@@ -89,6 +89,14 @@ const (
 	DeployFailed     = "failed"
 	DeployDeleted    = "deleted"
 	DeployInProgress = "deploying"
+	DeployBuilding   = "building"
+)
+
+// Phases a deployment can fail in. A failed build never touches the
+// running container; a failed deploy may have.
+const (
+	PhaseBuild  = "build"
+	PhaseDeploy = "deploy"
 )
 
 type Deployment struct {
@@ -97,7 +105,11 @@ type Deployment struct {
 	PlanID     string     `json:"plan_id"`
 	Spec       *spec.App  `json:"spec,omitempty"`
 	Status     string     `json:"status"`
+	Image      string     `json:"image,omitempty"`  // image that ran (built tag for git builds)
+	Commit     string     `json:"commit,omitempty"` // git commit, for builds
 	Error      string     `json:"error,omitempty"`
+	ErrorCode  string     `json:"error_code,omitempty"`
+	FailedIn   string     `json:"failed_in,omitempty"` // build | deploy`
 	Actor      string     `json:"actor"`
 	Reason     string     `json:"reason"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -127,6 +139,10 @@ CREATE TABLE IF NOT EXISTS plans (
 CREATE TABLE IF NOT EXISTS deployments (
   id TEXT PRIMARY KEY, app TEXT NOT NULL, status TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS deployments_by_app ON deployments(app, created_at);
+CREATE TABLE IF NOT EXISTS build_logs (
+  deployment TEXT PRIMARY KEY, lines TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (
+  hash TEXT PRIMARY KEY, token_name TEXT NOT NULL, scope TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
   target TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', detail TEXT);
@@ -204,6 +220,75 @@ func (s *Store) CountTokens(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM tokens`).Scan(&n)
 	return n, err
+}
+
+// --- sessions (dashboard sign-in) ---
+
+// CreateSession creates a browser session acting as the given token and
+// returns its plaintext id once. Only a hash is stored.
+func (s *Store) CreateSession(ctx context.Context, t *Token, ttl time.Duration) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	plain := hex.EncodeToString(b)
+	now := time.Now()
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`, ts(now)); err != nil {
+		return "", err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(hash, token_name, scope, created_at, expires_at) VALUES(?,?,?,?,?)`,
+		hashToken(plain), t.Name, string(t.Scope), ts(now), ts(now.Add(ttl)))
+	return plain, err
+}
+
+// LookupSession returns the token identity behind a live session, or nil.
+func (s *Store) LookupSession(ctx context.Context, plain string) (*Token, error) {
+	var t Token
+	var scope, expires string
+	err := s.db.QueryRowContext(ctx, `SELECT token_name, scope, expires_at FROM sessions WHERE hash = ?`, hashToken(plain)).
+		Scan(&t.Name, &scope, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if exp, _ := time.Parse(tsFormat, expires); time.Now().After(exp) {
+		return nil, nil
+	}
+	t.Scope = Scope(scope)
+	return &t, nil
+}
+
+func (s *Store) DeleteSession(ctx context.Context, plain string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE hash = ?`, hashToken(plain))
+	return err
+}
+
+// --- build logs ---
+
+func (s *Store) SaveBuildLog(ctx context.Context, deployment string, lines []string) error {
+	b, err := json.Marshal(lines)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO build_logs(deployment, lines) VALUES(?,?)
+		ON CONFLICT(deployment) DO UPDATE SET lines=excluded.lines`, deployment, string(b))
+	return err
+}
+
+// GetBuildLog returns a deployment's build log, or nil if it has none.
+func (s *Store) GetBuildLog(ctx context.Context, deployment string) ([]string, error) {
+	var body string
+	err := s.db.QueryRowContext(ctx, `SELECT lines FROM build_logs WHERE deployment = ?`, deployment).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	return lines, json.Unmarshal([]byte(body), &lines)
 }
 
 // --- apps ---

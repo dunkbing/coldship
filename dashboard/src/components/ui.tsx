@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ApiError, type AppView, type Change, type Deployment, type Plan, type Stage } from '../api'
+import { ApiError, type AppView, type Change, type Deployment, type Plan, type Spec, type Stage } from '../api'
 import { fmtTime, timeAgo, timeUntil } from '../hooks'
 
 export function StageBadge({ stage }: { stage?: Stage }) {
@@ -11,11 +11,14 @@ export type Health = 'healthy' | 'failing' | 'stopped' | 'deploying' | 'unknown'
 
 export function healthOf(v: AppView | undefined): Health {
   if (!v) return 'unknown'
-  if (v.latest_deployment?.status === 'deploying') return 'deploying'
+  const ld = v.latest_deployment
+  if (ld?.status === 'deploying' || ld?.status === 'building') return 'deploying'
   const rt = v.runtime
   if (!rt) return 'unknown'
   if (!rt.exists) return 'stopped'
-  if (rt.running && rt.restart_count === 0 && v.latest_deployment?.status !== 'failed') return 'healthy'
+  // A failed build never touches the running container, so it is not an outage.
+  const deployFailed = ld?.status === 'failed' && ld.failed_in !== 'build'
+  if (rt.running && rt.restart_count === 0 && !deployFailed) return 'healthy'
   return 'failing'
 }
 
@@ -38,6 +41,42 @@ export function HealthPill({ health }: { health: Health }) {
 
 export function DeployStatus({ status }: { status: Deployment['status'] }) {
   return <span className={`badge dep-${status}`}>{status}</span>
+}
+
+// shortRepo turns https://github.com/acme/api.git into acme/api.
+export function shortRepo(url: string): string {
+  return url
+    .replace(/^(https?|ssh):\/\/([^@/]*@)?[^/]+\//, '')
+    .replace(/^[^@]+@[^:]+:/, '')
+    .replace(/\.git$/, '')
+}
+
+// Source shows where an app's image comes from: an image, or repo@ref (commit).
+export function Source({ spec }: { spec?: Spec }) {
+  if (!spec) return <>—</>
+  if (!spec.build) return <Mono>{spec.image}</Mono>
+  const b = spec.build
+  return (
+    <span className="source" title={b.git}>
+      <GitIcon />
+      <Mono>
+        {shortRepo(b.git)}
+        {b.ref ? `@${b.ref}` : ''}
+      </Mono>
+      {b.commit && <span className="muted mono small">{b.commit.slice(0, 7)}</span>}
+    </span>
+  )
+}
+
+export function GitIcon() {
+  return (
+    <svg className="git-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden>
+      <circle cx="4" cy="3.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="4" cy="12.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="12" cy="6" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M4 5.3v5.4M12 7.8c0 2.4-3 2.6-7 3.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  )
 }
 
 export function Mono({ children }: { children: ReactNode }) {

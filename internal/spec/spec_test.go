@@ -45,3 +45,59 @@ func TestRedactedDoesNotMutate(t *testing.T) {
 		t.Fatal("redaction must copy")
 	}
 }
+
+func TestBuildValidation(t *testing.T) {
+	ok := []string{
+		"https://github.com/acme/api.git",
+		"http://gitea.internal:3000/acme/api",
+		"ssh://git@github.com/acme/api.git",
+		"git@github.com:acme/api.git",
+	}
+	for _, u := range ok {
+		a := App{Name: "api", Build: &Build{Git: u}}
+		a.Normalize()
+		if err := a.Validate(); err != nil {
+			t.Errorf("%s should be valid: %v", u, err)
+		}
+	}
+	bad := map[string]string{
+		"/srv/repos/api":                              "build.git",
+		"file:///srv/repos/api":                       "build.git",
+		"ext::sh -c touch% /tmp/pwned":                "build.git",
+		"-uhttps://evil":                              "build.git",
+		"https://user:ghp_secret@github.com/acme/api": "build.git",
+		"https://ghp_secret@github.com/acme/api":      "build.git",
+	}
+	for u, field := range bad {
+		a := App{Name: "api", Build: &Build{Git: u}}
+		a.Normalize()
+		ae, ok := apierr.As(a.Validate())
+		if !ok || ae.Field != field {
+			t.Errorf("%s: want error on %s, got %v", u, field, ae)
+		}
+	}
+	cases := []struct {
+		b     Build
+		field string
+	}{
+		{Build{Git: ok[0], Ref: "--upload-pack=x"}, "build.ref"},
+		{Build{Git: ok[0], Ref: "main..dev"}, "build.ref"},
+		{Build{Git: ok[0], Commit: "abc123"}, "build.commit"},
+		{Build{Git: ok[0], Context: "../.."}, "build.context"},
+		{Build{Git: ok[0], Dockerfile: "/etc/passwd"}, "build.dockerfile"},
+		{Build{Git: ok[0], Args: map[string]string{"bad-key": "x"}}, "build.args.bad-key"},
+	}
+	for _, c := range cases {
+		a := App{Name: "api", Build: &c.b}
+		a.Normalize()
+		ae, ok := apierr.As(a.Validate())
+		if !ok || ae.Field != c.field {
+			t.Errorf("%+v: want error on %s, got %v", c.b, c.field, ae)
+		}
+	}
+	both := App{Name: "api", Image: "nginx", Build: &Build{Git: ok[0]}}
+	both.Normalize()
+	if both.Validate() == nil {
+		t.Error("image and build together must be rejected")
+	}
+}

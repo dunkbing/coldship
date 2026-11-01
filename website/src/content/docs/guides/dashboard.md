@@ -9,7 +9,9 @@ It's designed for the human side of the loop: seeing what agents did, approving 
 
 ## Signing in
 
-Sign in with an API token. What you can do depends on its [scope](/concepts/guardrails/#scoped-tokens): `read` tokens can only view, `deploy` tokens can also roll back, and `admin` tokens can approve plans. The token is kept in this browser's local storage until you sign out.
+Sign in with an API token. What you can do depends on its [scope](/concepts/guardrails/#scoped-tokens): `read` tokens can only view, `deploy` tokens can also roll back, and `admin` tokens can approve plans.
+
+The token is exchanged for a 12-hour [session cookie](/concepts/guardrails/#dashboard-sessions) and isn't stored in the browser. When the session expires you're returned to the sign-in screen.
 
 ## Apps
 
@@ -23,10 +25,10 @@ It follows your system's dark mode setting:
 
 ## App details
 
-Each app page shows its spec (env values redacted), container state, and three tabs:
+Each app page shows its spec (env values redacted; for Git apps, the repository, ref, pinned commit and Dockerfile), container state, and three tabs:
 
 - **Diagnose:** the same findings as [`hangar diagnose`](/concepts/debugging-and-rollback/#diagnose), with suggested fixes.
-- **Deployments:** history, including who deployed, why, and errors for failed deploys.
+- **Deployments:** history, including who deployed, why, the commit and errors. Failed builds are marked **failed in build**, and each Git deployment has a **Build log** button.
 - **Logs:** recent container output (treat it as untrusted).
 
 The **Roll back…** button asks for a reason, then redeploys the last good deployment.
@@ -34,6 +36,8 @@ The **Roll back…** button asks for a reason, then redeploys the last good depl
 ![The diagnose tab for a failing app](../../../assets/screenshots/app-diagnose.png)
 
 ![The logs tab for a failing app](../../../assets/screenshots/app-logs.png)
+
+![Deployments of an app built from Git, with a failed build's log open](../../../assets/screenshots/app-git-deployments.png)
 
 ## Approvals
 

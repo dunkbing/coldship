@@ -2,7 +2,10 @@
 import { defineConfig } from 'astro/config'
 import starlight from '@astrojs/starlight'
 
+// SITE_URL (e.g. https://docs.example.com) is the docs' public address. It is
+// needed for the sitemap and canonical links; set it when building for deployment.
 export default defineConfig({
+  site: process.env.SITE_URL || undefined,
   integrations: [
     starlight({
       title: 'Hangar',
@@ -26,7 +29,7 @@ export default defineConfig({
         },
         {
           label: 'Guides',
-          items: ['guides/ai-agents', 'guides/dashboard', 'guides/production'],
+          items: ['guides/ai-agents', 'guides/build-from-git', 'guides/dashboard', 'guides/production'],
         },
         {
           label: 'Reference',

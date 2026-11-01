@@ -30,6 +30,8 @@ A plan contains:
 
 Env values never appear in a plan. Changed env keys are listed with the note "value changed (redacted)".
 
+For apps [built from Git](/guides/build-from-git/), planning also resolves `build.ref` to a commit and records it as `build.commit`, so the plan says exactly what will be built. New commits on the branch show up as a `build.commit` change.
+
 ### What counts as destructive
 
 | Change | Destructive? |
@@ -52,7 +54,7 @@ Apply checks, in order:
 3. **Approval, if required.** Otherwise `approval_required`.
 4. **The plan isn't stale.** If the app was deployed or deleted after the plan was made, you get `plan_stale`. Make a new plan and review it again.
 
-Then Hangar pulls the image (before touching the running container), replaces the container, and waits for a startup grace period (3 seconds by default). A deploy only succeeds if the container is still running, with no restarts, at the end of that period.
+Then Hangar gets the image before touching the running container: it pulls it, or for Git apps builds it (or reuses an image already built from that commit). Then it replaces the container and waits for a startup grace period (3 seconds by default). A deploy only succeeds if the container is still running, with no restarts, at the end of that period.
 
 ### Apply is idempotent
 
@@ -73,5 +75,7 @@ If the new container doesn't stay up, the deployment is marked `failed` and the 
   }
 }
 ```
+
+Errors also carry `failed_in`: `build` means the image couldn't be built and the running container was never touched; `deploy` means the new container itself failed.
 
 A failed deploy never replaces the app's current spec. The last good deployment stays the reference point for future plans and for [rollback](/concepts/debugging-and-rollback/).
