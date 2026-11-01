@@ -357,7 +357,43 @@ func tokenCmd() *cobra.Command {
 	create.Flags().StringVar(&name, "name", "", "token name, e.g. claude-agent")
 	create.Flags().StringVar(&scope, "scope", string(store.ScopeDeploy), "read | deploy | admin")
 	create.MarkFlagRequired("name")
-	cmd.AddCommand(create)
+
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List tokens, never their values (admin)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			toks, err := newClient().ListTokens(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return emit(toks, func() {
+				w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+				fmt.Fprintln(w, "NAME\tSCOPE\tCREATED")
+				for _, t := range toks {
+					fmt.Fprintf(w, "%s\t%s\t%s\n", t.Name, t.Scope, t.CreatedAt.Local().Format("2006-01-02 15:04"))
+				}
+				w.Flush()
+			})
+		},
+	}
+
+	var reason string
+	revoke := &cobra.Command{
+		Use:   "revoke <name>",
+		Short: "Revoke a token and sign out its dashboard sessions (admin)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := newClient().RevokeToken(cmd.Context(), args[0], reason); err != nil {
+				return err
+			}
+			return emit(map[string]any{"name": args[0], "revoked": true}, func() {
+				fmt.Printf("Token %q revoked. Its dashboard sessions are signed out.\n", args[0])
+			})
+		},
+	}
+	revoke.Flags().StringVar(&reason, "reason", "", "why, for the audit log")
+	cmd.AddCommand(create, list, revoke)
 	return cmd
 }
 

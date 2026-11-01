@@ -967,15 +967,57 @@ func (e *Engine) Audit(ctx context.Context, limit int) ([]store.AuditEntry, erro
 
 // --- tokens ---
 
+// reservedActors are names Coldship itself writes to the audit log, so no
+// token may use them.
+var reservedActors = map[string]bool{"coldship": true, "webhook": true, "system": true, "hangar": true}
+
 func (e *Engine) CreateToken(ctx context.Context, actor, name string, scope store.Scope) (string, error) {
 	if !nameOK(name) {
 		return "", apierr.New(400, "invalid_token_name", "token name %q must be lowercase letters, digits and dashes", name)
+	}
+	if reservedActors[name] {
+		return "", apierr.New(400, "invalid_token_name", "token name %q is reserved for Coldship's own audit entries", name)
 	}
 	t, err := e.st.CreateToken(ctx, name, scope)
 	if err == nil {
 		e.audit(ctx, actor, "token.create", name, "", map[string]any{"scope": scope})
 	}
 	return t, err
+}
+
+func (e *Engine) ListTokens(ctx context.Context) ([]store.Token, error) {
+	return e.st.ListTokens(ctx)
+}
+
+// RevokeToken deletes a token and signs out its dashboard sessions. The last
+// admin token can't be revoked, so the server can't be locked out.
+func (e *Engine) RevokeToken(ctx context.Context, actor, name, reason string) error {
+	toks, err := e.st.ListTokens(ctx)
+	if err != nil {
+		return err
+	}
+	var target *store.Token
+	admins := 0
+	for i, t := range toks {
+		if t.Scope == store.ScopeAdmin {
+			admins++
+		}
+		if t.Name == name {
+			target = &toks[i]
+		}
+	}
+	if target == nil {
+		return apierr.NotFound("token", name)
+	}
+	if target.Scope == store.ScopeAdmin && admins == 1 {
+		return apierr.New(409, "last_admin_token", "%s is the only admin token; create another admin token before revoking it", name).
+			WithHint("coldship token create --name <name> --scope admin")
+	}
+	if _, err := e.st.DeleteToken(ctx, name); err != nil {
+		return err
+	}
+	e.audit(ctx, actor, "token.revoke", name, reason, nil)
+	return nil
 }
 
 // EnsureAdminToken creates an "admin" token if no tokens exist yet and

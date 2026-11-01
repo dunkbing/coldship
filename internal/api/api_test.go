@@ -131,10 +131,13 @@ func TestDashboardSessions(t *testing.T) {
 		return resp
 	}
 
-	if r := do("POST", "/v1/sessions", `{"token":"cst_wrong"}`, nil, false); r.StatusCode != 401 {
+	if r := do("POST", "/v1/sessions", `{"token":"cst_wrong"}`, nil, true); r.StatusCode != 401 {
 		t.Fatalf("bad token: want 401, got %d", r.StatusCode)
 	}
-	r := do("POST", "/v1/sessions", `{"token":"`+admin+`"}`, nil, false)
+	if r := do("POST", "/v1/sessions", `{"token":"`+admin+`"}`, nil, false); r.StatusCode != 403 {
+		t.Fatalf("sign-in without the CSRF header (login CSRF): want 403, got %d", r.StatusCode)
+	}
+	r := do("POST", "/v1/sessions", `{"token":"`+admin+`"}`, nil, true)
 	var c *http.Cookie
 	for _, x := range r.Cookies() {
 		if x.Name == api.SessionCookie {
@@ -164,6 +167,42 @@ func TestDashboardSessions(t *testing.T) {
 	}
 	if r := do("GET", "/v1/whoami", "", c, false); r.StatusCode != 401 {
 		t.Fatalf("after sign out the session must be dead, got %d", r.StatusCode)
+	}
+
+	// Revoking a token kills it and every session signed in with it.
+	ac := client.New(srv.URL, admin)
+	ci, err := ac.CreateToken(ctx, "ci", "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = do("POST", "/v1/sessions", `{"token":"`+ci.Token+`"}`, nil, true)
+	var ciCookie *http.Cookie
+	for _, x := range r.Cookies() {
+		if x.Name == api.SessionCookie {
+			ciCookie = x
+		}
+	}
+	if ciCookie == nil {
+		t.Fatal("no session for the ci token")
+	}
+	if err := ac.RevokeToken(ctx, "ci", "rotated"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.New(srv.URL, ci.Token).ListApps(ctx); errCode(err) != "unauthenticated" {
+		t.Fatalf("revoked token: want unauthenticated, got %v", err)
+	}
+	if r := do("GET", "/v1/whoami", "", ciCookie, false); r.StatusCode != 401 {
+		t.Fatalf("a revoked token's session must be dead, got %d", r.StatusCode)
+	}
+	if err := ac.RevokeToken(ctx, "admin", ""); errCode(err) != "last_admin_token" {
+		t.Fatalf("revoking the only admin token: want last_admin_token, got %v", err)
+	}
+	if _, err := ac.CreateToken(ctx, "webhook", "deploy"); errCode(err) != "invalid_token_name" {
+		t.Fatalf("reserved token name: want invalid_token_name, got %v", err)
+	}
+	toks, err := ac.ListTokens(ctx)
+	if err != nil || len(toks) != 1 || toks[0].Name != "admin" {
+		t.Fatalf("tokens after revoke: %+v %v", toks, err)
 	}
 }
 

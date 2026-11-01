@@ -617,6 +617,46 @@ func (s *Store) LookupToken(ctx context.Context, plain string) (*Token, error) {
 	return &t, nil
 }
 
+// ListTokens lists tokens (never their values), oldest first.
+func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, scope, created_at FROM tokens ORDER BY created_at, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Token{}
+	for rows.Next() {
+		var t Token
+		var scope, created string
+		if err := rows.Scan(&t.Name, &scope, &created); err != nil {
+			return nil, err
+		}
+		t.Scope = Scope(scope)
+		t.CreatedAt, _ = time.Parse(tsFormat, created)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// DeleteToken deletes a token and every dashboard session signed in with
+// it. It reports whether the token existed.
+func (s *Store) DeleteToken(ctx context.Context, name string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `DELETE FROM tokens WHERE name = ?`, name)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE token_name = ?`, name); err != nil {
+		return false, err
+	}
+	return n > 0, tx.Commit()
+}
+
 func (s *Store) CountTokens(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM tokens`).Scan(&n)
@@ -646,7 +686,9 @@ func (s *Store) CreateSession(ctx context.Context, t *Token, ttl time.Duration) 
 func (s *Store) LookupSession(ctx context.Context, plain string) (*Token, error) {
 	var t Token
 	var scope, expires string
-	err := s.db.QueryRowContext(ctx, `SELECT token_name, scope, expires_at FROM sessions WHERE hash = ?`, hashToken(plain)).
+	// A session lives only as long as its token.
+	err := s.db.QueryRowContext(ctx, `SELECT s.token_name, t.scope, s.expires_at FROM sessions s
+		JOIN tokens t ON t.name = s.token_name WHERE s.hash = ?`, hashToken(plain)).
 		Scan(&t.Name, &scope, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

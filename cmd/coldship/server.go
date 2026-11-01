@@ -112,7 +112,10 @@ func serverCmd() *cobra.Command {
 			}
 
 			apiSrv := api.New(eng, st, log, web.Handler())
-			srv := &http.Server{Addr: addr, Handler: apiSrv, ReadHeaderTimeout: 10 * time.Second}
+			// No WriteTimeout: deployments run inside requests. api.Server bounds
+			// body reads instead.
+			srv := &http.Server{Addr: addr, Handler: apiSrv, ReadHeaderTimeout: 10 * time.Second,
+				IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}
 
 			// Self-upgrade: the checker installs a new binary, then calls
 			// restart, which drains in-flight requests (deployments run

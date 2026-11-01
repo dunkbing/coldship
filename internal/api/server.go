@@ -84,6 +84,8 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("POST /v1/system/check", store.ScopeAdmin, s.systemCheck)
 	s.route("POST /v1/system/upgrade", store.ScopeAdmin, s.systemUpgrade)
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
+	s.route("GET /v1/tokens", store.ScopeAdmin, s.listTokens)
+	s.route("DELETE /v1/tokens/{name}", store.ScopeAdmin, s.revokeToken)
 	notFound := func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, s.log, apierr.New(404, "route_not_found", "no route for %s %s", r.Method, r.URL.Path))
 	}
@@ -96,7 +98,17 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+// bodyReadTimeout bounds how long a client may take to send a request body,
+// so slow clients can't hold connections open. It only covers reading: a
+// deploy can run long after its body arrived.
+const bodyReadTimeout = 30 * time.Second
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Not every ResponseWriter supports deadlines (httptest recorders);
+	// ignore the error there.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(bodyReadTimeout))
+	s.mux.ServeHTTP(w, r)
+}
 
 type handler func(r *http.Request, p principal) (any, error)
 
@@ -182,6 +194,9 @@ func decode(r *http.Request, v any) error {
 	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
 		return apierr.New(400, "invalid_request", "invalid JSON body: %v", err)
 	}
+	if dec.More() {
+		return apierr.New(400, "invalid_request", "invalid JSON body: unexpected data after the JSON value")
+	}
 	return nil
 }
 
@@ -223,6 +238,12 @@ type SessionRequest struct {
 // createSession exchanges an API token for an HttpOnly session cookie, so the
 // dashboard never keeps the token itself.
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	// A cross-site form can't set this header, so another site can't sign
+	// the browser in to an attacker's token (login CSRF).
+	if r.Header.Get(CSRFHeader) == "" {
+		writeErr(w, s.log, apierr.New(403, "csrf_check_failed", "sign-in requests need the %s header", CSRFHeader))
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
 	var req SessionRequest
 	if err := decode(r, &req); err != nil {
@@ -575,4 +596,16 @@ func (s *Server) createToken(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	return TokenResponse{Name: req.Name, Scope: string(scope), Token: tok}, nil
+}
+
+func (s *Server) listTokens(r *http.Request, _ principal) (any, error) {
+	return s.eng.ListTokens(r.Context())
+}
+
+func (s *Server) revokeToken(r *http.Request, p principal) (any, error) {
+	name := r.PathValue("name")
+	if err := s.eng.RevokeToken(r.Context(), p.name, name, r.URL.Query().Get("reason")); err != nil {
+		return nil, err
+	}
+	return map[string]any{"name": name, "revoked": true}, nil
 }

@@ -232,6 +232,15 @@ func (c *Client) Audit(ctx context.Context, limit int) ([]store.AuditEntry, erro
 	return out, c.do(ctx, "GET", fmt.Sprintf("/v1/audit?limit=%d", limit), nil, &out)
 }
 
+func (c *Client) ListTokens(ctx context.Context) ([]store.Token, error) {
+	var out []store.Token
+	return out, c.do(ctx, "GET", "/v1/tokens", nil, &out)
+}
+
+func (c *Client) RevokeToken(ctx context.Context, name, reason string) error {
+	return c.do(ctx, "DELETE", "/v1/tokens/"+url.PathEscape(name)+"?reason="+url.QueryEscape(reason), nil, nil)
+}
+
 func (c *Client) CreateToken(ctx context.Context, name, scope string) (*api.TokenResponse, error) {
 	var out api.TokenResponse
 	return &out, c.do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: name, Scope: scope}, &out)
