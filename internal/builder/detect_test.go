@@ -114,3 +114,32 @@ func TestDetectFailuresSuggestFixes(t *testing.T) {
 		t.Fatalf("django without start: %v", err)
 	}
 }
+
+// Copied files are publicly downloadable: secrets, Git data, ignored paths
+// and symlinks must stay behind.
+func TestCopySiteSkipsWhatMustNotBeServed(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	for _, f := range []string{"index.html", "css/app.css", ".git/config", ".env", ".env.production", "drafts/secret.html", "node_modules/x.js"} {
+		os.MkdirAll(filepath.Join(src, filepath.Dir(f)), 0o755)
+		os.WriteFile(filepath.Join(src, f), []byte(f), 0o644)
+	}
+	os.Symlink("/etc/passwd", filepath.Join(src, "passwd.html"))
+	ignore := ".git\nnode_modules\n.env\n.env.*\n# comment\ndrafts/\n"
+	n, err := copySite(src, dst, ignore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"index.html", "css/app.css"} {
+		if _, err := os.Stat(filepath.Join(dst, f)); err != nil {
+			t.Errorf("%s should be copied", f)
+		}
+	}
+	for _, f := range []string{".git", ".env", ".env.production", "drafts", "node_modules", "passwd.html"} {
+		if _, err := os.Lstat(filepath.Join(dst, f)); err == nil {
+			t.Errorf("%s must not be copied", f)
+		}
+	}
+	if n != 2 {
+		t.Errorf("copied %d files, want 2", n)
+	}
+}

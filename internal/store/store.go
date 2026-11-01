@@ -159,7 +159,10 @@ type Deployment struct {
 	// KeptPrevious is true when the deployment failed without touching the
 	// previous version, which kept running and serving traffic.
 	KeptPrevious bool   `json:"kept_previous,omitempty"`
-	Strategy     string `json:"strategy,omitempty"` // zero-downtime | recreate
+	Strategy     string `json:"strategy,omitempty"` // zero-downtime | recreate | static
+	// Static is true when the proxy serves the deployment's files directly,
+	// with no container.
+	Static bool `json:"static,omitempty"`
 	// Detected summarizes the project detection when Coldship generated the
 	// Dockerfile, e.g. "node 22 · pnpm · pnpm start".
 	Detected   string     `json:"detected,omitempty"`

@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,7 +69,11 @@ func (e *Engine) StartProxy(ctx context.Context) error {
 	defer e.proxyMu.Unlock()
 	for _, a := range apps {
 		if a.Spec != nil && len(a.Spec.Domains) > 0 && a.CurrentDeployment != "" {
-			e.routes[a.Name] = proxy.Route{App: a.Name, Domains: a.Spec.Domains, Upstream: runtime.Upstream(a.CurrentDeployment, a.Spec.Port)}
+			r := proxy.Route{App: a.Name, Domains: a.Spec.Domains, Upstream: runtime.Upstream(a.CurrentDeployment, a.Spec.Port)}
+			if d, err := e.st.GetDeployment(ctx, a.CurrentDeployment); err == nil && d != nil && d.Static {
+				r.Upstream, r.Root = "", siteRoot(a.Name, d.ID)
+			}
+			e.routes[a.Name] = r
 		}
 	}
 	return e.px.Apply(ctx, e.routeList())
@@ -75,19 +82,27 @@ func (e *Engine) StartProxy(ctx context.Context) error {
 // setRoute points app's domains at upstream (or removes the route when there
 // are no domains) and reloads the proxy.
 func (e *Engine) setRoute(ctx context.Context, app string, domains []string, upstream string) error {
+	return e.setRouteTo(ctx, proxy.Route{App: app, Domains: domains, Upstream: upstream})
+}
+
+// setRouteTo installs r (an upstream or a static site root), or removes the
+// app's route when r has no domains or nothing to route to.
+func (e *Engine) setRouteTo(ctx context.Context, r proxy.Route) error {
 	if e.px == nil {
 		return nil
 	}
+	app := r.App
 	e.proxyMu.Lock()
 	defer e.proxyMu.Unlock()
 	prev, had := e.routes[app]
-	if len(domains) == 0 || upstream == "" {
+	if len(r.Domains) == 0 || (r.Upstream == "" && r.Root == "") {
 		if !had {
 			return nil
 		}
 		delete(e.routes, app)
 	} else {
-		e.routes[app] = proxy.Route{App: app, Domains: append([]string(nil), domains...), Upstream: upstream}
+		r.Domains = append([]string(nil), r.Domains...)
+		e.routes[app] = r
 	}
 	if err := e.px.Apply(ctx, e.routeList()); err != nil {
 		if had {
@@ -99,6 +114,66 @@ func (e *Engine) setRoute(ctx context.Context, app string, domains []string, ups
 	}
 	return nil
 }
+
+// siteRoot is a static deployment's directory, relative to the proxy's
+// sites directory.
+func siteRoot(app, deployment string) string { return app + "/" + deployment }
+
+// staticEligible reports whether run can be served as files by the proxy if
+// it turns out to be a plain static site: it needs a domain, the proxy, and
+// nothing that needs a running process.
+func (e *Engine) staticEligible(run *spec.App) bool {
+	return e.px != nil && e.px.SitesDir() != "" && run.Build != nil && len(run.Domains) > 0 &&
+		run.HostPort == 0 && len(run.Volumes) == 0 && len(run.Databases) == 0 &&
+		(run.Build.Builder == "" || run.Build.Builder == spec.BuilderAuto)
+}
+
+// pruneSites keeps app's static site directories for keep (the live one)
+// and the two newest others, for quick rollbacks; keep "" removes them all.
+func (e *Engine) pruneSites(app, keep string) {
+	if e.px == nil || e.px.SitesDir() == "" {
+		return
+	}
+	dir := filepath.Join(e.px.SitesDir(), app)
+	if keep == "" {
+		os.RemoveAll(dir)
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type site struct {
+		name string
+		mod  time.Time
+	}
+	var others []site
+	for _, en := range entries {
+		if en.IsDir() && en.Name() != keep {
+			if info, err := en.Info(); err == nil {
+				others = append(others, site{en.Name(), info.ModTime()})
+			}
+		}
+	}
+	sort.Slice(others, func(i, j int) bool { return others[i].mod.After(others[j].mod) })
+	for i, o := range others {
+		if i >= 2 {
+			os.RemoveAll(filepath.Join(dir, o.name))
+		}
+	}
+}
+
+// isStatic reports whether app's current deployment is a static site.
+func (e *Engine) isStatic(ctx context.Context, app *store.App) bool {
+	if app == nil || app.CurrentDeployment == "" {
+		return false
+	}
+	d, err := e.st.GetDeployment(ctx, app.CurrentDeployment)
+	return err == nil && d != nil && d.Static
+}
+
+// staticStatus is what a static site reports instead of a container.
+var staticStatus = runtime.Status{Exists: true, Running: true, State: "static"}
 
 func (e *Engine) routeList() []proxy.Route {
 	out := make([]proxy.Route, 0, len(e.routes))
@@ -730,6 +805,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			if err := e.setRoute(ctx, p.App, nil, ""); err != nil {
 				fmt.Fprintf(deployLog, "coldship: warning: removing the proxy route failed: %v\n", err)
 			}
+			e.pruneSites(p.App, "")
 			runErr = e.st.DeleteApp(ctx, p.App)
 		}
 		if runErr != nil {
@@ -750,14 +826,35 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			// app took one since this plan was made.
 			runErr = e.checkDomains(ctx, run)
 		}
-		if runErr == nil {
+		if runErr == nil && d.Static {
+			// The proxy serves the files: switching its route is the deploy,
+			// atomic and without downtime. Then any container the app ran
+			// in before goes.
+			d.Strategy = "static"
+			if runErr = e.setRouteTo(ctx, proxy.Route{App: run.Name, Domains: run.Domains, Root: siteRoot(run.Name, d.ID)}); runErr != nil {
+				d.FailedIn, d.KeptPrevious = store.PhaseDeploy, current != nil
+			} else {
+				fmt.Fprintf(deployLog, "coldship: serving %s as a static site\n", strings.Join(run.Domains, ", "))
+				if err := e.rt.Remove(ctx, p.App, nil); err != nil {
+					fmt.Fprintf(deployLog, "coldship: warning: removing the previous container failed: %v\n", err)
+				}
+				e.pruneSites(p.App, d.ID)
+				runErr = e.rt.RemoveVolumes(ctx, p.App, planner.RemovedVolumes(current, p.Desired))
+				if gone := planner.RemovedDatabases(current, p.Desired); runErr == nil && len(gone) > 0 {
+					if err := e.removeDatabases(ctx, actor, current, gone, "removed from the spec in "+p.ID, app == nil || app.PreviewOf == "", deployLog); err != nil {
+						fmt.Fprintf(deployLog, "coldship: warning: %v\n", err)
+					}
+				}
+			}
+		}
+		if runErr == nil && !d.Static {
 			// Databases start before the app, which needs their URLs. A
 			// failure here hasn't touched the running app.
 			if runErr = e.ensureDatabases(ctx, run, deployLog); runErr != nil {
 				d.FailedIn, d.KeptPrevious = store.PhaseDeploy, current != nil
 			}
 		}
-		if runErr == nil {
+		if runErr == nil && !d.Static {
 			d.Strategy = "recreate"
 			if run.ZeroDowntime() {
 				d.Strategy = "zero-downtime"
@@ -775,6 +872,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 				if err := e.setRoute(ctx, run.Name, run.Domains, upstream); err != nil {
 					fmt.Fprintf(deployLog, "coldship: warning: updating the proxy failed: %v\n", err)
 				}
+				e.pruneSites(p.App, "") // in case it was a static site before
 				runErr = e.rt.RemoveVolumes(ctx, p.App, planner.RemovedVolumes(current, p.Desired))
 				if gone := planner.RemovedDatabases(current, p.Desired); runErr == nil && len(gone) > 0 {
 					// The new version no longer uses them. Each is snapshotted
@@ -862,10 +960,22 @@ func (e *Engine) build(ctx context.Context, d *store.Deployment, run *spec.App, 
 	if err := e.st.SaveDeployment(ctx, d); err != nil {
 		return err
 	}
-	res, err := e.bd.Build(ctx, run.Name, *run.Build, log)
+	var opts builder.BuildOptions
+	if e.staticEligible(run) {
+		opts.StaticDir = filepath.Join(e.px.SitesDir(), siteRoot(run.Name, d.ID))
+	}
+	res, err := e.bd.Build(ctx, run.Name, *run.Build, log, opts)
 	if err != nil {
 		d.FailedIn = store.PhaseBuild
+		if opts.StaticDir != "" {
+			os.RemoveAll(opts.StaticDir)
+		}
 		return err
+	}
+	if res.Static {
+		run.Image, run.Build = "", nil
+		d.Static, d.Detected, d.Status = true, res.Summary, store.DeployInProgress
+		return e.st.SaveDeployment(ctx, d)
 	}
 	run.Image, run.Build = res.Image, nil
 	d.Image, d.Status = res.Image, store.DeployInProgress
@@ -999,7 +1109,10 @@ func (e *Engine) GetApp(ctx context.Context, name string) (*AppView, error) {
 	}
 	v := &AppView{App: *app}
 	v.Spec = app.Spec.Redacted()
-	if st, err := e.rt.Status(ctx, name); err == nil {
+	if e.isStatic(ctx, app) {
+		st := staticStatus
+		v.Runtime = &st
+	} else if st, err := e.rt.Status(ctx, name); err == nil {
 		v.Runtime = &st
 	}
 	if deps, err := e.st.ListDeployments(ctx, name, 1); err == nil && len(deps) > 0 {

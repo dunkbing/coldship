@@ -53,13 +53,20 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 	if app == nil {
 		return nil, apierr.NotFound("app", name)
 	}
-	st, err := e.rt.Status(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	logs, err := e.rt.Logs(ctx, name, 50, "")
-	if err != nil {
-		logs = []string{}
+	static := e.isStatic(ctx, app)
+	var st runtime.Status
+	var logs []string
+	if static {
+		// Served by the proxy: there is no container, and no app logs.
+		st, logs = staticStatus, []string{}
+	} else {
+		var err error
+		if st, err = e.rt.Status(ctx, name); err != nil {
+			return nil, err
+		}
+		if logs, err = e.rt.Logs(ctx, name, 50, ""); err != nil {
+			logs = []string{}
+		}
 	}
 	d := &Diagnosis{App: name, Runtime: st, Spec: app.Spec.Redacted(), RecentLogs: logs, LogsNote: untrustedNote, Findings: []Finding{}}
 	if deps, err := e.st.ListDeployments(ctx, name, 1); err == nil && len(deps) > 0 {

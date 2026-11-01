@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -32,16 +33,27 @@ type Builder interface {
 	// without cloning the repository.
 	Resolve(ctx context.Context, b spec.Build) (string, error)
 	// Build produces a local image for b, whose Commit must be set.
-	// Progress and errors are written to log.
-	Build(ctx context.Context, app string, b spec.Build, log io.Writer) (*Result, error)
+	// Progress and errors are written to log. With opts.StaticDir set, a
+	// plain static site is copied there instead, and no image is built.
+	Build(ctx context.Context, app string, b spec.Build, log io.Writer, opts BuildOptions) (*Result, error)
 	// Detect checks out b (Commit must be set) and reports how it would be
 	// built, without building anything.
 	Detect(ctx context.Context, b spec.Build, log io.Writer) (*Detection, error)
 }
 
-// Result describes a built image.
+// BuildOptions tune a build.
+type BuildOptions struct {
+	// StaticDir, if set, receives the files of a plain static site (no
+	// Dockerfile, no app code), which is then served without a container.
+	StaticDir string
+}
+
+// Result describes a built image, or a static site's files.
 type Result struct {
 	Image string
+	// Static is true when the site's files were copied to
+	// BuildOptions.StaticDir and no image was built.
+	Static bool
 	// Auto is true when Coldship generated the Dockerfile. Such images read
 	// their port from $PORT, which the engine sets to the spec's port.
 	Auto    bool
@@ -197,7 +209,7 @@ func unreachable(url, out string) error {
 	return e
 }
 
-func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer) (*Result, error) {
+func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer, opts BuildOptions) (*Result, error) {
 	if !spec.IsCommitSHA(b.Commit) {
 		return nil, apierr.New(400, "invalid_spec", "build.commit must be resolved before building").WithField("build.commit")
 	}
@@ -205,8 +217,11 @@ func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer
 	if out, err := g.run(ctx, "", nil, g.DockerBin, "image", "inspect", "-f",
 		`{{index .Config.Labels "coldship.builder"}}|{{index .Config.Labels "coldship.detected"}}`, tag); err == nil {
 		mode, summary, _ := strings.Cut(strings.TrimSpace(out), "|")
-		fmt.Fprintf(log, "coldship: image %s for commit %s already exists, reusing it\n", tag, b.Commit)
-		return &Result{Image: tag, Auto: mode == "auto", Summary: summary}, nil
+		// A static site built into an image earlier is served as files now.
+		if opts.StaticDir == "" || !strings.HasPrefix(summary, "static") {
+			fmt.Fprintf(log, "coldship: image %s for commit %s already exists, reusing it\n", tag, b.Commit)
+			return &Result{Image: tag, Auto: mode == "auto", Summary: summary}, nil
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, g.Timeout)
@@ -221,6 +236,14 @@ func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer
 	dockerfile, det, err := chooseDockerfile(co, b)
 	if err != nil {
 		return nil, err
+	}
+	if opts.StaticDir != "" && det.Mode == "auto" && det.Language == "static" {
+		n, err := copySite(co.ctxDir, opts.StaticDir, det.ignore)
+		if err != nil {
+			return nil, apierr.New(500, "build_failed", "copying the site's files failed: %v", err)
+		}
+		fmt.Fprintf(log, "coldship: static site: copied %d files; the proxy serves them directly, with no container\n", n)
+		return &Result{Static: true, Auto: true, Summary: det.Summary()}, nil
 	}
 
 	args := []string{"build", "-t", tag, "-f", dockerfile,
@@ -542,4 +565,77 @@ func (t *LogTail) Lines() []string {
 		out = append(out, string(t.partial))
 	}
 	return out
+}
+
+// copySite copies a static site's regular files from src to dst. It skips
+// what a build would ignore (.git, .env files, .dockerignore entries), since
+// every copied file becomes publicly downloadable, and it skips symlinks,
+// which could point outside the repository.
+func copySite(src, dst, ignore string) (int, error) {
+	var patterns []string
+	for _, l := range strings.Split(ignore, "\n") {
+		l = strings.Trim(strings.TrimSpace(l), "/")
+		if l != "" && !strings.HasPrefix(l, "#") && !strings.HasPrefix(l, "!") {
+			patterns = append(patterns, l)
+		}
+	}
+	ignored := func(rel string) bool {
+		for _, p := range patterns {
+			if ok, _ := path.Match(p, rel); ok {
+				return true
+			}
+			if ok, _ := path.Match(p, path.Base(rel)); ok {
+				return true
+			}
+		}
+		return false
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return 0, err
+	}
+	n := 0
+	err := filepath.WalkDir(src, func(p string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if ignored(rel) {
+			if e.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(dst, filepath.FromSlash(rel))
+		switch {
+		case e.IsDir():
+			return os.MkdirAll(target, 0o755)
+		case e.Type().IsRegular():
+			n++
+			return copyFile(p, target)
+		default: // symlinks, sockets, devices
+			return nil
+		}
+	})
+	return n, err
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }

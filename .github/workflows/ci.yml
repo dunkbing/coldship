@@ -101,6 +101,26 @@ jobs:
           coldship deploy --name ci-hello --image nginx:1.27-alpine --port 80 --host-port 18090
           curl -sf http://127.0.0.1:18090/ | grep -q nginx
           docker inspect -f '{{.HostConfig.LogConfig.Config}}' coldship-ci-hello | grep -q max-size
+      - name: A static site is served by the proxy, with no container
+        run: |
+          mkdir -p "$RUNNER_TEMP/site" "$RUNNER_TEMP/git"
+          cd "$RUNNER_TEMP/site"
+          printf '<h1>static ok</h1>\n' > index.html
+          printf 'SECRET=nope\n' > .env
+          git init -q -b main && git -c user.name=c -c user.email=c@c add -A && git -c user.name=c -c user.email=c@c commit -qm site
+          git clone -q --bare . "$RUNNER_TEMP/git/site.git" && git -C "$RUNNER_TEMP/git/site.git" update-server-info
+          (cd "$RUNNER_TEMP/git" && exec python3 -m http.server 7073 --bind 127.0.0.1) >/dev/null 2>&1 &
+          for i in $(seq 30); do curl -sf http://127.0.0.1:7073/site.git/HEAD >/dev/null && break; sleep 0.3; done
+          coldship deploy --name ci-site --git http://127.0.0.1:7073/site.git --ref main --domain ci-site.localhost
+          coldship status ci-site | grep -q static
+          test -z "$(docker ps -aq --filter name=coldship-ci-site)"
+          get() { curl -sk --resolve ci-site.localhost:443:127.0.0.1 "https://ci-site.localhost$1"; }
+          for i in $(seq 20); do get / | grep -q "static ok" && break; sleep 1; done
+          get / | grep -q "static ok"
+          get /some/client/route | grep -q "static ok"        # single-page-app fallback
+          test "$(curl -sk -o /dev/null -w '%{http_code}' --resolve ci-site.localhost:443:127.0.0.1 https://ci-site.localhost/.env)" != 200 ||
+            ! get /.env | grep -q SECRET
+          coldship delete ci-site --yes
       - name: Re-running the installer keeps the installation
         run: |
           COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh | tee "$RUNNER_TEMP/again.log"

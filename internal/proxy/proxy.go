@@ -21,12 +21,17 @@ import (
 	"github.com/dunkbing/coldship/internal/runtime"
 )
 
-// Route sends every listed domain to one upstream ("host:port").
+// Route sends every listed domain to one upstream ("host:port"), or, for a
+// static site, serves the files in Root (a path under SitesDir).
 type Route struct {
 	App      string
 	Domains  []string
 	Upstream string
+	Root     string
 }
+
+// sitesInContainer is where SitesDir appears inside the proxy container.
+const sitesInContainer = "/etc/coldship/sites"
 
 type Proxy interface {
 	// Ensure starts the proxy container (and network) if needed.
@@ -34,6 +39,9 @@ type Proxy interface {
 	// Apply replaces the whole route table.
 	Apply(ctx context.Context, routes []Route) error
 	Status(ctx context.Context) Status
+	// SitesDir is the host directory the proxy serves static sites from,
+	// or "" if it can't.
+	SitesDir() string
 }
 
 type Status struct {
@@ -151,6 +159,16 @@ func (c *Caddy) Status(ctx context.Context) Status {
 	return st
 }
 
+// SitesDir is inside the config directory, which the container already
+// mounts, so adding a site never needs a new container.
+func (c *Caddy) SitesDir() string {
+	abs, err := filepath.Abs(filepath.Join(c.ConfigDir, "sites"))
+	if err != nil {
+		return ""
+	}
+	return abs
+}
+
 // write renders the config and replaces caddy.json atomically.
 func (c *Caddy) write(routes []Route) error {
 	b, err := json.MarshalIndent(Config(routes, c.Email), "", "  ")
@@ -171,6 +189,30 @@ func (c *Caddy) write(routes []Route) error {
 	return os.Rename(tmp.Name(), filepath.Join(c.ConfigDir, "caddy.json"))
 }
 
+// staticHandler serves files from root like the nginx config Coldship used
+// for static sites: the file, else the directory's index, else /index.html
+// (so single-page apps handle their own routes), compressed.
+func staticHandler(root string) []any {
+	return []any{map[string]any{
+		"handler": "subroute",
+		"routes": []any{
+			map[string]any{
+				"match": []any{map[string]any{"file": map[string]any{
+					"root":      root,
+					"try_files": []string{"{http.request.uri.path}", "{http.request.uri.path}/", "/index.html"},
+				}}},
+				"handle": []any{map[string]any{"handler": "rewrite", "uri": "{http.matchers.file.relative}"}},
+			},
+			map[string]any{
+				"handle": []any{
+					map[string]any{"handler": "encode", "encodings": map[string]any{"zstd": map[string]any{}, "gzip": map[string]any{}}, "prefer": []string{"zstd", "gzip"}},
+					map[string]any{"handler": "file_server", "root": root},
+				},
+			},
+		},
+	}}
+}
+
 // Config renders Caddy's JSON config. Routes are sorted so the output is
 // stable. Unknown hosts get a plain 404.
 func Config(routes []Route, email string) map[string]any {
@@ -178,16 +220,20 @@ func Config(routes []Route, email string) map[string]any {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].App < sorted[j].App })
 	var rs []any
 	for _, r := range sorted {
-		if len(r.Domains) == 0 || r.Upstream == "" {
+		if len(r.Domains) == 0 || (r.Upstream == "" && r.Root == "") {
 			continue
 		}
+		handle := []any{map[string]any{
+			"handler":   "reverse_proxy",
+			"upstreams": []any{map[string]any{"dial": r.Upstream}},
+		}}
+		if r.Root != "" {
+			handle = staticHandler(sitesInContainer + "/" + r.Root)
+		}
 		rs = append(rs, map[string]any{
-			"@id":   "app-" + r.App,
-			"match": []any{map[string]any{"host": r.Domains}},
-			"handle": []any{map[string]any{
-				"handler":   "reverse_proxy",
-				"upstreams": []any{map[string]any{"dial": r.Upstream}},
-			}},
+			"@id":      "app-" + r.App,
+			"match":    []any{map[string]any{"host": r.Domains}},
+			"handle":   handle,
 			"terminal": true,
 		})
 	}
@@ -221,6 +267,22 @@ type Fake struct {
 	Routes   []Route
 	Applies  int
 	FailNext error
+	// Sites is the static sites directory; "" means no static sites.
+	Sites string
+}
+
+func (f *Fake) SitesDir() string { return f.Sites }
+
+// Root returns the static site root routed for app, or "".
+func (f *Fake) Root(app string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.Routes {
+		if r.App == app {
+			return r.Root
+		}
+	}
+	return ""
 }
 
 func (f *Fake) Ensure(context.Context) error { return nil }

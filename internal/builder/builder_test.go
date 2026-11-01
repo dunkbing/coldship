@@ -130,7 +130,7 @@ func TestBuild(t *testing.T) {
 	b := spec.Build{Git: repo, Commit: commit, Context: "services/api", Dockerfile: "Dockerfile", Args: map[string]string{"VERSION": "1.2"}}
 	log := NewLogTail(100)
 
-	res, err := g.Build(context.Background(), "api", b, log)
+	res, err := g.Build(context.Background(), "api", b, log, BuildOptions{})
 	if err != nil {
 		t.Fatalf("build: %v\n%s", err, strings.Join(log.Lines(), "\n"))
 	}
@@ -158,7 +158,7 @@ func TestBuildMissingDockerfileSuggestsOne(t *testing.T) {
 	repo := newRepo(t, map[string]string{"package.json": "{}", "deploy/web.Dockerfile": "FROM scratch\n"})
 	commit := gitRun(t, repo, "rev-parse", "HEAD")
 	g, _ := testBuilder(t)
-	_, err := g.Build(context.Background(), "web", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile", Builder: spec.BuilderDockerfile}, NewLogTail(10))
+	_, err := g.Build(context.Background(), "web", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile", Builder: spec.BuilderDockerfile}, NewLogTail(10), BuildOptions{})
 	ae, _ := apierr.As(err)
 	if code(err) != "dockerfile_not_found" || !strings.Contains(ae.Message, "Node.js") {
 		t.Fatalf("want dockerfile_not_found mentioning Node.js, got %v", err)
@@ -178,7 +178,7 @@ func TestBuildRejectsSymlinkEscape(t *testing.T) {
 	gitRun(t, repo, "commit", "-q", "-m", "symlink")
 	commit := gitRun(t, repo, "rev-parse", "HEAD")
 	g, argsFile := testBuilder(t)
-	_, err := g.Build(context.Background(), "x", spec.Build{Git: repo, Commit: commit, Context: "ctx", Dockerfile: "Dockerfile"}, NewLogTail(10))
+	_, err := g.Build(context.Background(), "x", spec.Build{Git: repo, Commit: commit, Context: "ctx", Dockerfile: "Dockerfile"}, NewLogTail(10), BuildOptions{})
 	if code(err) != "invalid_spec" {
 		t.Fatalf("a context symlinked outside the repo must be refused, got %v", err)
 	}
@@ -190,7 +190,7 @@ func TestBuildRejectsSymlinkEscape(t *testing.T) {
 func TestBuildUnknownCommit(t *testing.T) {
 	repo := newRepo(t, map[string]string{"Dockerfile": "FROM scratch\n"})
 	g, _ := testBuilder(t)
-	_, err := g.Build(context.Background(), "x", spec.Build{Git: repo, Commit: strings.Repeat("a", 40), Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10))
+	_, err := g.Build(context.Background(), "x", spec.Build{Git: repo, Commit: strings.Repeat("a", 40), Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10), BuildOptions{})
 	if code(err) != "git_commit_not_found" {
 		t.Fatalf("want git_commit_not_found, got %v", err)
 	}
@@ -234,7 +234,7 @@ func TestAutoBuildGeneratesDockerfileOutsideCheckout(t *testing.T) {
 	commit := gitRun(t, repo, "rev-parse", "HEAD")
 	g, out := stubDockerCopyingDockerfile(t)
 	log := NewLogTail(200)
-	res, err := g.Build(context.Background(), "web", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, log)
+	res, err := g.Build(context.Background(), "web", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, log, BuildOptions{})
 	if err != nil {
 		t.Fatalf("%v\n%s", err, strings.Join(log.Lines(), "\n"))
 	}
@@ -282,7 +282,7 @@ func TestAutoBuildRefusesSymlinkedProjectFiles(t *testing.T) {
 	gitRun(t, repo, "commit", "-q", "-m", "symlink")
 	commit := gitRun(t, repo, "rev-parse", "HEAD")
 	g, out := stubDockerCopyingDockerfile(t)
-	_, err := g.Build(context.Background(), "x", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10))
+	_, err := g.Build(context.Background(), "x", spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10), BuildOptions{})
 	if code(err) != "build_detect_failed" {
 		t.Fatalf("a symlinked package.json must not be used, got %v", err)
 	}
