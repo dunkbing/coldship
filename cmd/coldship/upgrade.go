@@ -83,6 +83,10 @@ func upgradeCmd() *cobra.Command {
 				})
 			}
 			st, err := c.SystemUpgrade(cmd.Context())
+			if ae, ok := apierr.As(err); ok && ae.Code == "server_unreachable" {
+				return ae.WithHint("`coldship upgrade` asks a running server to upgrade itself. " +
+					"With the server stopped, update this binary with `coldship self-update`, then start the server again")
+			}
 			if err != nil {
 				return err
 			}
