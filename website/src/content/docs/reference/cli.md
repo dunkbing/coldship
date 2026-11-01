@@ -61,10 +61,12 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 
 | Command | Description |
 |---|---|
+| `coldship deploy [flags]` | Deploy without a config file. Inside a Git repository with no `--name`, deploys that repository (current branch) as an app named after the folder. Flags: `--name`, `--image` or `--git`/`--ref`, `--port` (detected for Git builds), `--host-port`, `--domain`/`--remove-domain`, `--env K=V`/`--unset-env K`, `--db postgres[:name]`, `--volume name:/path`, `--memory`, `--production`, `--redeploy`, `--reason`. Each flag changes only what it names; the rest of the app, secrets included, stays. Stops with exit 3 if approval is needed. |
+| `coldship deploy -f coldship.yaml [--redeploy]` | Deploy a spec file describing the whole app. Used by default when `./coldship.yaml` exists and no app flags are given. |
+| `coldship export <app>` | The app's spec as YAML. Secrets show as `<redacted>`, which deploying the file keeps as they are. |
 | `coldship plan [-f coldship.yaml] [--redeploy]` | Dry run of a spec. Defaults to `./coldship.yaml`. |
 | `coldship plan --delete <app>` | Dry run of deleting an app |
 | `coldship apply <plan-id> --reason "..."` | Apply a reviewed plan |
-| `coldship deploy [-f coldship.yaml] --reason "..." [--redeploy]` | Plan and apply in one step. Stops with exit 3 if approval is needed. |
 | `coldship approve <plan-id>` | Approve a plan (admin token) |
 | `coldship rollback <app> --reason "..." [--to <deployment-id>]` | Redeploy the last good or a specific deployment |
 

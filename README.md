@@ -6,7 +6,7 @@ Deploy apps to your own server, from a container image or straight from Git. You
 (Claude Code or any MCP client) can deploy, debug and roll back on its own. Anything destructive,
 like deleting production data, waits for your approval.
 
-- **Plan, then apply:** every change is previewed first, and nothing happens without a reason on record
+- **One command to deploy:** no config files to learn; every change is still recorded in an audit log
 - **Your approval for risky changes:** destructive production changes need a human
 - **Deploy from Git:** with or without a Dockerfile (Node, Bun, Python, Go, static sites)
 - **Domains and HTTPS:** automatic certificates, zero-downtime deploys
@@ -48,30 +48,23 @@ The dashboard is at http://127.0.0.1:7070.
 
 ## Deploy an app
 
-Create `coldship.yaml`:
-
-```yaml
-name: hello
-image: nginx:1.27-alpine
-port: 80
-domains: [hello.example.com]   # point this domain's DNS at your server
-```
-
-Then:
+No config file needed. Inside a Git repository:
 
 ```sh
-coldship deploy --reason "first deploy"
+coldship deploy --domain web.example.com   # point the domain's DNS at your server
 ```
 
-To build from a Git repository instead of an image:
+Coldship names the app after the folder, builds your current branch (with or without a Dockerfile)
+and serves it with HTTPS. Or deploy an image:
 
-```yaml
-name: web
-port: 3000
-domains: [web.example.com]
-build:
-  git: https://github.com/you/web.git
-  ref: main
+```sh
+coldship deploy --name hello --image nginx:1.27-alpine --port 80 --domain hello.example.com
+```
+
+Change things the same way. Each flag changes only what it names:
+
+```sh
+coldship deploy --name hello --env API_KEY=... --db postgres
 ```
 
 ## Let your agent use it
@@ -88,7 +81,7 @@ Add Coldship to Claude Code:
 claude mcp add coldship -e COLDSHIP_URL=http://127.0.0.1:7070 -e COLDSHIP_TOKEN=cst_... -- coldship mcp
 ```
 
-Then ask it something like: *"Deploy coldship.yaml, and if it fails, figure out why and fix it."*
+Then ask it something like: *"Deploy this repo to web.example.com with a Postgres database, and if it fails, figure out why and fix it."*
 
 ## Everyday commands
 
@@ -98,6 +91,7 @@ coldship diagnose web               # what's wrong, and how to fix it
 coldship logs web                   # recent logs
 coldship rollback web --reason ...  # back to the last good version
 coldship approve <plan-id>          # approve a risky change
+coldship export web > coldship.yaml # the app as a config file, if you want one in Git
 ```
 
 ## Documentation

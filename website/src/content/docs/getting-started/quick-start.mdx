@@ -1,6 +1,6 @@
 ---
 title: Quick start
-description: Build Coldship, start the server, deploy your first app and open the dashboard.
+description: Install Coldship, start the server, deploy your first app and open the dashboard.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components'
@@ -43,41 +43,28 @@ import { Steps, Aside } from '@astrojs/starlight/components'
    export COLDSHIP_TOKEN=cst_3f9c...
    ```
 
-4. **Write a spec.** Save this as `coldship.yaml`:
-
-   ```yaml
-   name: hello
-   stage: staging
-   image: nginx:1.27-alpine
-   port: 80
-   host_port: 8080
-   env:
-     GREETING: hello from coldship
-   ```
-
-5. **Plan it.** Planning is a dry run that changes nothing.
+4. **Deploy an app.** No config file needed:
 
    ```sh
-   coldship plan -f coldship.yaml
-   ```
-
-   ```txt
-   Plan plan_692da65cccbb for app "hello" (create)
-     + app: hello
-   Destructive: no  Downtime: no  Requires approval: no
-   Next: Review the changes, then apply plan plan_692da65cccbb with a reason.
-   ```
-
-6. **Apply it.** Every apply needs a reason, which goes in the audit log.
-
-   ```sh
-   coldship apply plan_692da65cccbb --reason "first deploy"
+   coldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8080
    curl http://127.0.0.1:8080
    ```
 
-   `coldship deploy -f coldship.yaml --reason "..."` does plan and apply in one step. It stops if the plan needs approval.
+   Or, inside one of your Git repositories, just:
 
-7. **Open the dashboard** at [http://127.0.0.1:7070](http://127.0.0.1:7070) and sign in with the admin token.
+   ```sh
+   coldship deploy --domain hello.example.com
+   ```
+
+   Coldship names the app after the folder, builds your current branch (with or without a Dockerfile) and serves it on the domain with HTTPS.
+
+5. **Change it.** Flags change only what they name; everything else, secrets included, stays:
+
+   ```sh
+   coldship deploy --name hello --env GREETING=hi --db postgres
+   ```
+
+6. **Open the dashboard** at [http://127.0.0.1:7070](http://127.0.0.1:7070) and sign in with the admin token.
 
 </Steps>
 
@@ -86,8 +73,8 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 ## Next steps
 
 - [Connect an AI agent](/guides/ai-agents/) with its own deploy-scoped token.
-- Learn how [plans and approvals](/concepts/plan-and-apply/) work.
-- Read the [spec reference](/reference/spec/).
+- Learn how [approvals](/concepts/plan-and-apply/) keep agents from breaking production.
+- Prefer config in Git? `coldship export hello > coldship.yaml` writes the [spec](/reference/spec/), and `coldship deploy -f coldship.yaml` deploys it.
 
 <Aside type="caution">
   The server binds to localhost by default. Before exposing it on a network, read [Running in production](/guides/production/).

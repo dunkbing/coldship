@@ -35,6 +35,18 @@ labels=$(docker inspect -f '{{index .Config.Labels "coldship.app"}}|{{index .Con
 [ "$labels" = "smoke-web|" ] || fail "app container labels read as '$labels', want 'smoke-web|'"
 [ -z "$(docker ps -aq --filter name='^coldship-smoke-web-next$')" ] || fail "-next container left behind"
 
+echo "==> zero-config deploy from flags, then change one env var"
+"$H" deploy --name smoke-flags --image nginx:1.27-alpine --port 80 --env SECRET=s3cret --env MODE=a >/dev/null || fail "flag deploy"
+"$H" deploy --name smoke-flags --env MODE=b >/dev/null || fail "flag env update"
+env=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' coldship-smoke-flags)
+echo "$env" | grep -qx 'SECRET=s3cret' || fail "secret lost by an env-only update"
+echo "$env" | grep -qx 'MODE=b' || fail "env update not applied"
+"$H" export smoke-flags > "$WORK/exported.yaml" || fail "export"
+grep -q 'SECRET: <redacted>' "$WORK/exported.yaml" || fail "export should redact secrets"
+"$H" deploy -f "$WORK/exported.yaml" --redeploy >/dev/null || fail "deploy the exported spec"
+docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' coldship-smoke-flags | grep -qx 'SECRET=s3cret' ||
+  fail "deploying an exported spec must keep redacted secrets"
+
 echo "==> recreate deploy (host_port)"
 HP=$(spec hp $'name: smoke-hp\nimage: nginx:1.27-alpine\nport: 80\nhost_port: 18080\n')
 "$H" deploy -f "$HP" --reason smoke >/dev/null || fail "deploy smoke-hp"
@@ -55,7 +67,7 @@ if "$H" deploy -f "$SQ" --reason smoke >/dev/null 2>&1; then fail "deploy replac
 docker inspect coldship-smoke-squatter >/dev/null 2>&1 || fail "unlabeled container was removed"
 
 echo "==> delete"
-for app in smoke-web smoke-hp smoke-db; do
+for app in smoke-web smoke-flags smoke-hp smoke-db; do
   id=$("$H" plan --delete "$app" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
   "$H" apply "$id" --reason smoke >/dev/null || fail "delete $app"
 done

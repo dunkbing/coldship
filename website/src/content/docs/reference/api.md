@@ -38,7 +38,7 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/previews` | deploy | Create or update a preview: `{app, ref?, image?, name?, ttl?, env?, inherit_env?, reason?}` |
 | `GET` | `/v1/previews` | read | List previews |
 | `DELETE` | `/v1/previews/{name}?reason=...` | deploy | Delete a preview |
-| `POST` | `/v1/plans` | deploy | Body `{spec}`, `{delete: "<app>"}` or `{restore: {app, database, snapshot}}`, optionally `redeploy: true` |
+| `POST` | `/v1/plans` | deploy | Body `{spec}`, `{patch}`, `{delete: "<app>"}` or `{restore: {app, database, snapshot}}`, optionally `redeploy: true`. A `patch` (`{name, image?, build?, port?, env?, unset_env?, add_domains?, remove_domains?, add_databases?, add_volumes?, stage?, ...}`) changes only what it names and creates the app if needed. In a `spec`, an env value of `<redacted>` keeps the current value. |
 | `GET` | `/v1/plans?status=pending&limit=50` | read | List plans. `status` is `pending`, `applied` or `expired` |
 | `GET` | `/v1/plans/{id}` | read | One plan |
 | `POST` | `/v1/plans/{id}/apply` | deploy | Body `{reason}`. Idempotent. |

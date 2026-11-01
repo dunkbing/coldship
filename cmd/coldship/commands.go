@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/engine"
 	"github.com/dunkbing/coldship/internal/planner"
 	"github.com/dunkbing/coldship/internal/spec"
@@ -74,51 +73,6 @@ func applyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&reason, "reason", "", "why (recorded in the audit log)")
-	cmd.MarkFlagRequired("reason")
-	return cmd
-}
-
-func deployCmd() *cobra.Command {
-	var file, reason string
-	var redeploy bool
-	cmd := &cobra.Command{
-		Use:   "deploy",
-		Short: "Plan and apply a spec in one step (stops if human approval is needed)",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			req, err := planRequestFromFlags(file, "", redeploy)
-			if err != nil {
-				return err
-			}
-			c := newClient()
-			p, err := c.Plan(cmd.Context(), req)
-			if err != nil {
-				return err
-			}
-			if p.RequiresApproval {
-				if !flagJSON {
-					printPlan(p)
-				}
-				return apierr.New(403, "approval_required", "plan %s needs human approval before it can be applied", p.ID).
-					WithHint("review it, run `coldship approve " + p.ID + "`, then `coldship apply " + p.ID + " --reason ...`")
-			}
-			if p.Action == "noop" {
-				return emit(p, func() { fmt.Println("Nothing to do: app already matches the spec.") })
-			}
-			if !flagJSON {
-				printPlan(p)
-				fmt.Println()
-			}
-			res, err := c.Apply(cmd.Context(), p.ID, reason)
-			if err != nil {
-				return err
-			}
-			return emit(res, func() { printApply(res) })
-		},
-	}
-	cmd.Flags().StringVarP(&file, "file", "f", "", "spec file (default coldship.yaml)")
-	cmd.Flags().StringVar(&reason, "reason", "", "why (recorded in the audit log)")
-	cmd.Flags().BoolVar(&redeploy, "redeploy", false, "recreate the container even if nothing changed")
 	cmd.MarkFlagRequired("reason")
 	return cmd
 }

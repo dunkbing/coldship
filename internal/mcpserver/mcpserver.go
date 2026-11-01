@@ -55,12 +55,13 @@ func New(c *client.Client, version string) *mcp.Server {
 		Delete   string                 `json:"delete,omitempty" jsonschema:"name of an app to delete (instead of spec)"`
 		Redeploy bool                   `json:"redeploy,omitempty" jsonschema:"recreate the container even if the spec is unchanged"`
 		Restore  *engine.RestoreRequest `json:"restore,omitempty" jsonschema:"plan restoring a database from a snapshot: {app, database, snapshot}. Destructive; production restores need human approval"`
+		Patch    *spec.Patch            `json:"patch,omitempty" jsonschema:"change only some fields of an app (or create it): {name, image or build, port, env, unset_env, add_domains, add_databases, ...}. Everything not named, including secrets, is kept. Prefer this over spec for small changes"`
 	}
 	mcp.AddTool(s, &mcp.Tool{Name: "coldship_plan",
-		Description: "Dry run: compute what would change to make an app match a spec (or to delete it). Changes nothing. Returns a plan id, the changes, and whether they are destructive or need human approval.",
+		Description: "Dry run: compute what would change to make an app match a spec, apply a patch of a few fields, or delete it. Changes nothing. Returns a plan id, the changes, and whether they are destructive or need human approval.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: &f, IdempotentHint: true}},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in planArgs) (*mcp.CallToolResult, any, error) {
-			return result(c.Plan(ctx, engine.PlanRequest{Spec: in.Spec, Delete: in.Delete, Redeploy: in.Redeploy, Restore: in.Restore}))
+			return result(c.Plan(ctx, engine.PlanRequest{Spec: in.Spec, Patch: in.Patch, Delete: in.Delete, Redeploy: in.Redeploy, Restore: in.Restore}))
 		})
 
 	type planID struct {

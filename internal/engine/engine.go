@@ -109,6 +109,71 @@ func (e *Engine) routeList() []proxy.Route {
 }
 
 // checkDomains rejects domains already routed to another app.
+// keepRedacted replaces env values that are the redaction marker (from a
+// spec copied out of get_app or coldship export) with the current values.
+func keepRedacted(desired, current *spec.App) error {
+	if desired == nil {
+		return nil
+	}
+	for k, v := range desired.Env {
+		if v != spec.RedactedValue {
+			continue
+		}
+		if current == nil || current.Env[k] == "" {
+			return apierr.Invalid("env."+k, "env %s is %s, but the app has no current value to keep; set the real value", k, spec.RedactedValue)
+		}
+		desired.Env[k] = current.Env[k]
+	}
+	return nil
+}
+
+// specFromPatch merges a patch into the app's current spec. For an app built
+// from Git with no port, the port comes from build detection.
+func (e *Engine) specFromPatch(ctx context.Context, p *spec.Patch) (*spec.App, error) {
+	if !nameOK(p.Name) {
+		return nil, apierr.Invalid("name", "app name %q must be lowercase letters, digits and dashes, starting with a letter", p.Name)
+	}
+	app, err := e.st.GetApp(ctx, p.Name)
+	if err != nil {
+		return nil, err
+	}
+	var cur *spec.App
+	if app != nil {
+		if app.PreviewOf != "" {
+			return nil, apierr.New(400, "invalid_request", "%s is a preview; update it with coldship preview create", p.Name)
+		}
+		cur = app.Spec
+	}
+	s, err := p.Apply(cur)
+	if err != nil {
+		return nil, err
+	}
+	if s.Port == 0 && s.Build != nil {
+		// Detect on a copy without what needs a port, which wouldn't validate.
+		probe := s.Clone()
+		probe.Domains, probe.Health, probe.HostPort = nil, nil, 0
+		if res, err := e.DetectBuild(ctx, DetectRequest{Spec: probe}); err == nil {
+			s.Port = res.Detection.DefaultPort
+			if s.Port == 0 {
+				s.Port = exposedPort(res.Detection.Dockerfile)
+			}
+		}
+	}
+	return s, nil
+}
+
+var exposeRe = regexp.MustCompile(`(?mi)^\s*EXPOSE\s+(\d+)`)
+
+// exposedPort is the first port a Dockerfile EXPOSEs, or 0.
+func exposedPort(dockerfile string) int {
+	if m := exposeRe.FindStringSubmatch(dockerfile); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 && n < 65536 {
+			return n
+		}
+	}
+	return 0
+}
+
 // checkNames rejects an app whose Docker names (containers, network aliases,
 // volumes) match another app's, its own, or Coldship's. Without it, a preview
 // for branch db-main of app web would replace web's database container.
@@ -225,6 +290,9 @@ type PlanRequest struct {
 	Redeploy bool      `json:"redeploy,omitempty"`
 	// Restore plans restoring a database from a snapshot.
 	Restore *RestoreRequest `json:"restore,omitempty"`
+	// Patch changes an existing app, or creates one, without a full spec:
+	// the server merges it into the current spec.
+	Patch *spec.Patch `json:"patch,omitempty"`
 
 	// previewOf is set only by the preview code, never from a request: it
 	// allows stage: preview for a new preview of that app.
@@ -267,6 +335,16 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 			return nil, apierr.New(400, "invalid_request", "a restore plan takes only restore")
 		}
 		return e.restorePlan(ctx, actor, req.Restore)
+	}
+	if req.Patch != nil {
+		if req.Spec != nil || req.Delete != "" {
+			return nil, apierr.New(400, "invalid_request", "give one of spec, patch or delete")
+		}
+		s, err := e.specFromPatch(ctx, req.Patch)
+		if err != nil {
+			return nil, err
+		}
+		req.Spec, req.Patch = s, nil
 	}
 	var name string
 	var desired *spec.App
@@ -323,6 +401,9 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 		(app == nil || (app.PreviewOf == "" && (current == nil || current.Stage != spec.StagePreview))) {
 		return nil, apierr.New(400, "invalid_spec", "stage: preview is only for previews made with coldship preview create").
 			WithField("stage").WithFix(map[string]any{"stage": "staging"})
+	}
+	if err := keepRedacted(desired, current); err != nil {
+		return nil, err
 	}
 	if current != nil && desired != nil {
 		for _, c := range current.Databases {

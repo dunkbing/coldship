@@ -9,7 +9,7 @@ description: The tools coldship mcp exposes to AI agents.
 |---|---|---|---|
 | `coldship_list_apps` | — | read-only | All apps with their redacted spec |
 | `coldship_get_app` | `app` | read-only | Spec, container status, latest deployment |
-| `coldship_plan` | `spec`, `delete` or `restore: {app, database, snapshot}`, optional `redeploy` | not destructive, idempotent | Dry run. Returns the plan id, changes, `destructive`, `requires_approval`, `next_step` |
+| `coldship_plan` | `spec`, `patch` (only the fields to change; secrets and everything else kept), `delete` or `restore: {app, database, snapshot}`, optional `redeploy` | not destructive, idempotent | Dry run. Returns the plan id, changes, `destructive`, `requires_approval`, `next_step` |
 | `coldship_get_plan` | `plan_id` | read-only | A plan and its status |
 | `coldship_apply` | `plan_id`, `reason` | destructive, idempotent | Apply a reviewed plan. Safe to retry. |
 | `coldship_rollback` | `app`, `reason`, optional `to_deployment` | destructive | Redeploy the last good or a specific deployment |

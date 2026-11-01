@@ -55,7 +55,7 @@ func (f *Fake) Build(_ context.Context, app string, b spec.Build, log io.Writer)
 
 func (f *Fake) Detect(_ context.Context, b spec.Build, _ io.Writer) (*Detection, error) {
 	if b.Builder == spec.BuilderAuto {
-		return &Detection{Mode: "auto", Language: "node", Version: "22", PackageManager: "npm", Start: "npm start",
+		return &Detection{Mode: "auto", Language: "node", Version: "22", PackageManager: "npm", Start: "npm start", DefaultPort: 3000,
 			Notes: []string{"language node: found package.json"}, Dockerfile: "FROM node:22-alpine\n"}, nil
 	}
 	return &Detection{Mode: "dockerfile", Notes: []string{"uses Dockerfile from the repository"}}, nil
