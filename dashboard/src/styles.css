@@ -891,10 +891,8 @@ textarea:focus {
   justify-content: center;
   flex: none;
   border-radius: 7px;
-  color: #fff;
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.02em;
+  background: #fff;
+  border: 1px solid var(--border);
 }
 .data-name {
   display: inline-flex;
