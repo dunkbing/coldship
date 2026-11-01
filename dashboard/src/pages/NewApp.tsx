@@ -1,8 +1,17 @@
 import { LiveLog } from '../components/LiveLog'
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Box, GitBranch, Info, Loader2 } from 'lucide-react'
 import { api, type Patch, type Plan } from '../api'
-import { ErrorBox } from '@/components/common'
+import { ErrorBox, PageHeader } from '@/components/common'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 
 // nameFrom suggests an app name: https://github.com/acme/web-shop.git ->
 // web-shop, ghcr.io/acme/api:1.2 -> api.
@@ -17,6 +26,32 @@ function nameFrom(kind: 'git' | 'image', source: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^[^a-z]+|-+$/g, '')
     .slice(0, 40)
+}
+
+// Field is a label above a control, with an optional muted hint.
+function Field({ id, label, hint, className, children }: { id: string; label: string; hint?: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={className ?? 'grid gap-2'}>
+      <Label htmlFor={id} className="flex-wrap gap-x-1.5 gap-y-1 leading-snug">
+        {label}
+        {hint && <span className="font-normal text-muted-foreground">({hint})</span>}
+      </Label>
+      {children}
+    </div>
+  )
+}
+
+// Check is a checkbox with a label and a muted note beside it.
+function Check({ id, label, note, checked, onChange }: { id: string; label: string; note: ReactNode; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <Checkbox id={id} checked={checked} onCheckedChange={(v) => onChange(v === true)} className="mt-0.5" />
+      <Label htmlFor={id} className="flex-wrap gap-x-2 gap-y-1 leading-snug font-normal">
+        <span className="font-medium">{label}</span>
+        <span className="text-xs text-muted-foreground">{note}</span>
+      </Label>
+    </div>
+  )
 }
 
 function parseEnv(text: string): Record<string, string> | string {
@@ -104,144 +139,160 @@ export default function NewApp() {
   if (launched) {
     return (
       <>
-        <header className="page-head">
-          <div>
-            <h1>Launching {launched.app}</h1>
-            <p className="muted">Building and starting it. The log updates as it goes.</p>
-          </div>
-        </header>
-        <section className="card">
-          {launched.deployment ? (
-            <LiveLog deployment={launched.deployment} onEnd={(s) => setLaunched((l) => (l ? { ...l, status: s } : l))} />
-          ) : (
-            <div className="muted">Starting…</div>
-          )}
-          {launched.error && <ErrorBox error={launched.error} />}
-          {launched.status && (
-            <div className="inline" style={{ marginTop: 12 }}>
-              <Link className="btn btn-primary" to={`/apps/${launched.app}`}>
-                {launched.status === 'running' ? `Open ${launched.app}` : `See what went wrong in ${launched.app}`}
-              </Link>
-              {launched.status !== 'running' && (
-                <button className="btn btn-ghost" onClick={() => setLaunched(undefined)}>
-                  Back to the form
-                </button>
-              )}
-            </div>
-          )}
-        </section>
+        <PageHeader title={`Launching ${launched.app}`} description="Building and starting it. The log updates as it goes." />
+        <Card>
+          <CardContent className="space-y-3">
+            {launched.deployment ? (
+              <LiveLog deployment={launched.deployment} onEnd={(s) => setLaunched((l) => (l ? { ...l, status: s } : l))} />
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+                Starting…
+              </div>
+            )}
+            {launched.error && <ErrorBox error={launched.error} />}
+            {launched.status && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button asChild>
+                  <Link to={`/apps/${launched.app}`}>
+                    {launched.status === 'running' ? `Open ${launched.app}` : `See what went wrong in ${launched.app}`}
+                  </Link>
+                </Button>
+                {launched.status !== 'running' && (
+                  <Button variant="ghost" onClick={() => setLaunched(undefined)}>
+                    Back to the form
+                  </Button>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </>
     )
   }
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1>New app</h1>
-          <p className="muted">Deploy from a Git repository (with or without a Dockerfile) or a container image.</p>
-        </div>
-      </header>
+      <PageHeader title="New app" description="Deploy from a Git repository (with or without a Dockerfile) or a container image." />
 
-      <form className="card form-card" onSubmit={submit}>
-        <div className="tabs" role="tablist">
-          <button type="button" className={kind === 'git' ? 'active' : ''} onClick={() => setKind('git')}>
-            Git repository
-          </button>
-          <button type="button" className={kind === 'image' ? 'active' : ''} onClick={() => setKind('image')}>
-            Container image
-          </button>
-        </div>
+      <Card className="max-w-2xl">
+        <CardContent>
+          <form className="grid gap-5" onSubmit={submit}>
+            <Tabs value={kind} onValueChange={(v) => setKind(v as 'git' | 'image')}>
+              <TabsList>
+                <TabsTrigger value="git">
+                  <GitBranch /> Git repository
+                </TabsTrigger>
+                <TabsTrigger value="image">
+                  <Box /> Container image
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-        <div className="form-row">
-          <label className="field grow">
-            <span>{kind === 'git' ? 'Repository URL' : 'Image'}</span>
-            <input
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder={kind === 'git' ? 'https://github.com/you/app.git' : 'nginx:1.27-alpine'}
-              required
-              autoFocus
+            <div className="grid gap-4 sm:grid-cols-[1fr_12rem]">
+              <Field id="source" label={kind === 'git' ? 'Repository URL' : 'Image'} className={kind === 'git' ? 'grid gap-2' : 'grid gap-2 sm:col-span-2'}>
+                <Input
+                  id="source"
+                  className="font-mono"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                  placeholder={kind === 'git' ? 'https://github.com/you/app.git' : 'nginx:1.27-alpine'}
+                  required
+                  autoFocus
+                />
+              </Field>
+              {kind === 'git' && (
+                <Field id="ref" label="Branch">
+                  <Input id="ref" className="font-mono" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="default branch" />
+                </Field>
+              )}
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-[1fr_12rem]">
+              <Field id="name" label="Name">
+                <Input
+                  id="name"
+                  className="font-mono"
+                  value={appName}
+                  onChange={(e) => {
+                    setNameTouched(true)
+                    setName(e.target.value)
+                  }}
+                  placeholder="web"
+                  pattern="[a-z][a-z0-9-]{0,39}"
+                  title="lowercase letters, digits and dashes, starting with a letter"
+                  required
+                />
+              </Field>
+              <Field id="port" label="Port">
+                <Input
+                  id="port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={port}
+                  onChange={(e) => setPort(e.target.value)}
+                  placeholder="detected"
+                />
+              </Field>
+            </div>
+
+            <Field id="domain" label="Domain" hint="optional, gets HTTPS automatically">
+              <Input id="domain" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="app.example.com" />
+            </Field>
+
+            <Field id="env" label="Environment" hint="optional, one KEY=value per line; values are never shown again">
+              <Textarea
+                id="env"
+                className="font-mono"
+                value={envText}
+                onChange={(e) => setEnvText(e.target.value)}
+                rows={4}
+                spellCheck={false}
+                placeholder="API_KEY=…"
+              />
+            </Field>
+
+            <fieldset className="grid gap-3">
+              <legend className="mb-3 text-sm font-medium">Databases</legend>
+              <Check id="db-postgres" label="Postgres" note={<code className="font-mono">DATABASE_URL</code>} checked={postgres} onChange={setPostgres} />
+              <Check id="db-redis" label="Redis" note={<code className="font-mono">REDIS_URL</code>} checked={redis} onChange={setRedis} />
+            </fieldset>
+
+            <Check
+              id="production"
+              label="Production"
+              note="destructive changes (by you or an agent) will need an admin's approval"
+              checked={production}
+              onChange={setProduction}
             />
-          </label>
-          {kind === 'git' && (
-            <label className="field">
-              <span>Branch</span>
-              <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="default branch" />
-            </label>
-          )}
-        </div>
 
-        <div className="form-row">
-          <label className="field grow">
-            <span>Name</span>
-            <input
-              value={appName}
-              onChange={(e) => {
-                setNameTouched(true)
-                setName(e.target.value)
-              }}
-              placeholder="web"
-              pattern="[a-z][a-z0-9-]{0,39}"
-              title="lowercase letters, digits and dashes, starting with a letter"
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Port</span>
-            <input
-              type="number"
-              min={1}
-              max={65535}
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              placeholder="detected"
-            />
-          </label>
-        </div>
-
-        <label className="field">
-          <span>Domain <span className="muted">(optional, gets HTTPS automatically)</span></span>
-          <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="app.example.com" />
-        </label>
-
-        <label className="field">
-          <span>Environment <span className="muted">(optional, one KEY=value per line; values are never shown again)</span></span>
-          <textarea value={envText} onChange={(e) => setEnvText(e.target.value)} rows={4} spellCheck={false} placeholder="API_KEY=…" />
-        </label>
-
-        <fieldset className="checks">
-          <legend>Databases</legend>
-          <label>
-            <input type="checkbox" checked={postgres} onChange={(e) => setPostgres(e.target.checked)} /> Postgres{' '}
-            <span className="muted small">DATABASE_URL</span>
-          </label>
-          <label>
-            <input type="checkbox" checked={redis} onChange={(e) => setRedis(e.target.checked)} /> Redis{' '}
-            <span className="muted small">REDIS_URL</span>
-          </label>
-        </fieldset>
-
-        <label className="check">
-          <input type="checkbox" checked={production} onChange={(e) => setProduction(e.target.checked)} /> Production{' '}
-          <span className="muted small">destructive changes (by you or an agent) will need an admin's approval</span>
-        </label>
-
-        {error && <ErrorBox error={error} />}
-        {waiting && (
-          <div className="callout" role="status">
-            This change needs an admin's approval first. <Link to="/approvals">Review plan {waiting.id}</Link>
-          </div>
-        )}
-        <div className="inline">
-          <button className="btn btn-primary" disabled={busy || !source.trim() || !appName}>
-            {busy ? 'Deploying…' : 'Deploy'}
-          </button>
-          <Link className="btn btn-ghost" to="/apps">
-            Cancel
-          </Link>
-        </div>
-      </form>
+            {error && <ErrorBox error={error} />}
+            {waiting && (
+              <Alert role="status" className="bg-info-soft text-info">
+                <Info />
+                <AlertDescription className="text-info">
+                  <p>
+                    This change needs an admin's approval first.{' '}
+                    <Link className="font-medium underline underline-offset-4" to="/approvals">
+                      Review plan {waiting.id}
+                    </Link>
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" disabled={busy || !source.trim() || !appName}>
+                {busy && <Loader2 className="animate-spin" aria-hidden />}
+                {busy ? 'Deploying…' : 'Deploy'}
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link to="/apps">Cancel</Link>
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </>
   )
 }

@@ -1,24 +1,49 @@
 import { Link } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 import { api, type DataView } from '../api'
 import { useLoad } from '../hooks'
-import { Empty, ErrorBox, Time } from '@/components/common'
+import { Empty, ErrorBox, Mono, PageHeader, StatusDot, TableSkeleton, Time } from '@/components/common'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DataMark, dataKinds, envSummary } from '../components/data'
 
 function Status({ d }: { d: DataView }) {
-  if (d.status.running)
-    return (
-      <span className="pill health-healthy">
-        <span className="dot" aria-hidden />
-        Running
-      </span>
-    )
+  if (d.status.running) return <StatusDot dot="bg-ok" text="text-ok" label="Running" />
   return (
-    <span className="pill health-failing">
-      <span className="dot" aria-hidden />
-      {d.status.exists ? d.status.state || 'Stopped' : 'Missing'}
-    </span>
+    <StatusDot
+      dot="bg-destructive"
+      text="text-destructive"
+      label={d.status.exists ? d.status.state || 'Stopped' : 'Missing'}
+    />
   )
 }
+
+// Name cell: logo, name (optionally linked) and kind/version underneath.
+function NameCell({ d, link }: { d: DataView; link?: boolean }) {
+  const name = (
+    <span className="inline-flex items-center gap-2 font-medium">
+      <DataMark engine={d.engine} size={22} />
+      {d.name}
+    </span>
+  )
+  return (
+    <>
+      {link ? (
+        <Link className="hover:underline" to={`/data/${d.name}`}>
+          {name}
+        </Link>
+      ) : (
+        name
+      )}
+      <div className="text-xs text-muted-foreground">
+        {dataKinds[d.engine]?.label} {d.version}
+      </div>
+    </>
+  )
+}
+
+const linkClass = 'text-primary hover:underline'
 
 export default function Data() {
   const { data, error, loading } = useLoad(api.data, [], 5000)
@@ -27,27 +52,34 @@ export default function Data() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1>Data &amp; Storage</h1>
-          <p className="muted">Databases and object storage your apps connect to. Only reachable from Coldship's network.</p>
-        </div>
-        <Link className="btn btn-primary" to="/data/new">
-          Add
-        </Link>
-      </header>
+      <PageHeader
+        title="Data & Storage"
+        description="Databases and object storage your apps connect to. Only reachable from Coldship's network."
+        actions={
+          <Button asChild>
+            <Link to="/data/new">
+              <Plus />
+              Add
+            </Link>
+          </Button>
+        }
+      />
 
       {error && <ErrorBox error={error} />}
-      {loading && !data && <div className="muted">Loading…</div>}
+      {loading && !data && <TableSkeleton cols={5} />}
 
       {data && services.length === 0 && (
-        <div className="kind-grid">
+        <div className="mb-6 grid gap-3 md:grid-cols-2">
           {(Object.keys(dataKinds) as (keyof typeof dataKinds)[]).map((k) => (
-            <Link key={k} className="card kind-card" to={`/data/new?kind=${k}`}>
+            <Link
+              key={k}
+              to={`/data/new?kind=${k}`}
+              className="flex items-start gap-3 rounded-xl border bg-card p-4 transition-colors hover:border-primary hover:bg-accent/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            >
               <DataMark engine={k} />
-              <div>
-                <div className="kind-title">{dataKinds[k].label}</div>
-                <div className="muted small">{dataKinds[k].blurb}</div>
+              <div className="min-w-0">
+                <div className="font-medium">{dataKinds[k].label}</div>
+                <div className="text-sm text-muted-foreground">{dataKinds[k].blurb}</div>
               </div>
             </Link>
           ))}
@@ -55,99 +87,101 @@ export default function Data() {
       )}
 
       {services.length > 0 && (
-        <div className="card table-card">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Used by</th>
-                <th>Gives apps</th>
-                <th>Latest snapshot</th>
-              </tr>
-            </thead>
-            <tbody>
+        <Card className="py-0">
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow>
+                <TableHead className="px-4">Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Used by</TableHead>
+                <TableHead>Gives apps</TableHead>
+                <TableHead className="px-4">Latest snapshot</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {services.map((d) => (
-                <tr key={d.name}>
-                  <td>
-                    <Link className="row-link data-name" to={`/data/${d.name}`}>
-                      <DataMark engine={d.engine} size={22} />
-                      {d.name}
-                    </Link>
-                    <div className="muted small">
-                      {dataKinds[d.engine]?.label} {d.version}
-                    </div>
-                  </td>
-                  <td>
+                <TableRow key={d.name}>
+                  <TableCell className="px-4 py-3">
+                    <NameCell d={d} link />
+                  </TableCell>
+                  <TableCell>
                     <Status d={d} />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     {d.used_by.length === 0 ? (
-                      <span className="muted">—</span>
+                      <span className="text-muted-foreground">—</span>
                     ) : (
                       d.used_by.map((a, i) => (
                         <span key={a}>
                           {i > 0 && ', '}
-                          <Link to={`/apps/${a}`}>{a}</Link>
+                          <Link className={linkClass} to={`/apps/${a}`}>
+                            {a}
+                          </Link>
                         </span>
                       ))
                     )}
-                  </td>
-                  <td className="mono small">{envSummary(d.env)}</td>
-                  <td className="muted small">{d.latest_snapshot ? <Time iso={d.latest_snapshot.created_at} /> : '—'}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>
+                    <Mono className="text-xs">{envSummary(d.env)}</Mono>
+                  </TableCell>
+                  <TableCell className="px-4 text-muted-foreground">
+                    {d.latest_snapshot ? <Time iso={d.latest_snapshot.created_at} /> : '—'}
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
 
       {owned.length > 0 && (
-        <>
-          <h2 className="section-title">Databases owned by apps</h2>
-          <p className="muted small">Declared in an app's spec; they're deleted with the app (after a snapshot).</p>
-          <div className="card table-card">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Database</th>
-                  <th>App</th>
-                  <th>Status</th>
-                  <th>Gives the app</th>
-                  <th>Latest snapshot</th>
-                </tr>
-              </thead>
-              <tbody>
+        <section className="mt-8">
+          <h2 className="text-lg font-semibold">Databases owned by apps</h2>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Declared in an app's spec; they're deleted with the app (after a snapshot).
+          </p>
+          <Card className="py-0">
+            <Table>
+              <TableHeader className="bg-muted/50">
+                <TableRow>
+                  <TableHead className="px-4">Database</TableHead>
+                  <TableHead>App</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Gives the app</TableHead>
+                  <TableHead className="px-4">Latest snapshot</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {owned.map((d) => (
-                  <tr key={d.app + '/' + d.name}>
-                    <td>
-                      <span className="data-name">
-                        <DataMark engine={d.engine} size={22} />
-                        {d.name}
-                      </span>
-                      <div className="muted small">
-                        {dataKinds[d.engine]?.label} {d.version}
-                      </div>
-                    </td>
-                    <td>
-                      <Link to={`/apps/${d.app}`}>{d.app}</Link>
-                    </td>
-                    <td>
+                  <TableRow key={d.app + '/' + d.name}>
+                    <TableCell className="px-4 py-3">
+                      <NameCell d={d} />
+                    </TableCell>
+                    <TableCell>
+                      <Link className={linkClass} to={`/apps/${d.app}`}>
+                        {d.app}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
                       <Status d={d} />
-                    </td>
-                    <td className="mono small">{envSummary(d.env)}</td>
-                    <td className="muted small">{d.latest_snapshot ? <Time iso={d.latest_snapshot.created_at} /> : '—'}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>
+                      <Mono className="text-xs">{envSummary(d.env)}</Mono>
+                    </TableCell>
+                    <TableCell className="px-4 text-muted-foreground">
+                      {d.latest_snapshot ? <Time iso={d.latest_snapshot.created_at} /> : '—'}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+              </TableBody>
+            </Table>
+          </Card>
+        </section>
       )}
 
       {data && data.length === 0 && (
         <Empty title="No databases or storage yet">
-          Pick a kind above, or run <code>coldship data create postgres maindb</code>.
+          Pick a kind above, or run <Mono>coldship data create postgres maindb</Mono>.
         </Empty>
       )}
     </>

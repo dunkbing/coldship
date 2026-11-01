@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api, type SystemStatus } from '../api'
 import { useSession } from '../App'
+import { ArrowUpCircle, ExternalLink, Loader2 } from 'lucide-react'
 import { ErrorBox } from '@/components/common'
+import { Button } from '@/components/ui/button'
 
 const DISMISS_KEY = 'coldship.dismissed-update'
 
@@ -53,11 +55,11 @@ export default function UpdateBanner() {
   if (!st) return null
   if (upgradingTo) {
     return (
-      <div className="update-banner" role="status">
-        <span className="spinner" aria-hidden />
-        <div>
-          <strong>Upgrading Coldship to {upgradingTo}…</strong>
-          <div className="small muted">
+      <div className="mb-6 flex items-start gap-3 rounded-xl border bg-info-soft px-4 py-3 text-sm" role="status">
+        <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-info" aria-hidden />
+        <div className="min-w-0">
+          <strong className="font-semibold">Upgrading Coldship to {upgradingTo}…</strong>
+          <div className="text-xs text-muted-foreground">
             The server finishes running deployments, installs the new version and restarts. This page reloads when it is back.
           </div>
         </div>
@@ -83,29 +85,32 @@ export default function UpdateBanner() {
       : 'Automatic upgrades are off.'
 
   return (
-    <div className="update-banner" role="status">
-      <div className="update-text">
+    <div className="mb-6 flex flex-wrap items-start gap-3 rounded-xl border bg-info-soft px-4 py-3 text-sm" role="status">
+      <ArrowUpCircle className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
+      <div className="min-w-0 flex-1 basis-64 space-y-1">
         <div>
-          <strong>Coldship {st.latest} is available</strong> <span className="muted">(you are on {st.version}).</span> {how}
+          <strong className="font-semibold">Coldship {st.latest} is available</strong>{' '}
+          <span className="text-muted-foreground">(you are on {st.version}).</span> {how}
         </div>
-        {st.notes && <div className="small">{st.notes}</div>}
+        {st.notes && <div className="text-xs">{st.notes}</div>}
         {st.notes_url?.startsWith('https://') && (
-          <a className="small" href={st.notes_url} target="_blank" rel="noreferrer">
-            Release notes ↗
+          <a className="inline-flex items-center gap-1 text-xs font-medium text-info hover:underline" href={st.notes_url} target="_blank" rel="noreferrer">
+            Release notes <ExternalLink className="size-3" aria-hidden />
           </a>
         )}
         {error && <ErrorBox error={error} />}
       </div>
-      <div className="update-actions">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         {me.scope === 'admin' ? (
-          <button className="btn btn-primary btn-sm" onClick={upgrade}>
+          <Button size="sm" onClick={upgrade}>
             Upgrade now
-          </button>
+          </Button>
         ) : (
-          <span className="small muted">An admin can upgrade now.</span>
+          <span className="text-xs text-muted-foreground">An admin can upgrade now.</span>
         )}
-        <button
-          className="btn btn-ghost btn-sm"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => {
             try {
               localStorage.setItem(DISMISS_KEY, st.latest!)
@@ -116,7 +121,7 @@ export default function UpdateBanner() {
           }}
         >
           Dismiss
-        </button>
+        </Button>
       </div>
     </div>
   )

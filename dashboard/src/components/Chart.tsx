@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import { cn } from '@/lib/utils'
 
 export interface Series {
   name: string
-  slot: 1 | 2 // categorical slot: --series-1 (blue), --series-2 (orange)
+  slot: 1 | 2 // categorical slot: chart-1 (blue), chart-2 (orange)
   values: number[]
 }
 
@@ -21,6 +22,11 @@ function niceMax(max: number, binary = false): { top: number; step: number } {
 }
 
 const H = 150
+
+// Literal class names per slot, so Tailwind sees them.
+const stroke = { 1: 'stroke-chart-1', 2: 'stroke-chart-2' } as const
+const dot = { 1: 'fill-chart-1', 2: 'fill-chart-2' } as const
+const swatch = { 1: 'bg-chart-1', 2: 'bg-chart-2' } as const
 const PAD = { top: 10, right: 54, bottom: 22, left: 52 }
 
 // LineChart plots one measure over time: one or two series, one y-axis.
@@ -80,89 +86,116 @@ export function LineChart({
   }
 
   return (
-    <figure className="chart" ref={wrap}>
-      <figcaption className="chart-head">
-        <span className="chart-title">{title}</span>
+    <figure className="min-w-0 rounded-xl border bg-card p-4">
+      <figcaption className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+        <span className="font-medium">{title}</span>
         {series.length > 1 && (
-          <span className="chart-legend">
+          <span className="flex items-center gap-3 text-xs text-muted-foreground">
             {series.map((s) => (
-              <span key={s.name} className="legend-item">
-                <span className={`legend-swatch series-${s.slot}`} aria-hidden />
+              <span key={s.name} className="inline-flex items-center gap-1.5">
+                <span className={cn('inline-block h-0.5 w-3 rounded-full', swatch[s.slot])} aria-hidden />
                 {s.name}
               </span>
             ))}
           </span>
         )}
-        <span className="chart-now mono">{series.map((s, i) => (series.length > 1 ? `${s.name} ` : '') + format(last[i])).join(' · ')}</span>
+        <span className="ml-auto font-mono text-xs text-muted-foreground">
+          {series.map((s, i) => (series.length > 1 ? `${s.name} ` : '') + format(last[i])).join(' · ')}
+        </span>
       </figcaption>
-      {n < 2 ? (
-        <div className="chart-empty muted small">Collecting… a point every 15 seconds.</div>
-      ) : (
-        <svg width={w} height={H} role="img" aria-label={`${title}, last hour`}>
-          {ticks.map((t) => (
-            <g key={t}>
-              <line className="chart-grid" x1={PAD.left} x2={PAD.left + iw} y1={y(t)} y2={y(t)} />
-              <text className="chart-axis" x={PAD.left - 6} y={y(t) + 4} textAnchor="end">
-                {format(t)}
-              </text>
-            </g>
-          ))}
-          <text className="chart-axis" x={PAD.left} y={H - 4}>
-            {fmtTime(times[0])}
-          </text>
-          <text className="chart-axis" x={PAD.left + iw} y={H - 4} textAnchor="end">
-            {fmtTime(times[n - 1])}
-          </text>
-          {refLine && refLine.value <= top && (
-            <g>
-              <line className="chart-ref" x1={PAD.left} x2={PAD.left + iw} y1={y(refLine.value)} y2={y(refLine.value)} />
-              <text className="chart-axis" x={PAD.left + iw + 4} y={y(refLine.value) + 4}>
-                {refLine.label}
-              </text>
-            </g>
-          )}
-          {series.map((s) => (
-            <polyline
-              key={s.name}
-              className={`chart-line series-${s.slot}`}
-              points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')}
-            />
-          ))}
-          {series.length > 1 &&
-            series.map((s, i) => (
-              <text key={s.name} className="chart-label" x={PAD.left + iw + 4} y={labelY[i]}>
-                {s.name}
-              </text>
+      <div className="relative" ref={wrap}>
+        {n < 2 ? (
+          <div className="flex h-[150px] items-center justify-center text-sm text-muted-foreground">
+            Collecting… a point every 15 seconds.
+          </div>
+        ) : (
+          <svg width={w} height={H} role="img" aria-label={`${title}, last hour`} className="block overflow-visible text-[11px]">
+            {ticks.map((t) => (
+              <g key={t}>
+                <line className="stroke-border" x1={PAD.left} x2={PAD.left + iw} y1={y(t)} y2={y(t)} />
+                <text className="fill-muted-foreground" x={PAD.left - 6} y={y(t) + 4} textAnchor="end">
+                  {format(t)}
+                </text>
+              </g>
             ))}
-          {hover !== undefined && (
-            <g>
-              <line className="chart-cross" x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + ih} />
-              {series.map((s) => (
-                <circle key={s.name} className={`chart-dot series-${s.slot}`} cx={x(hover)} cy={y(s.values[hover] ?? 0)} r={4} />
+            <text className="fill-muted-foreground" x={PAD.left} y={H - 4}>
+              {fmtTime(times[0])}
+            </text>
+            <text className="fill-muted-foreground" x={PAD.left + iw} y={H - 4} textAnchor="end">
+              {fmtTime(times[n - 1])}
+            </text>
+            {refLine && refLine.value <= top && (
+              <g>
+                <line
+                  className="stroke-muted-foreground"
+                  strokeDasharray="4 3"
+                  x1={PAD.left}
+                  x2={PAD.left + iw}
+                  y1={y(refLine.value)}
+                  y2={y(refLine.value)}
+                />
+                <text className="fill-muted-foreground" x={PAD.left + iw + 4} y={y(refLine.value) + 4}>
+                  {refLine.label}
+                </text>
+              </g>
+            )}
+            {series.map((s) => (
+              <polyline
+                key={s.name}
+                className={cn('fill-none', stroke[s.slot])}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')}
+              />
+            ))}
+            {series.length > 1 &&
+              series.map((s, i) => (
+                <text key={s.name} className="fill-foreground font-medium" x={PAD.left + iw + 4} y={labelY[i]}>
+                  {s.name}
+                </text>
               ))}
-            </g>
-          )}
-          <rect
-            x={PAD.left}
-            y={PAD.top}
-            width={iw}
-            height={ih}
-            fill="transparent"
-            onMouseMove={onMove}
-            onMouseLeave={() => setHover(undefined)}
-          />
-        </svg>
-      )}
-      {hover !== undefined && n >= 2 && (
-        <div className="chart-tip" style={{ left: Math.min(x(hover) + 10, w - 170) }}>
-          <div className="muted small">{fmtTime(times[hover])}</div>
-          {series.map((s) => (
-            <div key={s.name} className="small">
-              <span className={`legend-swatch series-${s.slot}`} aria-hidden /> {s.name}: <b>{format(s.values[hover] ?? 0)}</b>
-            </div>
-          ))}
-        </div>
-      )}
+            {hover !== undefined && (
+              <g>
+                <line className="stroke-muted-foreground" x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + ih} />
+                {series.map((s) => (
+                  <circle
+                    key={s.name}
+                    className={cn('stroke-card', dot[s.slot])}
+                    strokeWidth={2}
+                    cx={x(hover)}
+                    cy={y(s.values[hover] ?? 0)}
+                    r={4}
+                  />
+                ))}
+              </g>
+            )}
+            <rect
+              x={PAD.left}
+              y={PAD.top}
+              width={iw}
+              height={ih}
+              fill="transparent"
+              onMouseMove={onMove}
+              onMouseLeave={() => setHover(undefined)}
+            />
+          </svg>
+        )}
+        {hover !== undefined && n >= 2 && (
+          <div
+            className="pointer-events-none absolute top-2 z-10 min-w-36 rounded-md border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md"
+            style={{ left: Math.max(0, Math.min(x(hover) + 10, w - 170)) }}
+          >
+            <div className="text-xs text-muted-foreground">{fmtTime(times[hover])}</div>
+            {series.map((s) => (
+              <div key={s.name} className="flex items-center gap-1.5 text-xs">
+                <span className={cn('inline-block size-2 rounded-full', swatch[s.slot])} aria-hidden /> {s.name}:{' '}
+                <b className="font-mono">{format(s.values[hover] ?? 0)}</b>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </figure>
   )
 }

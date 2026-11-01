@@ -1,6 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { api, type WhoAmI } from '../api'
+import { Loader2, Ship } from 'lucide-react'
 import { ErrorBox } from '@/components/common'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 export default function Login({ onLogin, initialError }: { onLogin: (w: WhoAmI) => void; initialError?: Error }) {
   const [token, setTok] = useState('')
@@ -23,38 +28,46 @@ export default function Login({ onLogin, initialError }: { onLogin: (w: WhoAmI) 
   }
 
   return (
-    <div className="login">
-      <form className="card login-card" onSubmit={submit}>
-        <div className="brand brand-lg">
-          <svg viewBox="0 0 32 32" width="32" height="32" aria-hidden>
-            <rect width="32" height="32" rx="7" fill="var(--accent)" />
-            <path d="M6 23V13l10-6 10 6v10h-4v-7H10v7z" fill="#fff" />
-          </svg>
-          <span>Coldship</span>
-        </div>
-        <p className="muted">
-          Sign in with an API token. Use an admin token to approve plans. The token is exchanged for a 12-hour session and is not
-          stored in the browser.
-        </p>
-        <label className="field">
-          <span>API token</span>
-          <input
-            type="password"
-            autoComplete="off"
-            placeholder="cst_…"
-            value={token}
-            onChange={(e) => setTok(e.target.value)}
-            autoFocus
-          />
-        </label>
-        {error && <ErrorBox error={error} />}
-        <button className="btn btn-primary" disabled={busy || !token.trim()}>
-          {busy ? 'Checking…' : 'Sign in'}
-        </button>
-        <p className="muted small">
-          The first admin token is printed when <code>coldship server</code> starts for the first time.
-        </p>
-      </form>
-    </div>
+    <main className="flex min-h-svh items-center justify-center bg-muted/40 px-4 py-10">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Ship className="size-5" aria-hidden />
+            </div>
+            <h1 className="text-xl font-semibold tracking-tight">Coldship</h1>
+          </div>
+          <CardDescription>
+            Sign in with an API token. Use an admin token to approve plans. The token is exchanged for a 12-hour session and is not
+            stored in the browser.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="grid gap-4" onSubmit={submit}>
+            <div className="grid gap-2">
+              <Label htmlFor="token">API token</Label>
+              <Input
+                id="token"
+                type="password"
+                autoComplete="off"
+                placeholder="cst_…"
+                className="font-mono"
+                value={token}
+                onChange={(e) => setTok(e.target.value)}
+                autoFocus
+              />
+            </div>
+            {error && <ErrorBox error={error} />}
+            <Button type="submit" size="lg" className="w-full" disabled={busy || !token.trim()}>
+              {busy && <Loader2 className="animate-spin" aria-hidden />}
+              {busy ? 'Checking…' : 'Sign in'}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              The first admin token is printed when <code className="font-mono">coldship server</code> starts for the first time.
+            </p>
+          </form>
+        </CardContent>
+      </Card>
+    </main>
   )
 }

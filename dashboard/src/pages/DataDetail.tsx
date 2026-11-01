@@ -2,26 +2,48 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { useLoad } from '../hooks'
-import { ErrorBox, Time } from '@/components/common'
+import { Check, Copy as CopyIcon } from 'lucide-react'
+import { ErrorBox, Mono, PageHeader, PageSkeleton, Time } from '@/components/common'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DataMark, dataKinds, envSummary } from '../components/data'
 import { useSession } from '../App'
 
 function Copy({ text }: { text: string }) {
   const [done, setDone] = useState(false)
   return (
-    <button
+    <Button
       type="button"
-      className="btn btn-ghost btn-sm"
+      variant="ghost"
+      size="sm"
+      className="shrink-0"
       onClick={() => {
         navigator.clipboard?.writeText(text)
         setDone(true)
         setTimeout(() => setDone(false), 1500)
       }}
     >
+      {done ? <Check className="text-ok" aria-hidden /> : <CopyIcon aria-hidden />}
       {done ? 'Copied' : 'Copy'}
-    </button>
+    </Button>
   )
 }
+
+// A line of code that scrolls inside its box, with a copy button.
+function CopyLine({ code, copy }: { code: string; copy: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border bg-muted/50 py-1 pr-1 pl-3">
+      <code className="min-w-0 flex-1 overflow-x-auto py-1 font-mono text-xs whitespace-nowrap">{code}</code>
+      <Copy text={copy} />
+    </div>
+  )
+}
+
+const linkClass = 'text-primary hover:underline'
 
 export default function DataDetail() {
   const { name = '' } = useParams()
@@ -54,177 +76,231 @@ export default function DataDetail() {
   }
 
   if (error) return <ErrorBox error={error} />
-  if (!d) return <div className="muted">Loading…</div>
+  if (!d) return <PageSkeleton kind="detail" />
   const kind = dataKinds[d.engine]
   const connectCmd = `coldship deploy --name <app> --use ${d.name}`
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <div className="muted small">
-            <Link to="/data">Data &amp; Storage</Link> /
-          </div>
-          <h1 className="data-name">
+      <PageHeader
+        crumbs={
+          <>
+            <Link className="hover:text-foreground hover:underline" to="/data">
+              Data &amp; Storage
+            </Link>{' '}
+            /
+          </>
+        }
+        title={
+          <>
             <DataMark engine={d.engine} />
-            {d.name}
-          </h1>
-          <p className="muted">
+            <span className="break-all">{d.name}</span>
+          </>
+        }
+        description={
+          <>
             {kind?.label} {d.version} · {d.status.running ? 'running' : d.status.state || 'not running'} · host{' '}
-            <code>{d.host}</code>
-          </p>
-        </div>
-      </header>
+            <Mono className="text-foreground">{d.host}</Mono>
+          </>
+        }
+      />
 
       {actionError && <ErrorBox error={actionError} />}
       {message && (
-        <div className="callout" role="status">
-          {message}
-        </div>
+        <Alert className="my-3 border-transparent bg-info-soft text-info" role="status">
+          <AlertDescription className="text-info">{message}</AlertDescription>
+        </Alert>
       )}
 
-      <div className="grid-2">
-        <section className="card">
-          <h2 className="card-title">Connect an app</h2>
-          <p className="muted small">
-            The app gets <code>{envSummary(d.env)}</code> on its next deploy.
-          </p>
-          <div className="copy-line">
-            <code>{connectCmd}</code>
-            <Copy text={connectCmd} />
-          </div>
-          <p className="muted small">
-            Used by:{' '}
-            {d.used_by.length === 0
-              ? 'no apps yet'
-              : d.used_by.map((a, i) => (
-                  <span key={a}>
-                    {i > 0 && ', '}
-                    <Link to={`/apps/${a}`}>{a}</Link>
-                  </span>
-                ))}
-          </p>
-        </section>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Connect an app</h2>
+            </CardTitle>
+            <CardDescription>
+              The app gets <Mono className="text-foreground">{envSummary(d.env)}</Mono> on its next deploy.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <CopyLine code={connectCmd} copy={connectCmd} />
+            <p className="text-sm text-muted-foreground">
+              Used by:{' '}
+              {d.used_by.length === 0
+                ? 'no apps yet'
+                : d.used_by.map((a, i) => (
+                    <span key={a}>
+                      {i > 0 && ', '}
+                      <Link className={linkClass} to={`/apps/${a}`}>
+                        {a}
+                      </Link>
+                    </span>
+                  ))}
+            </p>
+          </CardContent>
+        </Card>
 
-        <section className="card">
-          <h2 className="card-title">Connection details</h2>
-          {!admin ? (
-            <p className="muted small">Passwords are shown to admin tokens only.</p>
-          ) : !conn ? (
-            <>
-              <p className="muted small">For connecting with your own tools from Coldship's network. Revealing is recorded in the audit log.</p>
-              <button className="btn btn-sm" disabled={busy} onClick={() => act(async () => setConn(await api.dataConnection(d.name)))}>
-                Show connection details
-              </button>
-            </>
-          ) : (
-            <div className="env-list">
-              {Object.entries(conn)
-                .sort()
-                .map(([k, v]) => (
-                  <div className="copy-line" key={k}>
-                    <code className="small">
-                      {k}={v}
-                    </code>
-                    <Copy text={v} />
-                  </div>
-                ))}
-            </div>
-          )}
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Connection details</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!admin ? (
+              <p className="text-sm text-muted-foreground">Passwords are shown to admin tokens only.</p>
+            ) : !conn ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  For connecting with your own tools from Coldship's network. Revealing is recorded in the audit log.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => act(async () => setConn(await api.dataConnection(d.name)))}
+                >
+                  Show connection details
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-2">
+                {Object.entries(conn)
+                  .sort()
+                  .map(([k, v]) => (
+                    <CopyLine key={k} code={`${k}=${v}`} copy={v} />
+                  ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      <section className="card">
-        <div className="card-head">
-          <h2 className="card-title">Snapshots</h2>
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>
+            <h2>Snapshots</h2>
+          </CardTitle>
           {d.engine !== 's3' && (
-            <button className="btn btn-sm" disabled={busy} onClick={() => act(() => api.snapshotData(d.name), 'Snapshot saved.')}>
-              Snapshot now
-            </button>
+            <CardAction>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => act(() => api.snapshotData(d.name), 'Snapshot saved.')}
+              >
+                Snapshot now
+              </Button>
+            </CardAction>
           )}
-        </div>
-        {d.engine === 's3' ? (
-          <p className="muted small">Snapshots of S3 storage aren't supported yet. Back up the bucket with an S3 tool such as rclone.</p>
-        ) : !snaps.data || snaps.data.length === 0 ? (
-          <p className="muted small">None yet. Snapshots are taken daily and before anything destructive.</p>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Snapshot</th>
-                <th>Taken</th>
-                <th>Size</th>
-                <th>Reason</th>
-                {admin && <th />}
-              </tr>
-            </thead>
-            <tbody>
-              {snaps.data.map((s) => (
-                <tr key={s.id}>
-                  <td className="mono small">{s.id}</td>
-                  <td className="small">
-                    <Time iso={s.created_at} />
-                  </td>
-                  <td className="small">{(s.size / 1024).toFixed(1)} KB</td>
-                  <td className="small muted">{s.reason}</td>
+        </CardHeader>
+        <CardContent>
+          {d.engine === 's3' ? (
+            <p className="text-sm text-muted-foreground">
+              Snapshots of S3 storage aren't supported yet. Back up the bucket with an S3 tool such as rclone.
+            </p>
+          ) : !snaps.data || snaps.data.length === 0 ? (
+            <p className="text-sm text-muted-foreground">None yet. Snapshots are taken daily and before anything destructive.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Snapshot</TableHead>
+                  <TableHead>Taken</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Reason</TableHead>
                   {admin && (
-                    <td>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        disabled={busy}
-                        onClick={() => {
-                          const reason = window.prompt(
-                            `Restore ${d.name} from ${s.id}? All current data is replaced (it's snapshotted first). Why?`,
-                          )
-                          if (reason?.trim()) act(async () => setMessage((await api.restoreData(d.name, s.id, reason)).message))
-                        }}
-                      >
-                        Restore
-                      </button>
-                    </td>
+                    <TableHead>
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {snaps.data.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell>
+                      <Mono className="text-xs">{s.id}</Mono>
+                    </TableCell>
+                    <TableCell>
+                      <Time iso={s.created_at} />
+                    </TableCell>
+                    <TableCell>{(s.size / 1024).toFixed(1)} KB</TableCell>
+                    <TableCell className="text-muted-foreground">{s.reason}</TableCell>
+                    {admin && (
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => {
+                            const reason = window.prompt(
+                              `Restore ${d.name} from ${s.id}? All current data is replaced (it's snapshotted first). Why?`,
+                            )
+                            if (reason?.trim()) act(async () => setMessage((await api.restoreData(d.name, s.id, reason)).message))
+                          }}
+                        >
+                          Restore
+                        </Button>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {admin && (
-        <section className="card danger-zone">
-          <h2 className="card-title">Delete</h2>
-          {d.used_by.length > 0 ? (
-            <p className="muted small">Disconnect {d.used_by.join(', ')} first (remove it from each app's uses).</p>
-          ) : !deleting ? (
-            <button className="btn btn-danger btn-sm" onClick={() => setDeleting(true)}>
-              Delete {d.name}
-            </button>
-          ) : (
-            <div className="form-row">
-              <label className="field grow">
-                <span>
-                  Type <code>{d.name}</code> to delete it and all its data{d.engine !== 's3' && ' (a snapshot is kept)'}
-                </span>
-                <input value={confirmDelete} onChange={(e) => setConfirmDelete(e.target.value)} autoFocus />
-              </label>
-              <div className="inline">
-                <button
-                  className="btn btn-danger btn-sm"
-                  disabled={busy || confirmDelete !== d.name}
-                  onClick={() => act(async () => {
-                    await api.deleteData(d.name)
-                    nav('/data')
-                  })}
-                >
-                  Delete
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setDeleting(false)}>
-                  Cancel
-                </button>
+        <Card className="mt-4 ring-destructive/40">
+          <CardHeader>
+            <CardTitle>
+              <h2 className="text-destructive">Delete</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {d.used_by.length > 0 ? (
+              <p className="text-sm text-muted-foreground">Disconnect {d.used_by.join(', ')} first (remove it from each app's uses).</p>
+            ) : !deleting ? (
+              <Button variant="destructive" size="sm" onClick={() => setDeleting(true)}>
+                Delete {d.name}
+              </Button>
+            ) : (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="confirm-delete" className="block font-normal leading-normal">
+                    Type <Mono>{d.name}</Mono> to delete it and all its data{d.engine !== 's3' && ' (a snapshot is kept)'}
+                  </Label>
+                  <Input
+                    id="confirm-delete"
+                    value={confirmDelete}
+                    onChange={(e) => setConfirmDelete(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={busy || confirmDelete !== d.name}
+                    onClick={() =>
+                      act(async () => {
+                        await api.deleteData(d.name)
+                        nav('/data')
+                      })
+                    }
+                  >
+                    Delete
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setDeleting(false)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
-        </section>
+            )}
+          </CardContent>
+        </Card>
       )}
     </>
   )

@@ -27,7 +27,8 @@ export interface Spec {
   port?: number
   host_port?: number
   domains?: string[]
-  databases?: { name: string; engine: 'postgres' | 'redis'; version?: string; env?: string }[]
+  databases?: { name: string; engine: 'postgres' | 'mysql' | 'redis'; version?: string; env?: string }[]
+  uses?: string[]
   on_push?: OnPush
   health?: { path?: string; timeout?: string }
   memory?: string

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { StatusDot } from '@/components/common'
 
 // LiveLog follows a deployment's log as it is written: build steps, image
 // pulls, the container start and health checks. onEnd gets the deployment's
@@ -35,18 +36,21 @@ export function LiveLog({ deployment, onEnd }: { deployment: string; onEnd?: (st
   }, [lines])
 
   const running = status === undefined
+  const label = running ? 'In progress' : status === 'running' ? 'Deployed' : status === 'failed' ? 'Failed' : status
+  const look = running
+    ? { dot: 'bg-info animate-pulse', text: 'text-info' }
+    : status === 'running'
+      ? { dot: 'bg-ok', text: 'text-ok' }
+      : { dot: 'bg-destructive', text: 'text-destructive' }
   return (
-    <div className="live-log">
-      <div className="live-log-head">
-        <span className={`pill ${running ? 'health-deploying' : status === 'running' ? 'health-healthy' : 'health-failing'}`}>
-          <span className="dot" aria-hidden />
-          {running ? 'In progress' : status === 'running' ? 'Deployed' : status === 'failed' ? 'Failed' : status}
-        </span>
-        <span className="muted small mono">{deployment}</span>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <StatusDot {...look} label={label} />
+        <span className="font-mono text-xs break-all text-muted-foreground">{deployment}</span>
       </div>
       <pre
         ref={box}
-        className="logs log-box"
+        className="max-h-96 overflow-auto rounded-lg border bg-muted p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words"
         onScroll={(e) => {
           const el = e.currentTarget
           follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40

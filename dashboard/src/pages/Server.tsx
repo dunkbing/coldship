@@ -1,6 +1,9 @@
 import { api, type Usage } from '../api'
 import { useLoad } from '../hooks'
-import { ErrorBox } from '@/components/common'
+import type { ReactNode } from 'react'
+import { cn } from '@/lib/utils'
+import { ErrorBox, Mono, PageHeader, PageSkeleton } from '@/components/common'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 function bytes(n: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -24,15 +27,42 @@ function Meter({ label, used, total, detail }: { label: string; used: number; to
   const pct = total > 0 ? Math.min(100, (100 * used) / total) : 0
   const level = pct >= 90 ? 'danger' : pct >= 80 ? 'warn' : 'ok'
   return (
-    <div className="meter">
-      <div className="meter-head">
-        <span>{label}</span>
-        <span className="mono small">{detail ?? `${pct.toFixed(0)}%`}</span>
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+        <span className="font-medium">{label}</span>
+        <span className={cn('font-mono text-xs', level === 'ok' ? 'text-muted-foreground' : level === 'warn' ? 'text-warn' : 'text-destructive')}>
+          {level !== 'ok' && <span className="font-sans font-medium">{level === 'warn' ? 'High · ' : 'Critical · '}</span>}
+          {detail ?? `${pct.toFixed(0)}%`}
+        </span>
       </div>
-      <div className="meter-bar" role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
-        <span className={`meter-fill ${level}`} style={{ width: `${pct}%` }} />
+      <div
+        className="h-2 overflow-hidden rounded-full bg-muted"
+        role="meter"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
+        <span
+          className={cn('block h-full rounded-full transition-[width]', level === 'ok' ? 'bg-ok' : level === 'warn' ? 'bg-warn' : 'bg-destructive')}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
+  )
+}
+
+// Facts is a two-column definition list of label/value pairs.
+function Facts({ items }: { items: [string, ReactNode, boolean?][] }) {
+  return (
+    <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-4 gap-y-2 text-sm">
+      {items.map(([k, v, mono]) => (
+        <div key={k} className="contents">
+          <dt className="text-muted-foreground">{k}</dt>
+          <dd className="min-w-0 break-words">{mono ? <Mono className="text-xs break-all">{v}</Mono> : v}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -44,88 +74,91 @@ function UsageMeter({ label, u }: { label: string; u: Usage }) {
 export default function Server() {
   const { data: s, error } = useLoad(api.serverStatus, [], 5000)
   if (error) return <ErrorBox error={error} />
-  if (!s) return <div className="muted">Loading…</div>
+  if (!s) return <PageSkeleton kind="detail" />
   const h = s.host
   const started = (Date.now() - new Date(s.started_at).getTime()) / 1000
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1>Server</h1>
-          <p className="muted">
+      <PageHeader
+        title="Server"
+        description={
+          <>
             {h.hostname} · {h.os} · {h.arch} · up {duration(h.uptime_seconds)}. Refreshes every 5 seconds.
-          </p>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <div className="grid-2">
-        <section className="card">
-          <h2 className="card-title">Resources</h2>
-          <Meter
-            label={`CPU (${h.cpus} cores)`}
-            used={h.cpu_used_percent}
-            total={100}
-            detail={`${h.cpu_used_percent.toFixed(0)}% · load ${h.load.map((l) => l.toFixed(2)).join(' ')}`}
-          />
-          <UsageMeter label="Memory" u={h.memory} />
-          <UsageMeter label="Swap" u={h.swap} />
-          {h.disks.map((d) => (
-            <UsageMeter key={d.path} label={`Disk ${d.path} (${d.for})`} u={d} />
-          ))}
-        </section>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Resources</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Meter
+              label={`CPU (${h.cpus} cores)`}
+              used={h.cpu_used_percent}
+              total={100}
+              detail={`${h.cpu_used_percent.toFixed(0)}% · load ${h.load.map((l) => l.toFixed(2)).join(' ')}`}
+            />
+            <UsageMeter label="Memory" u={h.memory} />
+            <UsageMeter label="Swap" u={h.swap} />
+            {h.disks.map((d) => (
+              <UsageMeter key={d.path} label={`Disk ${d.path} (${d.for})`} u={d} />
+            ))}
+          </CardContent>
+        </Card>
 
-        <section className="card">
-          <h2 className="card-title">Container engine</h2>
-          {s.engine_error ? (
-            <p className="danger-text small">{s.engine_error}</p>
-          ) : s.engine ? (
-            <dl className="facts">
-              <dt>Engine</dt>
-              <dd>
-                {s.engine.name === 'podman' ? 'Podman' : 'Docker'} {s.engine.version}
-              </dd>
-              <dt>Containers</dt>
-              <dd>
-                {s.engine.running} running of {s.engine.containers}
-              </dd>
-              <dt>Images</dt>
-              <dd>{s.engine.images}</dd>
-              <dt>Storage</dt>
-              <dd className="mono small">
-                {s.engine.storage_driver} · {s.engine.root_dir}
-              </dd>
-              <dt>Socket</dt>
-              <dd className="mono small">{s.engine.host}</dd>
-            </dl>
-          ) : null}
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Container engine</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {s.engine_error ? (
+              <p className="text-sm text-destructive">{s.engine_error}</p>
+            ) : s.engine ? (
+              <Facts
+                items={[
+                  ['Engine', `${s.engine.name === 'podman' ? 'Podman' : 'Docker'} ${s.engine.version}`],
+                  ['Containers', `${s.engine.running} running of ${s.engine.containers}`],
+                  ['Images', s.engine.images],
+                  ['Storage', `${s.engine.storage_driver} · ${s.engine.root_dir}`, true],
+                  ['Socket', s.engine.host, true],
+                ]}
+              />
+            ) : null}
+          </CardContent>
 
-          <h2 className="card-title" style={{ marginTop: 16 }}>
-            Coldship
-          </h2>
-          <dl className="facts">
-            <dt>Version</dt>
-            <dd>{s.version}</dd>
-            <dt>Running for</dt>
-            <dd>{duration(started)}</dd>
-            <dt>Apps</dt>
-            <dd>{s.apps}</dd>
-            <dt>Data services</dt>
-            <dd>{s.data_services}</dd>
-            <dt>Proxy</dt>
-            <dd>
-              {!s.proxy
-                ? 'off'
-                : s.proxy.running
-                  ? `running on ports ${s.proxy.http_port} and ${s.proxy.https_port}`
-                  : `not running${s.proxy.error ? `: ${s.proxy.error}` : ''}`}
-            </dd>
-            <dt>Data</dt>
-            <dd className="mono small">{s.data_dir}</dd>
-            <dt>Kernel</dt>
-            <dd className="mono small">{h.kernel}</dd>
-          </dl>
-        </section>
+          <CardHeader className="mt-2 border-t pt-4">
+            <CardTitle>
+              <h2>Coldship</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Facts
+              items={[
+                ['Version', s.version],
+                ['Running for', duration(started)],
+                ['Apps', s.apps],
+                ['Data services', s.data_services],
+                [
+                  'Proxy',
+                  !s.proxy
+                    ? 'off'
+                    : s.proxy.running
+                      ? `running on ports ${s.proxy.http_port} and ${s.proxy.https_port}`
+                      : `not running${s.proxy.error ? `: ${s.proxy.error}` : ''}`,
+                ],
+                ['Data', s.data_dir, true],
+                ['Kernel', h.kernel, true],
+              ]}
+            />
+          </CardContent>
+        </Card>
       </div>
     </>
   )

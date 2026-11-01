@@ -48,7 +48,11 @@ const logos: Record<DataEngine, { path: string; hex: string }> = {
 export function DataMark({ engine, size = 28 }: { engine: DataEngine; size?: number }) {
   const logo = logos[engine]
   return (
-    <span className="data-mark" style={{ width: size, height: size }} aria-hidden>
+    <span
+      className="inline-flex shrink-0 items-center justify-center rounded-md border bg-white dark:bg-card"
+      style={{ width: size, height: size }}
+      aria-hidden
+    >
       {logo && (
         <svg viewBox="0 0 24 24" width={size * 0.66} height={size * 0.66}>
           <path d={logo.path} fill={`#${logo.hex}`} />

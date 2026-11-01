@@ -1,11 +1,57 @@
 import { Link } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 import { api, type AppView } from '../api'
 import { timeUntil, useLoad } from '../hooks'
-import { DeployStatus, Empty, ErrorBox, HealthPill, healthOf, Source, StageBadge, Time } from '@/components/common'
+import { cn } from '@/lib/utils'
+import {
+  DeployStatus,
+  Empty,
+  ErrorBox,
+  HealthPill,
+  healthOf,
+  PageHeader,
+  Source,
+  StageBadge,
+  TableSkeleton,
+  Time,
+} from '@/components/common'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 async function loadApps(): Promise<AppView[]> {
   const apps = await api.apps()
   return Promise.all(apps.map((a) => api.app(a.name).catch(() => a as AppView)))
+}
+
+function Stat({ label, value, className }: { label: string; value: number; className?: string }) {
+  return (
+    <Card size="sm">
+      <CardContent>
+        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className={cn('text-2xl font-semibold tabular-nums', className)}>{value}</div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// AppName links to the app and shows its first URL under it.
+function AppName({ app }: { app: AppView }) {
+  return (
+    <div className="min-w-0">
+      <Link className="font-medium hover:underline" to={`/apps/${app.name}`}>
+        {app.name}
+      </Link>
+      {app.urls?.[0] && (
+        <div className="text-xs">
+          <a href={app.urls[0]} target="_blank" rel="noreferrer" className="text-muted-foreground hover:underline">
+            {app.urls[0].replace(/^https:\/\//, '')}
+          </a>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function Apps() {
@@ -22,94 +68,90 @@ export default function Apps() {
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <h1>Apps</h1>
-          <p className="muted">Everything Coldship runs on this node. This view is live.</p>
-        </div>
-        <Link className="btn btn-primary" to="/apps/new">
-          New app
-        </Link>
-      </header>
+      <PageHeader
+        title="Apps"
+        description="Everything Coldship runs on this node. This view is live."
+        actions={
+          <Button asChild>
+            <Link to="/apps/new">
+              <Plus /> New app
+            </Link>
+          </Button>
+        }
+      />
 
       {data && data.length > 0 && (
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-label">Apps</div>
-            <div className="stat-value">{data.length}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Healthy</div>
-            <div className="stat-value ok-text">{counts.healthy}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Need attention</div>
-            <div className={`stat-value${counts.failing ? ' danger-text' : ''}`}>{counts.failing}</div>
-          </div>
+        <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3">
+          <Stat label="Apps" value={data.length} />
+          <Stat label="Healthy" value={counts.healthy} className="text-ok" />
+          <Stat label="Need attention" value={counts.failing} className={counts.failing ? 'text-destructive' : undefined} />
         </div>
       )}
 
       {error && <ErrorBox error={error} />}
-      {loading && !data && <div className="muted">Loading…</div>}
+      {loading && !data && (
+        <div aria-busy="true" aria-label="Loading" className="space-y-6">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-20 rounded-xl" />
+            ))}
+          </div>
+          <TableSkeleton cols={5} />
+        </div>
+      )}
       {data?.length === 0 && previews.length === 0 && (
         <Empty title="No apps yet">
-          <Link to="/apps/new">Create one here</Link>, run <code>coldship deploy</code> inside a Git repository, or ask your agent to.
+          <Link className="text-primary hover:underline" to="/apps/new">
+            Create one here
+          </Link>
+          , run <code className="font-mono">coldship deploy</code> inside a Git repository, or ask your agent to.
         </Empty>
       )}
 
       {data && data.length > 0 && (
-        <div className="card table-card">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>App</th>
-                <th>Status</th>
-                <th>Stage</th>
-                <th>Source</th>
-                <th>Last deployment</th>
-              </tr>
-            </thead>
-            <tbody>
+        <Card className="py-0">
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow>
+                <TableHead className="px-4">App</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Stage</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="px-4">Last deployment</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.map((a) => (
-                <tr key={a.name}>
-                  <td>
-                    <Link className="row-link" to={`/apps/${a.name}`}>
-                      {a.name}
-                    </Link>
-                    {a.urls?.[0] && (
-                      <div className="small">
-                        <a href={a.urls[0]} target="_blank" rel="noreferrer" className="muted">
-                          {a.urls[0].replace(/^https:\/\//, '')}
-                        </a>
-                      </div>
-                    )}
-                  </td>
-                  <td>
+                <TableRow key={a.name}>
+                  <TableCell className="px-4 py-3">
+                    <AppName app={a} />
+                  </TableCell>
+                  <TableCell>
                     <HealthPill health={healthOf(a)} />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     <StageBadge stage={a.spec?.stage} />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     <Source spec={a.spec} />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell className="px-4">
                     {a.latest_deployment ? (
-                      <span className="inline">
+                      <span className="inline-flex items-center gap-2">
                         <DeployStatus status={a.latest_deployment.status} />
-                        <span className="muted small">
+                        <span className="text-xs text-muted-foreground">
                           {a.latest_deployment.actor} · <Time iso={a.latest_deployment.created_at} />
                         </span>
                       </span>
                     ) : (
                       '—'
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
       {previews.length > 0 && <PreviewTable previews={previews} />}
     </>
@@ -119,48 +161,41 @@ export default function Apps() {
 function PreviewTable({ previews }: { previews: AppView[] }) {
   return (
     <>
-      <h2 className="section-title">Previews</h2>
-      <div className="card table-card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Preview</th>
-              <th>Status</th>
-              <th>Of</th>
-              <th>Source</th>
-              <th>Expires</th>
-            </tr>
-          </thead>
-          <tbody>
+      <h2 className="mt-8 mb-3 text-lg font-semibold">Previews</h2>
+      <Card className="py-0">
+        <Table>
+          <TableHeader className="bg-muted/50">
+            <TableRow>
+              <TableHead className="px-4">Preview</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Of</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead className="px-4">Expires</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {previews.map((a) => (
-              <tr key={a.name}>
-                <td>
-                  <Link className="row-link" to={`/apps/${a.name}`}>
-                    {a.name}
-                  </Link>
-                  {a.urls?.[0] && (
-                    <div className="small">
-                      <a href={a.urls[0]} target="_blank" rel="noreferrer" className="muted">
-                        {a.urls[0].replace(/^https:\/\//, '')}
-                      </a>
-                    </div>
-                  )}
-                </td>
-                <td>
+              <TableRow key={a.name}>
+                <TableCell className="px-4 py-3">
+                  <AppName app={a} />
+                </TableCell>
+                <TableCell>
                   <HealthPill health={healthOf(a)} />
-                </td>
-                <td>
-                  <Link to={`/apps/${a.preview_of}`}>{a.preview_of}</Link>
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
+                  <Link className="text-primary hover:underline" to={`/apps/${a.preview_of}`}>
+                    {a.preview_of}
+                  </Link>
+                </TableCell>
+                <TableCell>
                   <Source spec={a.spec} />
-                </td>
-                <td className="muted">{a.expires_at ? timeUntil(a.expires_at) : '—'}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="px-4 text-muted-foreground">{a.expires_at ? timeUntil(a.expires_at) : '—'}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
     </>
   )
 }
