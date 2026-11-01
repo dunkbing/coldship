@@ -299,22 +299,37 @@ func auditCmd() *cobra.Command {
 func tokenCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "token", Short: "Manage API tokens"}
 	var name, scope string
+	var apps []string
 	create := &cobra.Command{
 		Use:   "create",
 		Short: "Create a token (admin). Scopes: read, deploy, admin",
+		Long: `Create an API token (admin). Scopes: read, deploy, admin.
+
+Limit a token to some apps with --app (repeatable). Patterns work, which
+also lets the token create new apps, but only with matching names:
+
+  coldship token create --name claude --app web --app api
+  coldship token create --name sandbox --app 'agent-*'
+
+A limited token sees and changes only those apps and their previews.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			t, err := newClient().CreateToken(cmd.Context(), name, scope)
+			t, err := newClient().CreateToken(cmd.Context(), name, scope, apps...)
 			if err != nil {
 				return err
 			}
 			return emit(t, func() {
-				fmt.Printf("Token %q (scope %s), shown once:\n\n  %s\n", t.Name, t.Scope, t.Token)
+				limit := "every app"
+				if len(t.Apps) > 0 {
+					limit = "apps " + strings.Join(t.Apps, ", ")
+				}
+				fmt.Printf("Token %q (scope %s, %s), shown once:\n\n  %s\n", t.Name, t.Scope, limit, t.Token)
 			})
 		},
 	}
 	create.Flags().StringVar(&name, "name", "", "token name, e.g. claude-agent")
 	create.Flags().StringVar(&scope, "scope", string(store.ScopeDeploy), "read | deploy | admin")
+	create.Flags().StringArrayVar(&apps, "app", nil, "limit the token to this app or pattern, like shop-* (repeatable; default: every app)")
 	create.MarkFlagRequired("name")
 
 	list := &cobra.Command{
@@ -328,9 +343,13 @@ func tokenCmd() *cobra.Command {
 			}
 			return emit(toks, func() {
 				w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-				fmt.Fprintln(w, "NAME\tSCOPE\tCREATED")
+				fmt.Fprintln(w, "NAME\tSCOPE\tAPPS\tCREATED")
 				for _, t := range toks {
-					fmt.Fprintf(w, "%s\t%s\t%s\n", t.Name, t.Scope, t.CreatedAt.Local().Format("2006-01-02 15:04"))
+					limit := "all"
+					if len(t.Apps) > 0 {
+						limit = strings.Join(t.Apps, ",")
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.Name, t.Scope, limit, t.CreatedAt.Local().Format("2006-01-02 15:04"))
 				}
 				w.Flush()
 			})

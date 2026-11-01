@@ -23,6 +23,17 @@ coldship token create --name claude --scope deploy
 
 Admin tokens are for humans. The first one is created when the server first starts.
 
+## Tokens limited to apps
+
+A `deploy` token can run any image for the apps it may deploy, so it can read those apps' secrets. Limit each agent to the apps it works on:
+
+```sh
+coldship token create --name claude --app web --app api
+coldship token create --name sandbox --app 'agent-*'    # may also create apps named agent-...
+```
+
+A limited token sees and changes only those apps and their previews: listing, logs, plans, approvals waiting, deploy logs and the audit log are all filtered, and anything else fails with `app_not_allowed` (with `details.allowed_apps`). Patterns use `*`. Admin tokens can't be limited, because admins approve plans and manage tokens for the whole server. `coldship token list` shows each token's limits.
+
 ## Approval for destructive production changes
 
 A plan needs approval when it is **destructive** and the app's stage is **production**, either before or after the change. That second condition means an agent can't get around approval by demoting an app to `staging` in the same plan.

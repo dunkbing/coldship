@@ -236,6 +236,8 @@ export interface ApplyResult {
 export interface WhoAmI {
   name: string
   scope: Scope
+  // The apps this token is limited to; absent means every app.
+  apps?: string[]
 }
 
 export interface SystemStatus {

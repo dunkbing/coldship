@@ -24,6 +24,29 @@ import (
 type principal struct {
 	name  string
 	scope store.Scope
+	apps  []string // empty: every app
+}
+
+func (p principal) limited() bool { return len(p.apps) > 0 }
+
+// allowApp returns an error unless p may use app, or app is a preview of an
+// app p may use.
+func (s *Server) allowApp(ctx context.Context, p principal, app string) error {
+	if store.MatchApps(p.apps, app) {
+		return nil
+	}
+	if a, err := s.st.GetApp(ctx, app); err == nil && a != nil && a.PreviewOf != "" && store.MatchApps(p.apps, a.PreviewOf) {
+		return nil
+	}
+	return apierr.New(403, "app_not_allowed", "token %q can't use app %q: it is limited to %s", p.name, app, strings.Join(p.apps, ", ")).
+		WithDetail("allowed_apps", p.apps).
+		WithHint("work on one of those apps, or ask an admin for a token that covers this one")
+}
+
+// visible reports whether a limited principal may see app (with parent
+// previewOf, if it is a preview).
+func (p principal) visible(app, previewOf string) bool {
+	return store.MatchApps(p.apps, app) || (previewOf != "" && store.MatchApps(p.apps, previewOf))
 }
 
 type Server struct {
@@ -123,6 +146,12 @@ func (s *Server) route(pattern string, need store.Scope, h handler) {
 			writeErr(w, s.log, apierr.New(403, "insufficient_scope", "token %q has scope %s; this action needs %s", p.name, p.scope, need))
 			return
 		}
+		if p.limited() && (strings.Contains(pattern, "/v1/apps/{name}") || strings.Contains(pattern, "/v1/previews/{name}")) {
+			if err := s.allowApp(r.Context(), p, r.PathValue("name")); err != nil {
+				writeErr(w, s.log, err)
+				return
+			}
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		out, err := h(r, p)
 		if err != nil {
@@ -162,7 +191,7 @@ func (s *Server) auth(r *http.Request) (principal, error) {
 		if t == nil {
 			return principal{}, apierr.New(401, "unauthenticated", "session expired or signed out")
 		}
-		return principal{name: t.Name, scope: t.Scope}, nil
+		return principal{name: t.Name, scope: t.Scope, apps: t.Apps}, nil
 	}
 	t, err := s.st.LookupToken(r.Context(), tok)
 	if err != nil {
@@ -171,7 +200,7 @@ func (s *Server) auth(r *http.Request) (principal, error) {
 	if t == nil {
 		return principal{}, apierr.New(401, "unauthenticated", "unknown token")
 	}
-	return principal{name: t.Name, scope: t.Scope}, nil
+	return principal{name: t.Name, scope: t.Scope, apps: t.Apps}, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -217,18 +246,42 @@ func intQuery(r *http.Request, key string, def, max int) (int, error) {
 type WhoAmI struct {
 	Name  string      `json:"name"`
 	Scope store.Scope `json:"scope"`
+	// Apps lists the apps the token is limited to; empty means all.
+	Apps []string `json:"apps,omitempty"`
 }
 
 func (s *Server) whoami(_ *http.Request, p principal) (any, error) {
-	return WhoAmI{Name: p.name, Scope: p.scope}, nil
+	return WhoAmI{Name: p.name, Scope: p.scope, Apps: p.apps}, nil
 }
 
-func (s *Server) listPlans(r *http.Request, _ principal) (any, error) {
+func (s *Server) listPlans(r *http.Request, p principal) (any, error) {
 	limit, err := intQuery(r, "limit", 50, 500)
 	if err != nil {
 		return nil, err
 	}
-	return s.eng.ListPlans(r.Context(), r.URL.Query().Get("status"), limit)
+	plans, err := s.eng.ListPlans(r.Context(), r.URL.Query().Get("status"), limit)
+	if err != nil || !p.limited() {
+		return plans, err
+	}
+	out := plans[:0:0]
+	for _, pl := range plans {
+		if s.allowApp(r.Context(), p, pl.App) == nil {
+			out = append(out, pl)
+		}
+	}
+	return out, nil
+}
+
+// allowPlan checks that p may use the plan's app.
+func (s *Server) allowPlan(r *http.Request, p principal) error {
+	if !p.limited() {
+		return nil
+	}
+	pl, err := s.eng.GetPlan(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	return s.allowApp(r.Context(), p, pl.App)
 }
 
 type SessionRequest struct {
@@ -405,12 +458,32 @@ func (s *Server) createSnapshot(r *http.Request, p principal) (any, error) {
 	return s.eng.Snapshot(r.Context(), p.name, r.PathValue("name"), r.PathValue("db"), req.Reason)
 }
 
-func (s *Server) deployLog(r *http.Request, _ principal) (any, error) {
-	return s.eng.DeployLog(r.Context(), r.PathValue("id"))
+func (s *Server) deployLog(r *http.Request, p principal) (any, error) {
+	l, err := s.eng.DeployLog(r.Context(), r.PathValue("id"))
+	if err == nil && p.limited() {
+		if err := s.allowApp(r.Context(), p, l.App); err != nil {
+			return nil, err
+		}
+	}
+	return l, err
 }
 
-func (s *Server) listApps(r *http.Request, _ principal) (any, error) {
-	return s.eng.ListApps(r.Context())
+func (s *Server) listApps(r *http.Request, p principal) (any, error) {
+	apps, err := s.eng.ListApps(r.Context())
+	if err != nil || !p.limited() {
+		return apps, err
+	}
+	return visibleApps(p, apps), nil
+}
+
+func visibleApps(p principal, apps []store.App) []store.App {
+	out := apps[:0:0]
+	for _, a := range apps {
+		if p.visible(a.Name, a.PreviewOf) {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (s *Server) getApp(r *http.Request, _ principal) (any, error) {
@@ -450,10 +523,19 @@ func (s *Server) rollback(r *http.Request, p principal) (any, error) {
 	return s.eng.Rollback(r.Context(), p.name, r.PathValue("name"), req.ToDeployment, req.Reason)
 }
 
-func (s *Server) detectBuild(r *http.Request, _ principal) (any, error) {
+func (s *Server) detectBuild(r *http.Request, p principal) (any, error) {
 	var req engine.DetectRequest
 	if err := decode(r, &req); err != nil {
 		return nil, err
+	}
+	if p.limited() {
+		app := req.App
+		if req.Spec != nil {
+			app = req.Spec.Name
+		}
+		if err := s.allowApp(r.Context(), p, app); err != nil {
+			return nil, err
+		}
 	}
 	return s.eng.DetectBuild(r.Context(), req)
 }
@@ -464,11 +546,20 @@ func (s *Server) createPreview(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	req.AdminCaller = p.scope.Allows(store.ScopeAdmin)
+	if p.limited() {
+		if err := s.allowApp(r.Context(), p, req.App); err != nil {
+			return nil, err
+		}
+	}
 	return s.eng.CreatePreview(r.Context(), p.name, req)
 }
 
-func (s *Server) listPreviews(r *http.Request, _ principal) (any, error) {
-	return s.eng.ListPreviews(r.Context())
+func (s *Server) listPreviews(r *http.Request, p principal) (any, error) {
+	apps, err := s.eng.ListPreviews(r.Context())
+	if err != nil || !p.limited() {
+		return apps, err
+	}
+	return visibleApps(p, apps), nil
 }
 
 func (s *Server) deletePreview(r *http.Request, p principal) (any, error) {
@@ -480,10 +571,27 @@ func (s *Server) createPlan(r *http.Request, p principal) (any, error) {
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	if p.limited() {
+		app := req.Delete
+		switch {
+		case req.Spec != nil:
+			app = req.Spec.Name
+		case req.Patch != nil:
+			app = req.Patch.Name
+		case req.Restore != nil:
+			app = req.Restore.App
+		}
+		if err := s.allowApp(r.Context(), p, app); err != nil {
+			return nil, err
+		}
+	}
 	return s.eng.Plan(r.Context(), p.name, req)
 }
 
-func (s *Server) getPlan(r *http.Request, _ principal) (any, error) {
+func (s *Server) getPlan(r *http.Request, p principal) (any, error) {
+	if err := s.allowPlan(r, p); err != nil {
+		return nil, err
+	}
 	return s.eng.GetPlan(r.Context(), r.PathValue("id"))
 }
 
@@ -496,6 +604,9 @@ func (s *Server) applyPlan(r *http.Request, p principal) (any, error) {
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	if err := s.allowPlan(r, p); err != nil {
+		return nil, err
+	}
 	return s.eng.Apply(r.Context(), p.name, r.PathValue("id"), req.Reason)
 }
 
@@ -503,12 +614,23 @@ func (s *Server) approvePlan(r *http.Request, p principal) (any, error) {
 	return s.eng.Approve(r.Context(), p.name, r.PathValue("id"))
 }
 
-func (s *Server) audit(r *http.Request, _ principal) (any, error) {
+func (s *Server) audit(r *http.Request, p principal) (any, error) {
 	limit, err := intQuery(r, "limit", 50, 1000)
 	if err != nil {
 		return nil, err
 	}
-	return s.eng.Audit(r.Context(), limit)
+	entries, err := s.eng.Audit(r.Context(), limit)
+	if err != nil || !p.limited() {
+		return entries, err
+	}
+	// A limited token sees its own actions and those on its apps.
+	out := entries[:0:0]
+	for _, e := range entries {
+		if e.Actor == p.name || s.allowApp(r.Context(), p, e.Target) == nil {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 func (s *Server) system(*http.Request, principal) (any, error) {
@@ -573,14 +695,16 @@ func (s *Server) systemUpgrade(_ *http.Request, p principal) (any, error) {
 }
 
 type TokenRequest struct {
-	Name  string `json:"name"`
-	Scope string `json:"scope"`
+	Name  string   `json:"name"`
+	Scope string   `json:"scope"`
+	Apps  []string `json:"apps,omitempty"`
 }
 
 type TokenResponse struct {
-	Name  string `json:"name"`
-	Scope string `json:"scope"`
-	Token string `json:"token"`
+	Name  string   `json:"name"`
+	Scope string   `json:"scope"`
+	Apps  []string `json:"apps,omitempty"`
+	Token string   `json:"token"`
 }
 
 func (s *Server) createToken(r *http.Request, p principal) (any, error) {
@@ -592,11 +716,11 @@ func (s *Server) createToken(r *http.Request, p principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	tok, err := s.eng.CreateToken(r.Context(), p.name, req.Name, scope)
+	tok, err := s.eng.CreateToken(r.Context(), p.name, req.Name, scope, req.Apps)
 	if err != nil {
 		return nil, err
 	}
-	return TokenResponse{Name: req.Name, Scope: string(scope), Token: tok}, nil
+	return TokenResponse{Name: req.Name, Scope: string(scope), Apps: req.Apps, Token: tok}, nil
 }
 
 func (s *Server) listTokens(r *http.Request, _ principal) (any, error) {

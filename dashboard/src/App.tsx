@@ -92,6 +92,7 @@ function Sidebar({ me, onSignOut }: { me: WhoAmI; onSignOut: () => void }) {
         <div>
           <div className="whoami-name">{me.name}</div>
           <div className="muted small">scope: {me.scope}</div>
+          {me.apps && me.apps.length > 0 && <div className="muted small">apps: {me.apps.join(', ')}</div>}
         </div>
         <button className="btn btn-ghost btn-sm" onClick={onSignOut}>
           Sign out

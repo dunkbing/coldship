@@ -150,6 +150,6 @@ After other commands, the CLI prints a one-line note on stderr when a new versio
 
 | Command | Description |
 |---|---|
-| `coldship token create --name <name> [--scope deploy]` | Create a token (admin). Scopes: `read`, `deploy`, `admin`. The token is shown once. |
-| `coldship token list` | Token names, scopes and creation times, never their values (admin) |
+| `coldship token create --name <name> [--scope deploy] [--app A]...` | Create a token (admin). Scopes: `read`, `deploy`, `admin`. `--app` (repeatable, patterns like `shop-*` allowed) limits it to those apps and their previews. The token is shown once. |
+| `coldship token list` | Token names, scopes, app limits and creation times, never their values (admin) |
 | `coldship token revoke <name> [--reason "..."]` | Revoke a token and sign out its dashboard sessions (admin). The last admin token can't be revoked. |

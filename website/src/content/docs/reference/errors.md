@@ -35,6 +35,7 @@ Every error from every interface has the same shape:
 | `unauthenticated` | 401 | Missing or unknown token, or an expired session |
 | `csrf_check_failed` | 403 | Sign-in, or a cookie-authenticated request that changes state, without the `X-Coldship-Request` header |
 | `insufficient_scope` | 403 | The token's scope is too low for this action |
+| `app_not_allowed` | 403 | The token is limited to other apps. `details.allowed_apps` lists its patterns. |
 | `approval_required` | 403 | Destructive production change. A human must run `coldship approve <plan>`. CLI exit code 3. |
 | `app_not_found` / `plan_not_found` / `deployment_not_found` / `token_not_found` | 404 | Check the name or id |
 | `route_not_found` | 404 | Unknown API path |

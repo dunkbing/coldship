@@ -9,11 +9,13 @@ Agents can use Coldship in two ways: through the **MCP server** (recommended) or
 
 <Steps>
 
-1. **Create a token for the agent.** Use `deploy` scope: the agent can plan, apply and roll back, but can't approve plans or create tokens.
+1. **Create a token for the agent.** Use `deploy` scope (the default): the agent can plan, apply and roll back, but can't approve plans or create tokens. Limit it to the apps it works on, so it can't touch (or read the secrets of) anything else:
 
    ```sh
-   coldship token create --name claude --scope deploy
+   coldship token create --name claude --app web --app api
    ```
+
+   With a pattern like `--app 'claude-*'`, the agent can also create new apps, as long as their names match.
 
 2. **Register the MCP server with your client.**
 

@@ -241,7 +241,9 @@ func (c *Client) RevokeToken(ctx context.Context, name, reason string) error {
 	return c.do(ctx, "DELETE", "/v1/tokens/"+url.PathEscape(name)+"?reason="+url.QueryEscape(reason), nil, nil)
 }
 
-func (c *Client) CreateToken(ctx context.Context, name, scope string) (*api.TokenResponse, error) {
+// CreateToken creates a token, optionally limited to apps (names or patterns
+// like shop-*).
+func (c *Client) CreateToken(ctx context.Context, name, scope string, apps ...string) (*api.TokenResponse, error) {
 	var out api.TokenResponse
-	return &out, c.do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: name, Scope: scope}, &out)
+	return &out, c.do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: name, Scope: scope, Apps: apps}, &out)
 }

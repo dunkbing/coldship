@@ -1060,16 +1060,29 @@ func (e *Engine) Audit(ctx context.Context, limit int) ([]store.AuditEntry, erro
 // token may use them.
 var reservedActors = map[string]bool{"coldship": true, "webhook": true, "system": true, "hangar": true}
 
-func (e *Engine) CreateToken(ctx context.Context, actor, name string, scope store.Scope) (string, error) {
+// appPatternRe is an app name, optionally with * wildcards: web, shop-*.
+var appPatternRe = regexp.MustCompile(`^[a-z*][a-z0-9*-]{0,39}$`)
+
+func (e *Engine) CreateToken(ctx context.Context, actor, name string, scope store.Scope, apps []string) (string, error) {
 	if !nameOK(name) {
 		return "", apierr.New(400, "invalid_token_name", "token name %q must be lowercase letters, digits and dashes", name)
 	}
 	if reservedActors[name] {
 		return "", apierr.New(400, "invalid_token_name", "token name %q is reserved for Coldship's own audit entries", name)
 	}
-	t, err := e.st.CreateToken(ctx, name, scope)
+	if len(apps) > 0 && scope == store.ScopeAdmin {
+		return "", apierr.New(400, "invalid_request", "admin tokens can't be limited to apps: admins approve plans and manage tokens for the whole server").
+			WithField("apps").WithHint("give the agent a deploy token limited to its apps instead")
+	}
+	for _, a := range apps {
+		if !appPatternRe.MatchString(a) || a == "*" {
+			return "", apierr.New(400, "invalid_request", "app pattern %q must be an app name, optionally with * (like shop-*); leave apps out for every app", a).
+				WithField("apps")
+		}
+	}
+	t, err := e.st.CreateToken(ctx, name, scope, apps)
 	if err == nil {
-		e.audit(ctx, actor, "token.create", name, "", map[string]any{"scope": scope})
+		e.audit(ctx, actor, "token.create", name, "", map[string]any{"scope": scope, "apps": apps})
 	}
 	return t, err
 }
@@ -1116,7 +1129,7 @@ func (e *Engine) EnsureAdminToken(ctx context.Context) (string, error) {
 	if err != nil || n > 0 {
 		return "", err
 	}
-	return e.CreateToken(ctx, "system", "admin", store.ScopeAdmin)
+	return e.CreateToken(ctx, "system", "admin", store.ScopeAdmin, nil)
 }
 
 // --- helpers ---

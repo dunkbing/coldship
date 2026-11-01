@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,9 +46,40 @@ func ParseScope(s string) (Scope, error) {
 }
 
 type Token struct {
-	Name      string    `json:"name"`
-	Scope     Scope     `json:"scope"`
+	Name  string `json:"name"`
+	Scope Scope  `json:"scope"`
+	// Apps limits the token to these apps (and their previews). Entries are
+	// names or patterns like shop-* (path.Match syntax). Empty means every
+	// app.
+	Apps      []string  `json:"apps,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// AllowsApp reports whether the token may use app. Previews are checked
+// against their parent by the caller.
+func (t Token) AllowsApp(app string) bool { return MatchApps(t.Apps, app) }
+
+// MatchApps reports whether app matches one of patterns; no patterns match
+// everything.
+func MatchApps(patterns []string, app string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, p := range patterns {
+		if ok, _ := path.Match(p, app); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func joinApps(apps []string) string { return strings.Join(apps, ",") }
+
+func splitApps(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }
 
 type App struct {
@@ -259,6 +291,7 @@ func Open(path string, kr *secrets.Keyring) (*Store, error) {
 	for _, stmt := range []string{
 		`ALTER TABLE apps ADD COLUMN preview_of TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE apps ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tokens ADD COLUMN apps TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
@@ -584,14 +617,14 @@ func NewID(prefix string) string {
 }
 
 // CreateToken stores a new token and returns its plaintext once.
-func (s *Store) CreateToken(ctx context.Context, name string, scope Scope) (string, error) {
+func (s *Store) CreateToken(ctx context.Context, name string, scope Scope, apps []string) (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	plain := "cst_" + hex.EncodeToString(b)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens(name, hash, scope, created_at) VALUES(?,?,?,?)`,
-		name, hashToken(plain), string(scope), ts(time.Now()))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens(name, hash, scope, apps, created_at) VALUES(?,?,?,?,?)`,
+		name, hashToken(plain), string(scope), joinApps(apps), ts(time.Now()))
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return "", apierr.New(409, "token_exists", "a token named %q already exists", name)
@@ -603,23 +636,23 @@ func (s *Store) CreateToken(ctx context.Context, name string, scope Scope) (stri
 
 func (s *Store) LookupToken(ctx context.Context, plain string) (*Token, error) {
 	var t Token
-	var scope, created string
-	err := s.db.QueryRowContext(ctx, `SELECT name, scope, created_at FROM tokens WHERE hash = ?`, hashToken(plain)).
-		Scan(&t.Name, &scope, &created)
+	var scope, created, apps string
+	err := s.db.QueryRowContext(ctx, `SELECT name, scope, apps, created_at FROM tokens WHERE hash = ?`, hashToken(plain)).
+		Scan(&t.Name, &scope, &apps, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	t.Scope = Scope(scope)
+	t.Scope, t.Apps = Scope(scope), splitApps(apps)
 	t.CreatedAt, _ = time.Parse(tsFormat, created)
 	return &t, nil
 }
 
 // ListTokens lists tokens (never their values), oldest first.
 func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, scope, created_at FROM tokens ORDER BY created_at, name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, scope, apps, created_at FROM tokens ORDER BY created_at, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -627,11 +660,11 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	out := []Token{}
 	for rows.Next() {
 		var t Token
-		var scope, created string
-		if err := rows.Scan(&t.Name, &scope, &created); err != nil {
+		var scope, created, apps string
+		if err := rows.Scan(&t.Name, &scope, &apps, &created); err != nil {
 			return nil, err
 		}
-		t.Scope = Scope(scope)
+		t.Scope, t.Apps = Scope(scope), splitApps(apps)
 		t.CreatedAt, _ = time.Parse(tsFormat, created)
 		out = append(out, t)
 	}
@@ -685,11 +718,11 @@ func (s *Store) CreateSession(ctx context.Context, t *Token, ttl time.Duration) 
 // LookupSession returns the token identity behind a live session, or nil.
 func (s *Store) LookupSession(ctx context.Context, plain string) (*Token, error) {
 	var t Token
-	var scope, expires string
-	// A session lives only as long as its token.
-	err := s.db.QueryRowContext(ctx, `SELECT s.token_name, t.scope, s.expires_at FROM sessions s
+	var scope, expires, apps string
+	// A session lives only as long as its token, and has its limits.
+	err := s.db.QueryRowContext(ctx, `SELECT s.token_name, t.scope, t.apps, s.expires_at FROM sessions s
 		JOIN tokens t ON t.name = s.token_name WHERE s.hash = ?`, hashToken(plain)).
-		Scan(&t.Name, &scope, &expires)
+		Scan(&t.Name, &scope, &apps, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -699,7 +732,7 @@ func (s *Store) LookupSession(ctx context.Context, plain string) (*Token, error)
 	if exp, _ := time.Parse(tsFormat, expires); time.Now().After(exp) {
 		return nil, nil
 	}
-	t.Scope = Scope(scope)
+	t.Scope, t.Apps = Scope(scope), splitApps(apps)
 	return &t, nil
 }
 

@@ -283,3 +283,139 @@ func TestGitHookEndpoint(t *testing.T) {
 	}
 	_ = rotated
 }
+
+// A token limited to some apps can't see or change any other app, by any
+// route, including the dashboard's session.
+func TestTokensLimitedToApps(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
+	defer srv.Close()
+	adminTok, _ := eng.EnsureAdminToken(ctx)
+	admin := client.New(srv.URL, adminTok)
+
+	deploy := func(c *client.Client, name string) (*engine.ApplyResult, error) {
+		p, err := c.Plan(ctx, engine.PlanRequest{Spec: &spec.App{Name: name, Image: "nginx:1", Port: 80}})
+		if err != nil {
+			return nil, err
+		}
+		return c.Apply(ctx, p.ID, "test")
+	}
+	var apiDep *engine.ApplyResult
+	for _, n := range []string{"web", "api", "shop-a"} {
+		res, err := deploy(admin, n)
+		if err != nil {
+			t.Fatal(n, err)
+		}
+		if n == "api" {
+			apiDep = res
+		}
+	}
+	apiPlan, _ := admin.Plan(ctx, engine.PlanRequest{Spec: &spec.App{Name: "api", Image: "nginx:2", Port: 80}})
+
+	if _, err := admin.CreateToken(ctx, "boss", "admin", "web"); errCode(err) != "invalid_request" {
+		t.Fatalf("admin tokens can't be limited: %v", err)
+	}
+	if _, err := admin.CreateToken(ctx, "bad", "deploy", "*"); errCode(err) != "invalid_request" {
+		t.Fatalf("a lone * means every app; leave apps out instead: %v", err)
+	}
+	tr, err := admin.CreateToken(ctx, "agent", "deploy", "web", "shop-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := client.New(srv.URL, tr.Token)
+	denied := func(what string, err error) {
+		t.Helper()
+		if errCode(err) != "app_not_allowed" {
+			t.Errorf("%s: want app_not_allowed, got %v", what, err)
+		}
+	}
+
+	if me, err := agent.WhoAmI(ctx); err != nil || len(me.Apps) != 2 {
+		t.Fatalf("whoami: %+v %v", me, err)
+	}
+	apps, _ := agent.ListApps(ctx)
+	if len(apps) != 2 || apps[0].Name == "api" || apps[1].Name == "api" {
+		t.Fatalf("list must hide other apps: %+v", apps)
+	}
+	_, err = agent.GetApp(ctx, "api")
+	denied("get", err)
+	_, err = agent.Logs(ctx, "api", 10, "")
+	denied("logs", err)
+	_, err = agent.Rollback(ctx, "api", "", "x")
+	denied("rollback", err)
+	_, err = agent.DeployLog(ctx, apiDep.Deployment.ID)
+	denied("deploy log", err)
+	_, err = deploy(agent, "api")
+	denied("plan another app", err)
+	_, err = agent.Plan(ctx, engine.PlanRequest{Delete: "api"})
+	denied("delete another app", err)
+	_, err = agent.Plan(ctx, engine.PlanRequest{Patch: &spec.Patch{Name: "api", Env: map[string]string{"X": "1"}}})
+	denied("patch another app", err)
+	_, err = agent.GetPlan(ctx, apiPlan.ID)
+	denied("read another app's plan", err)
+	_, err = agent.Apply(ctx, apiPlan.ID, "sneaky")
+	denied("apply another app's plan", err)
+	_, err = deploy(agent, "other")
+	denied("create an app outside the patterns", err)
+
+	if _, err := deploy(agent, "web"); err != nil {
+		t.Fatalf("own app: %v", err)
+	}
+	if _, err := deploy(agent, "shop-new"); err != nil {
+		t.Fatalf("new app matching a pattern: %v", err)
+	}
+	plans, _ := agent.ListPlans(ctx, "", 100)
+	for _, p := range plans {
+		if p.App == "api" {
+			t.Fatal("plan list must hide other apps' plans")
+		}
+	}
+	entries, _ := agent.Audit(ctx, 1000)
+	for _, e := range entries {
+		if e.Target == "api" {
+			t.Fatal("audit must hide other apps' entries")
+		}
+	}
+
+	// Previews of allowed apps are allowed; of others, not.
+	pv, err := agent.CreatePreview(ctx, engine.PreviewRequest{App: "web", Image: "nginx:2", Name: "pr-1"})
+	if err != nil {
+		t.Fatalf("preview of own app: %v", err)
+	}
+	if _, err := agent.GetApp(ctx, pv.App); err != nil {
+		t.Fatalf("own preview: %v", err)
+	}
+	_, err = agent.CreatePreview(ctx, engine.PreviewRequest{App: "api", Image: "nginx:2", Name: "pr-1"})
+	denied("preview of another app", err)
+
+	// The dashboard session carries the same limits.
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/sessions", strings.NewReader(`{"token":"`+tr.Token+`"}`))
+	req.Header.Set(api.CSRFHeader, "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	var cookie *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == api.SessionCookie {
+			cookie = c
+		}
+	}
+	req, _ = http.NewRequest("GET", srv.URL+"/v1/apps/api", nil)
+	req.AddCookie(cookie)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 403 {
+		t.Fatalf("session for a limited token: want 403 for another app, got %d", resp.StatusCode)
+	}
+}

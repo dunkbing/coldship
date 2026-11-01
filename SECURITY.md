@@ -27,6 +27,6 @@ These are in scope:
 
 By design, these are not vulnerabilities:
 
-- A deploy-scope token can run any container image, and a Dockerfile runs code during its build. So a deploy token can read the env (including secrets) of every app it can deploy, by deploying an image that prints it. Treat deploy tokens like deploy access, and revoke one you no longer trust with `coldship token revoke`. Tokens scoped to single apps are planned.
+- A deploy-scope token can run any container image, and a Dockerfile runs code during its build. So a deploy token can read the env (including secrets) of every app it can deploy, by deploying an image that prints it. Limit each agent's token to its apps (`coldship token create --app ...`), treat deploy tokens like deploy access, and revoke one you no longer trust with `coldship token revoke`. A limited token reaching another app is in scope.
 - Anyone with root, or with access to the Docker socket on the host, can read app env values (`docker inspect`). Encryption at rest protects the state file, not a compromised host.
 - The default key file next to the database protects leaked copies of the database file only. See [Secrets encryption](website/src/content/docs/guides/secrets.md).
