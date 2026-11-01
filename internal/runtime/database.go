@@ -1,15 +1,17 @@
 package runtime
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/moby/moby/client"
 
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/spec"
@@ -83,36 +85,27 @@ func (d *Docker) EnsureDatabase(ctx context.Context, db DB, log io.Writer) error
 			WithField("databases").WithHint("changing a database's engine or major version needs a migration, which Coldship doesn't do yet; keep the current version")
 	case st.Exists && !st.Running:
 		fmt.Fprintf(log, "coldship: starting database %s\n", db.Name)
-		if _, se, err := d.run(ctx, "start", name); err != nil {
-			return apierr.New(502, "database_start_failed", "could not start database %s: %s", db.Name, se)
+		if err := d.startContainer(ctx, name); err != nil {
+			return apierr.New(502, "database_start_failed", "could not start database %s: %v", db.Name, err)
 		}
 	case !st.Exists:
-		if _, _, err := d.run(ctx, "image", "inspect", image); err != nil {
-			fmt.Fprintf(log, "coldship: pulling %s\n", image)
-			if _, se, err := d.run(ctx, "pull", image); err != nil {
-				return apierr.New(502, "database_start_failed", "could not pull %s: %s", image, se)
-			}
+		if err := d.EnsureImage(ctx, image, log); err != nil {
+			return apierr.New(502, "database_start_failed", "could not pull %s: %v", image, err)
 		}
 		fmt.Fprintf(log, "coldship: creating database %s (%s)\n", db.Name, image)
-		envFile, err := os.CreateTemp("", "coldship-db-env-*")
-		if err != nil {
-			return err
-		}
-		defer os.Remove(envFile.Name())
-		args := []string{"run", "-d", "--name", name, "--restart", "unless-stopped",
-			"--label", "coldship.app=" + db.App, "--label", "coldship.db=" + db.Name,
-			"--network", Network, "--network-alias", DBHost(db.App, db.Name), "--env-file", envFile.Name()}
+		cs := ContainerSpec{Name: name, Image: image,
+			Labels:  map[string]string{"coldship.app": db.App, "coldship.db": db.Name},
+			Aliases: []string{DBHost(db.App, db.Name)}}
 		switch db.Engine {
 		case spec.EngineRedis:
-			fmt.Fprintf(envFile, "REDIS_PASSWORD=%s\n", db.Password)
-			args = append(args, "-v", dbVolume(db.App, db.Name)+":/data", image,
-				"sh", "-c", `exec redis-server --requirepass "$REDIS_PASSWORD" --save 60 1 --appendonly no`)
+			cs.Env = []string{"REDIS_PASSWORD=" + db.Password}
+			cs.Binds = []string{dbVolume(db.App, db.Name) + ":/data"}
+			cs.Cmd = []string{"sh", "-c", `exec redis-server --requirepass "$REDIS_PASSWORD" --save 60 1 --appendonly no`}
 		default:
-			fmt.Fprintf(envFile, "POSTGRES_USER=app\nPOSTGRES_DB=app\nPOSTGRES_PASSWORD=%s\n", db.Password)
-			args = append(args, "-v", dbVolume(db.App, db.Name)+":/var/lib/postgresql/data", image)
+			cs.Env = []string{"POSTGRES_USER=app", "POSTGRES_DB=app", "POSTGRES_PASSWORD=" + db.Password}
+			cs.Binds = []string{dbVolume(db.App, db.Name) + ":/var/lib/postgresql/data"}
 		}
-		envFile.Close()
-		if _, se, err := d.run(ctx, args...); err != nil {
+		if se, err := d.RunContainer(ctx, cs); err != nil {
 			return apierr.New(502, "database_start_failed", "could not create database %s: %s", db.Name, se)
 		}
 	}
@@ -126,7 +119,7 @@ func (d *Docker) waitDBReady(ctx context.Context, db DB, log io.Writer) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			out, _ := exec.CommandContext(context.WithoutCancel(ctx), d.Bin, "logs", "--tail", "30", dbContainer(db.App, db.Name)).CombinedOutput()
+			out, _ := d.tailLogs(context.WithoutCancel(ctx), dbContainer(db.App, db.Name), 30, "")
 			fmt.Fprintf(log, "coldship: database %s did not become ready; its last output:\n%s", db.Name, out)
 			return apierr.New(502, "database_not_ready", "database %s did not accept connections within 90s", db.Name).
 				WithHint("read the deploy log for the database's output")
@@ -139,41 +132,41 @@ func (d *Docker) waitDBReady(ctx context.Context, db DB, log io.Writer) error {
 	}
 }
 
+// redisAuth passes the password in the exec request, not on a command line.
+func redisAuth(db DB) []string { return []string{"REDISCLI_AUTH=" + db.Password} }
+
 func (d *Docker) dbReady(ctx context.Context, db DB) bool {
 	c := dbContainer(db.App, db.Name)
 	switch db.Engine {
 	case spec.EngineRedis:
-		out, _, err := d.runEnv(ctx, []string{"REDISCLI_AUTH=" + db.Password}, "exec", "-e", "REDISCLI_AUTH", c, "redis-cli", "ping")
-		return err == nil && strings.Contains(out, "PONG")
+		var out bytes.Buffer
+		code, _, err := d.Exec(ctx, c, []string{"redis-cli", "ping"}, ExecIO{Env: redisAuth(db), Stdout: &out})
+		return err == nil && code == 0 && strings.Contains(out.String(), "PONG")
 	default:
 		// Over TCP: during first-time setup postgres only listens on its
 		// socket, and restarts before it is really ready.
-		_, _, err := d.run(ctx, "exec", c, "pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "app")
-		return err == nil
+		code, _, err := d.Exec(ctx, c, []string{"pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "app"}, ExecIO{})
+		return err == nil && code == 0
 	}
 }
 
 func (d *Docker) DatabaseStatus(ctx context.Context, app, name string) (DBStatus, error) {
-	out, se, err := d.run(ctx, "inspect", "-f", "{{.State.Status}} {{.Config.Image}}", dbContainer(app, name))
-	if err != nil {
-		if notFound(se) {
-			return DBStatus{}, nil
-		}
-		return DBStatus{}, apierr.New(502, "runtime_unavailable", "docker inspect failed: %s", se)
+	info, err := d.InspectContainer(ctx, dbContainer(app, name))
+	if err != nil || !info.Exists {
+		return DBStatus{}, err
 	}
-	state, image, _ := strings.Cut(strings.TrimSpace(out), " ")
-	return DBStatus{Exists: true, Running: state == "running", State: state, Image: image}, nil
+	return DBStatus{Exists: true, Running: info.State == "running", State: info.State, Image: info.Image}, nil
 }
 
 func (d *Docker) RemoveDatabase(ctx context.Context, app, name string) error {
 	if err := d.checkOwner(ctx, dbContainer(app, name), app, name); err != nil {
 		return err
 	}
-	if _, se, err := d.run(ctx, "rm", "-f", dbContainer(app, name)); err != nil && !notFound(se) {
-		return apierr.New(502, "database_remove_failed", "could not remove database %s: %s", name, se)
+	if err := d.ForceRemove(ctx, dbContainer(app, name)); err != nil {
+		return apierr.New(502, "database_remove_failed", "could not remove database %s: %v", name, err)
 	}
-	if _, se, err := d.run(ctx, "volume", "rm", dbVolume(app, name)); err != nil && !notFound(se) {
-		return apierr.New(502, "database_remove_failed", "could not remove database volume %s: %s", name, se)
+	if err := d.removeVolume(ctx, dbVolume(app, name)); err != nil {
+		return apierr.New(502, "database_remove_failed", "could not remove database volume %s: %v", name, err)
 	}
 	return nil
 }
@@ -182,21 +175,20 @@ func (d *Docker) RemoveDatabase(ctx context.Context, app, name string) error {
 // archive for postgres, an RDB file for redis.
 func (d *Docker) SnapshotDatabase(ctx context.Context, db DB, w io.Writer) error {
 	c := dbContainer(db.App, db.Name)
-	var args []string
+	var cmd []string
 	switch db.Engine {
 	case spec.EngineRedis:
-		if _, se, err := d.runEnv(ctx, []string{"REDISCLI_AUTH=" + db.Password}, "exec", "-e", "REDISCLI_AUTH", c, "redis-cli", "SAVE"); err != nil {
-			return apierr.New(502, "snapshot_failed", "redis SAVE failed for %s: %s", db.Name, se)
+		code, se, err := d.Exec(ctx, c, []string{"redis-cli", "SAVE"}, ExecIO{Env: redisAuth(db)})
+		if err != nil || code != 0 {
+			return apierr.New(502, "snapshot_failed", "redis SAVE failed for %s: %s", db.Name, errText(se, err))
 		}
-		args = []string{"exec", c, "cat", "/data/dump.rdb"}
+		cmd = []string{"cat", "/data/dump.rdb"}
 	default:
-		args = []string{"exec", c, "pg_dump", "-U", "app", "-d", "app", "-Fc"}
+		cmd = []string{"pg_dump", "-U", "app", "-d", "app", "-Fc"}
 	}
-	cmd := exec.CommandContext(ctx, d.Bin, args...)
-	var errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = w, &errb
-	if err := cmd.Run(); err != nil {
-		return apierr.New(502, "snapshot_failed", "snapshot of database %s failed: %s", db.Name, strings.TrimSpace(errb.String()))
+	code, se, err := d.Exec(ctx, c, cmd, ExecIO{Stdout: w})
+	if err != nil || code != 0 {
+		return apierr.New(502, "snapshot_failed", "snapshot of database %s failed: %s", db.Name, errText(se, err))
 	}
 	return nil
 }
@@ -207,35 +199,78 @@ func (d *Docker) RestoreDatabase(ctx context.Context, db DB, r io.Reader, log io
 		log = io.Discard
 	}
 	c := dbContainer(db.App, db.Name)
-	var errb bytes.Buffer
 	switch db.Engine {
 	case spec.EngineRedis:
-		// Redis loads dump.rdb only at startup: stop it, replace the file
-		// in the volume, start it again.
+		// Redis loads dump.rdb only at startup: stop it, copy the file into
+		// its volume, start it again.
 		fmt.Fprintf(log, "coldship: stopping redis %s to restore\n", db.Name)
-		if _, se, err := d.run(ctx, "stop", c); err != nil {
-			return apierr.New(502, "restore_failed", "could not stop %s: %s", db.Name, se)
+		if err := d.stopContainer(ctx, c, 10*time.Second); err != nil {
+			return apierr.New(502, "restore_failed", "could not stop %s: %v", db.Name, err)
 		}
-		cmd := exec.CommandContext(ctx, d.Bin, "run", "--rm", "-i", "-v", dbVolume(db.App, db.Name)+":/data",
-			"--entrypoint", "sh", dbImage(db.Engine, db.Version), "-c", "cat > /data/dump.rdb")
-		cmd.Stdin, cmd.Stderr = r, &errb
-		runErr := cmd.Run()
-		if _, se, err := d.run(ctx, "start", c); err != nil {
-			return apierr.New(502, "restore_failed", "could not start %s after restoring: %s", db.Name, se)
+		copyErr := d.copyFile(ctx, c, "/data", "dump.rdb", r)
+		if err := d.startContainer(ctx, c); err != nil {
+			return apierr.New(502, "restore_failed", "could not start %s after restoring: %v", db.Name, err)
 		}
-		if runErr != nil {
-			return apierr.New(502, "restore_failed", "writing the snapshot failed: %s", strings.TrimSpace(errb.String()))
+		if copyErr != nil {
+			return apierr.New(502, "restore_failed", "writing the snapshot failed: %v", copyErr)
 		}
 	default:
-		cmd := exec.CommandContext(ctx, d.Bin, "exec", "-i", c, "pg_restore", "-U", "app", "-d", "app",
-			"--clean", "--if-exists", "--no-owner", "--single-transaction")
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = r, log, &errb
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintln(log, errb.String())
-			return apierr.New(502, "restore_failed", "pg_restore failed for %s: %s", db.Name, lastLine(errb.String()))
+		code, se, err := d.Exec(ctx, c, []string{"pg_restore", "-U", "app", "-d", "app",
+			"--clean", "--if-exists", "--no-owner", "--single-transaction"}, ExecIO{Stdin: r, Stdout: log})
+		if err != nil || code != 0 {
+			fmt.Fprintln(log, se)
+			return apierr.New(502, "restore_failed", "pg_restore failed for %s: %s", db.Name, lastLine(errText(se, err)))
 		}
 	}
 	return d.waitDBReady(ctx, db, log)
+}
+
+// copyFile writes r as dir/name inside a container (running or stopped,
+// including into its volumes). It spools r to a temp file first, because a
+// tar header needs the size.
+func (d *Docker) copyFile(ctx context.Context, ctr, dir, name string, r io.Reader) error {
+	cli, err := d.api()
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp("", "coldship-copy-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	size, err := io.Copy(tmp, r)
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		tw := tar.NewWriter(pw)
+		err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: size, ModTime: time.Now()})
+		if err == nil {
+			_, err = io.Copy(tw, tmp)
+		}
+		if err == nil {
+			err = tw.Close()
+		}
+		pw.CloseWithError(err)
+	}()
+	_, err = cli.CopyToContainer(ctx, ctr, client.CopyToContainerOptions{DestinationPath: dir, Content: pr})
+	pr.Close()
+	return err
+}
+
+func errText(stderr string, err error) string {
+	if s := strings.TrimSpace(stderr); s != "" {
+		return s
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return "exited with an error"
 }
 
 func lastLine(s string) string {

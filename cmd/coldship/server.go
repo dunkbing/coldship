@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -55,6 +56,9 @@ func serverCmd() *cobra.Command {
 			cancelPing()
 			if err != nil {
 				return err
+			}
+			if _, err := exec.LookPath("docker"); err != nil {
+				log.Warn("the docker command isn't installed: apps from images work, but builds from Git need it (install docker-ce-cli)")
 			}
 			if keyFile == "" {
 				keyFile = defaultKeyFile(data)

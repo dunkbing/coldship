@@ -1,28 +1,28 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/client"
+
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/spec"
 )
 
-// Docker drives the docker CLI. Shelling out keeps the dependency tree small
-// for the starter; swap in the Docker Engine API client when needed.
+// Docker drives the local Docker daemon through the Engine API (the official
+// Go SDK). It honours DOCKER_HOST like the docker CLI does.
 type Docker struct {
-	Bin string
+	cli     *client.Client
+	initErr error
 	// StartupGrace is how long a new container must stay up before it counts
 	// as started, on top of passing its health check.
 	StartupGrace time.Duration
@@ -31,7 +31,8 @@ type Docker struct {
 }
 
 func NewDocker() *Docker {
-	return &Docker{Bin: "docker", StartupGrace: 3 * time.Second, StopTimeout: 10 * time.Second}
+	cli, err := client.New(client.FromEnv)
+	return &Docker{cli: cli, initErr: err, StartupGrace: 3 * time.Second, StopTimeout: 10 * time.Second}
 }
 
 func ContainerName(app string) string      { return "coldship-" + app }
@@ -61,67 +62,33 @@ var (
 	ReservedVolumes = []string{"coldship-proxy-data", "coldship-proxy-config"}
 )
 
-// notFound reports whether docker's error output says the object doesn't
-// exist. The wording and case vary between Docker versions ("No such
-// container", "error: no such object").
-func notFound(stderr string) bool {
-	return strings.Contains(strings.ToLower(stderr), "no such")
-}
-
-func (d *Docker) run(ctx context.Context, args ...string) (string, string, error) {
-	return d.runEnv(ctx, nil, args...)
-}
-
-// runEnv runs docker with extra environment variables. Pass secrets this way
-// with `-e NAME` (no value), never as `-e NAME=value`, which the process list
-// shows.
-func (d *Docker) runEnv(ctx context.Context, env []string, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, d.Bin, args...)
-	if env != nil {
-		cmd.Env = append(os.Environ(), env...)
-	}
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
-	return out.String(), strings.TrimSpace(errb.String()), err
-}
-
-// Ping checks that Docker is installed, running and usable by this user,
+// Ping checks that the Docker daemon is reachable and usable by this user,
 // and says how to fix it if not.
 func (d *Docker) Ping(ctx context.Context) error {
-	if _, err := exec.LookPath(d.Bin); err != nil {
-		return apierr.New(502, "docker_not_installed", "Docker isn't installed (no %q command found)", d.Bin).
-			WithHint("install Docker Engine: https://docs.docker.com/engine/install/, then start coldship server again")
+	cli, err := d.api()
+	if err != nil {
+		return err
 	}
-	if _, se, err := d.run(ctx, "version", "--format", "{{.Server.Version}}"); err != nil {
-		return dockerUnavailable("can't use Docker", se)
+	if _, err := cli.ServerVersion(ctx, client.ServerVersionOptions{}); err != nil {
+		return unavailable("can't use Docker", err)
 	}
 	return nil
 }
 
-// dockerUnavailable explains a failed docker call with the usual fixes.
-func dockerUnavailable(what, stderr string) *apierr.Error {
-	e := apierr.New(502, "runtime_unavailable", "%s: %s", what, stderr)
-	s := strings.ToLower(stderr)
-	switch {
-	case strings.Contains(s, "permission denied"):
-		e.Code = "docker_permission_denied"
-		e.WithHint("this user isn't allowed to use Docker. Add it to the docker group: `sudo usermod -aG docker $USER`, " +
-			"then log out and back in (or run `newgrp docker`), check with `docker ps`, and start coldship server again")
-	case strings.Contains(s, "cannot connect") || strings.Contains(s, "is the docker daemon running") || strings.Contains(s, "no such file"):
-		e.Code = "docker_not_running"
-		e.WithHint("start Docker (`sudo systemctl enable --now docker`), check with `docker ps`, then start coldship server again")
-	}
-	return e
-}
-
 // EnsureNetwork creates the Coldship network if it doesn't exist.
 func (d *Docker) EnsureNetwork(ctx context.Context) error {
-	if _, _, err := d.run(ctx, "network", "inspect", Network); err == nil {
-		return nil
+	cli, err := d.api()
+	if err != nil {
+		return err
 	}
-	if _, se, err := d.run(ctx, "network", "create", "--label", "coldship=true", Network); err != nil && !strings.Contains(se, "already exists") {
-		return dockerUnavailable("could not create docker network "+Network, se)
+	if _, err := cli.NetworkInspect(ctx, Network, client.NetworkInspectOptions{}); err == nil {
+		return nil
+	} else if !isNotFound(err) {
+		return unavailable("could not inspect docker network "+Network, err)
+	}
+	_, err = cli.NetworkCreate(ctx, Network, client.NetworkCreateOptions{Driver: "bridge", Labels: map[string]string{"coldship": "true"}})
+	if err != nil && !cerrdefs.IsConflict(err) {
+		return unavailable("could not create docker network "+Network, err)
 	}
 	return nil
 }
@@ -135,12 +102,12 @@ func (d *Docker) Deploy(ctx context.Context, deploymentID string, app spec.App, 
 		return err
 	}
 	// Pull before touching anything, so a bad image never causes downtime.
-	if _, _, err := d.run(ctx, "image", "inspect", app.Image); err != nil {
-		fmt.Fprintf(log, "coldship: pulling %s\n", app.Image)
-		if _, se, err := d.run(ctx, "pull", app.Image); err != nil {
-			return apierr.New(422, "image_pull_failed", "could not pull image %q: %s", app.Image, se).
-				WithField("image").WithHint("check the image name and tag, and that the node can reach the registry")
+	if err := d.EnsureImage(ctx, app.Image, log); err != nil {
+		if ae, ok := apierr.As(err); ok {
+			return ae
 		}
+		return apierr.New(422, "image_pull_failed", "could not pull image %q: %v", app.Image, err).
+			WithField("image").WithHint("check the image name and tag, and that the node can reach the registry")
 	}
 
 	if opts.ZeroDowntime {
@@ -213,56 +180,43 @@ func (d *Docker) deployAlongside(ctx context.Context, depID string, app spec.App
 			return fail(err)
 		}
 		fmt.Fprintf(log, "coldship: stopping the previous version (up to %s for graceful shutdown)\n", d.StopTimeout)
-		if _, se, err := d.run(ctx, "stop", "-t", strconv.Itoa(int(d.StopTimeout.Seconds())), ContainerName(app.Name)); err != nil && !notFound(se) {
-			fmt.Fprintf(log, "coldship: warning: stopping the previous version failed: %s\n", se)
+		if err := d.stopContainer(ctx, ContainerName(app.Name), d.StopTimeout); err != nil {
+			fmt.Fprintf(log, "coldship: warning: stopping the previous version failed: %v\n", err)
 		}
 		if err := d.removeContainer(ctx, ContainerName(app.Name), app.Name); err != nil {
 			fmt.Fprintf(log, "coldship: warning: %v\n", err)
 		}
 	}
-	if _, se, err := d.run(ctx, "rename", nextName(app.Name), ContainerName(app.Name)); err != nil {
-		fmt.Fprintf(log, "coldship: warning: renaming the new container failed: %s\n", se)
+	if cli, err := d.api(); err == nil {
+		if _, err := cli.ContainerRename(ctx, nextName(app.Name), client.ContainerRenameOptions{NewName: ContainerName(app.Name)}); err != nil {
+			fmt.Fprintf(log, "coldship: warning: renaming the new container failed: %v\n", err)
+		}
 	}
 	fmt.Fprintln(log, "coldship: deployed")
 	return nil
 }
 
 func (d *Docker) start(ctx context.Context, name, depID string, app spec.App, log io.Writer) error {
-	// Env goes through a 0600 temp file so secret values never appear in the
-	// process list.
-	envFile, err := os.CreateTemp("", "coldship-env-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(envFile.Name())
 	keys := make([]string, 0, len(app.Env))
 	for k := range app.Env {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	env := make([]string, 0, len(keys))
 	for _, k := range keys {
-		fmt.Fprintf(envFile, "%s=%s\n", k, app.Env[k])
+		env = append(env, k+"="+app.Env[k])
 	}
-	if err := envFile.Close(); err != nil {
-		return err
-	}
-
-	args := []string{"run", "-d", "--name", name,
-		"--label", "coldship.app=" + app.Name, "--label", "coldship.deployment=" + depID,
-		"--network", Network, "--network-alias", Alias(depID), "--network-alias", app.Name,
-		"--restart", "unless-stopped", "--env-file", envFile.Name()}
+	cs := ContainerSpec{Name: name, Image: app.Image, Env: env,
+		Labels:  map[string]string{"coldship.app": app.Name, "coldship.deployment": depID},
+		Aliases: []string{Alias(depID), app.Name}, Memory: parseMemory(app.Memory)}
 	if app.HostPort > 0 {
-		args = append(args, "-p", fmt.Sprintf("%d:%d", app.HostPort, app.Port))
-	}
-	if app.Memory != "" {
-		args = append(args, "--memory", app.Memory)
+		cs.Ports = map[int]int{app.HostPort: app.Port}
 	}
 	for _, v := range app.Volumes {
-		args = append(args, "-v", VolumeName(app.Name, v.Name)+":"+v.Path)
+		cs.Binds = append(cs.Binds, VolumeName(app.Name, v.Name)+":"+v.Path)
 	}
-	args = append(args, app.Image)
 	fmt.Fprintf(log, "coldship: starting %s from %s\n", name, app.Image)
-	if _, se, err := d.run(ctx, args...); err != nil {
+	if se, err := d.RunContainer(ctx, cs); err != nil {
 		e := apierr.New(502, "container_start_failed", "docker could not start the container: %s", se)
 		if strings.Contains(se, "port is already allocated") || strings.Contains(se, "address already in use") {
 			e.Code = "host_port_in_use"
@@ -327,8 +281,8 @@ func (d *Docker) waitHealthy(ctx context.Context, name string, app spec.App, log
 }
 
 func (d *Docker) probe(ctx context.Context, name string, app spec.App) (bool, string) {
-	out, _, err := d.run(ctx, "inspect", "-f", `{{with index .NetworkSettings.Networks "`+Network+`"}}{{.IPAddress}}{{end}}`, name)
-	ip := strings.TrimSpace(out)
+	info, err := d.InspectContainer(ctx, name)
+	ip := info.IP
 	if err != nil || ip == "" {
 		return false, "container has no address on the coldship network yet"
 	}
@@ -364,14 +318,14 @@ func shortNetErr(err error) string {
 }
 
 func (d *Docker) dumpLogs(ctx context.Context, name string, log io.Writer) {
-	out, err := exec.CommandContext(context.WithoutCancel(ctx), d.Bin, "logs", "--tail", "50", name).CombinedOutput()
-	if err != nil || len(bytes.TrimSpace(out)) == 0 {
+	out, err := d.tailLogs(context.WithoutCancel(ctx), name, 50, "")
+	if err != nil || strings.TrimSpace(out) == "" {
 		fmt.Fprintln(log, "coldship: the container produced no output")
 		return
 	}
 	fmt.Fprintln(log, "coldship: last output of the new container:")
-	log.Write(out)
-	if !bytes.HasSuffix(out, []byte("\n")) {
+	fmt.Fprint(log, out)
+	if !strings.HasSuffix(out, "\n") {
 		fmt.Fprintln(log)
 	}
 }
@@ -382,8 +336,8 @@ func (d *Docker) removeContainer(ctx context.Context, name, app string) error {
 	if err := d.checkOwner(ctx, name, app, ""); err != nil {
 		return err
 	}
-	if _, se, err := d.run(ctx, "rm", "-f", name); err != nil && !notFound(se) {
-		return apierr.New(502, "container_remove_failed", "could not remove container %s: %s", name, se)
+	if err := d.ForceRemove(ctx, name); err != nil {
+		return apierr.New(502, "container_remove_failed", "could not remove container %s: %v", name, err)
 	}
 	return nil
 }
@@ -391,15 +345,14 @@ func (d *Docker) removeContainer(ctx context.Context, name, app string) error {
 // checkOwner returns an error if container name exists and isn't app's (or,
 // with db set, app's database db).
 func (d *Docker) checkOwner(ctx context.Context, name, app, db string) error {
-	out, se, err := d.run(ctx, "inspect", "--type", "container", "-f",
-		`{{index .Config.Labels "coldship.app"}}|{{index .Config.Labels "coldship.db"}}`, name)
+	info, err := d.InspectContainer(ctx, name)
 	if err != nil {
-		if notFound(se) {
-			return nil
-		}
-		return apierr.New(502, "runtime_unavailable", "docker inspect failed: %s", se)
+		return err
 	}
-	if got := strings.TrimSpace(out); got != app+"|"+db {
+	if !info.Exists {
+		return nil
+	}
+	if got := info.Labels["coldship.app"] + "|" + info.Labels["coldship.db"]; got != app+"|"+db {
 		return apierr.New(409, "name_in_use", "container %s doesn't belong to %s (labels %q); Coldship won't touch it", name, app, got).
 			WithHint("rename or remove that container yourself, or rename the app")
 	}
@@ -417,8 +370,8 @@ func (d *Docker) Remove(ctx context.Context, app string, volumes []string) error
 
 func (d *Docker) RemoveVolumes(ctx context.Context, app string, volumes []string) error {
 	for _, v := range volumes {
-		if _, se, err := d.run(ctx, "volume", "rm", VolumeName(app, v)); err != nil && !notFound(se) {
-			return apierr.New(502, "volume_remove_failed", "could not remove volume %s: %s", v, se)
+		if err := d.removeVolume(ctx, VolumeName(app, v)); err != nil {
+			return apierr.New(502, "volume_remove_failed", "could not remove volume %s: %v", v, err)
 		}
 	}
 	return nil
@@ -429,53 +382,19 @@ func (d *Docker) Status(ctx context.Context, app string) (Status, error) {
 }
 
 func (d *Docker) inspect(ctx context.Context, name string) (Status, error) {
-	out, se, err := d.run(ctx, "inspect", "--type", "container", name)
-	if err != nil {
-		if notFound(se) {
-			return Status{}, nil
-		}
-		return Status{}, apierr.New(502, "runtime_unavailable", "docker inspect failed: %s", se)
-	}
-	var res []struct {
-		State struct {
-			Status     string
-			Running    bool
-			Restarting bool
-			OOMKilled  bool
-			ExitCode   int
-			StartedAt  string
-			Error      string
-		}
-		RestartCount int
-		Config       struct{ Image string }
-	}
-	if err := json.Unmarshal([]byte(out), &res); err != nil || len(res) == 0 {
-		return Status{}, fmt.Errorf("parse docker inspect: %v", err)
-	}
-	r := res[0]
-	return Status{
-		Exists: true, State: r.State.Status, Running: r.State.Running && !r.State.Restarting,
-		ExitCode: r.State.ExitCode, OOMKilled: r.State.OOMKilled, RestartCount: r.RestartCount,
-		StartedAt: r.State.StartedAt, Image: r.Config.Image, Error: r.State.Error,
-	}, nil
+	info, err := d.InspectContainer(ctx, name)
+	return info.Status, err
 }
 
 func (d *Docker) Logs(ctx context.Context, app string, tail int, since string) ([]string, error) {
-	args := []string{"logs", "--tail", fmt.Sprint(tail)}
-	if since != "" {
-		args = append(args, "--since", since)
+	out, err := d.tailLogs(ctx, ContainerName(app), tail, since)
+	if isNotFound(err) {
+		return []string{}, nil
 	}
-	args = append(args, ContainerName(app))
-	cmd := exec.CommandContext(ctx, d.Bin, args...)
-	out, err := cmd.CombinedOutput()
 	if err != nil {
-		s := strings.TrimSpace(string(out))
-		if notFound(s) {
-			return []string{}, nil
-		}
-		return nil, apierr.New(502, "logs_unavailable", "docker logs failed: %s", s)
+		return nil, apierr.New(502, "logs_unavailable", "docker logs failed: %v", err)
 	}
-	return splitLines(string(out)), nil
+	return splitLines(out), nil
 }
 
 func splitLines(s string) []string {

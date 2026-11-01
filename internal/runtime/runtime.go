@@ -1,5 +1,6 @@
 // Package runtime runs app containers on a node. Docker drives the local
-// Docker daemon via its CLI; Fake is an in-memory runtime for tests.
+// Docker daemon through the Engine API (the official Go SDK); Fake is an
+// in-memory runtime for tests.
 package runtime
 
 import (

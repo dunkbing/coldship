@@ -8,12 +8,10 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -49,8 +47,8 @@ type Status struct {
 const containerName = "coldship-proxy"
 
 type Caddy struct {
-	DockerBin string
-	Image     string
+	Docker *runtime.Docker
+	Image  string
 	// ConfigDir is a host directory mounted into the container at
 	// /etc/coldship; Coldship writes caddy.json there.
 	ConfigDir string
@@ -63,16 +61,8 @@ type Caddy struct {
 }
 
 func NewCaddy(configDir string, httpPort, httpsPort int, email string) *Caddy {
-	return &Caddy{DockerBin: "docker", Image: "caddy:2-alpine", ConfigDir: configDir,
+	return &Caddy{Docker: runtime.NewDocker(), Image: "caddy:2-alpine", ConfigDir: configDir,
 		HTTPPort: httpPort, HTTPSPort: httpsPort, Email: email}
-}
-
-func (c *Caddy) docker(ctx context.Context, args ...string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, c.DockerBin, args...)
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
-	return out.String(), strings.TrimSpace(errb.String()), err
 }
 
 func (c *Caddy) portsLabel() string { return fmt.Sprintf("%d,%d", c.HTTPPort, c.HTTPSPort) }
@@ -80,7 +70,7 @@ func (c *Caddy) portsLabel() string { return fmt.Sprintf("%d,%d", c.HTTPPort, c.
 func (c *Caddy) Ensure(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := (&runtime.Docker{Bin: c.DockerBin}).EnsureNetwork(ctx); err != nil {
+	if err := c.Docker.EnsureNetwork(ctx); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(c.ConfigDir, 0o755); err != nil {
@@ -93,25 +83,31 @@ func (c *Caddy) Ensure(ctx context.Context) error {
 		}
 	}
 
-	out, _, err := c.docker(ctx, "inspect", "-f", `{{.State.Running}} {{index .Config.Labels "coldship.proxy.ports"}}`, containerName)
-	if err == nil {
-		running, ports, _ := strings.Cut(strings.TrimSpace(out), " ")
-		if running == "true" && ports == c.portsLabel() {
+	info, err := c.Docker.InspectContainer(ctx, containerName)
+	if err != nil {
+		return err
+	}
+	if info.Exists {
+		if info.Running && info.Labels["coldship.proxy.ports"] == c.portsLabel() {
 			return nil
 		}
 		// Wrong ports or stopped: recreate. Certificates live in a volume.
-		c.docker(ctx, "rm", "-f", containerName)
+		if err := c.Docker.ForceRemove(ctx, containerName); err != nil {
+			return apierr.New(502, "proxy_unavailable", "could not replace the proxy container: %v", err)
+		}
 	}
 	abs, err := filepath.Abs(c.ConfigDir)
 	if err != nil {
 		return err
 	}
-	_, se, err := c.docker(ctx, "run", "-d", "--name", containerName,
-		"--label", "coldship.proxy.ports="+c.portsLabel(), "--restart", "unless-stopped",
-		"--network", runtime.Network,
-		"-p", fmt.Sprintf("%d:80", c.HTTPPort), "-p", fmt.Sprintf("%d:443", c.HTTPSPort),
-		"-v", "coldship-proxy-data:/data", "-v", "coldship-proxy-config:/config", "-v", abs+":/etc/coldship:ro",
-		c.Image, "caddy", "run", "--config", "/etc/coldship/caddy.json")
+	if err := c.Docker.EnsureImage(ctx, c.Image, nil); err != nil {
+		return apierr.New(502, "proxy_unavailable", "could not pull %s: %v", c.Image, err)
+	}
+	se, err := c.Docker.RunContainer(ctx, runtime.ContainerSpec{Name: containerName, Image: c.Image,
+		Cmd:    []string{"caddy", "run", "--config", "/etc/coldship/caddy.json"},
+		Labels: map[string]string{"coldship.proxy.ports": c.portsLabel()},
+		Ports:  map[int]int{c.HTTPPort: 80, c.HTTPSPort: 443},
+		Binds:  []string{"coldship-proxy-data:/data", "coldship-proxy-config:/config", abs + ":/etc/coldship:ro"}})
 	if err != nil {
 		e := apierr.New(502, "proxy_unavailable", "could not start the proxy container: %s", se)
 		if strings.Contains(se, "port is already allocated") || strings.Contains(se, "address already in use") {
@@ -128,8 +124,11 @@ func (c *Caddy) Apply(ctx context.Context, routes []Route) error {
 	if err := c.write(routes); err != nil {
 		return err
 	}
-	_, se, err := c.docker(ctx, "exec", containerName, "caddy", "reload", "--config", "/etc/coldship/caddy.json", "--force")
-	if err != nil {
+	code, se, err := c.Docker.Exec(ctx, containerName, []string{"caddy", "reload", "--config", "/etc/coldship/caddy.json", "--force"}, runtime.ExecIO{})
+	if err != nil || code != 0 {
+		if se == "" && err != nil {
+			se = err.Error()
+		}
 		return apierr.New(502, "proxy_reload_failed", "the proxy rejected its new configuration: %s", lastLine(se)).
 			WithHint("check that the coldship-proxy container is running (coldship server starts it)")
 	}
@@ -138,12 +137,15 @@ func (c *Caddy) Apply(ctx context.Context, routes []Route) error {
 
 func (c *Caddy) Status(ctx context.Context) Status {
 	st := Status{Enabled: true, HTTP: c.HTTPPort, HTTPS: c.HTTPSPort}
-	out, se, err := c.docker(ctx, "inspect", "-f", "{{.State.Running}}", containerName)
-	if err != nil {
-		st.Error = lastLine(se)
-		return st
+	info, err := c.Docker.InspectContainer(ctx, containerName)
+	switch {
+	case err != nil:
+		st.Error = err.Error()
+	case !info.Exists:
+		st.Error = "no such container: " + containerName
+	default:
+		st.Running = info.Running
 	}
-	st.Running = strings.TrimSpace(out) == "true"
 	return st
 }
 
