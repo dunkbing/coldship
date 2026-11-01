@@ -11,8 +11,12 @@ VERSION ?= 0.1.0-dev
 # never replaces itself; the release workflow sets it to GitHub Releases.
 UPDATE_URL ?=
 RELEASE_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+# Release notes come from the tag message. They are passed to the recipe
+# through the environment, never expanded into it, so no tag or commit text
+# ever runs as shell.
 NOTES ?=
 NOTES_URL ?=
+export NOTES NOTES_URL
 LDFLAGS = -s -w -X main.version=$(VERSION) -X main.defaultUpdateURL=$(UPDATE_URL)
 
 go:
@@ -45,7 +49,7 @@ release: dashboard go
 		CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} go build -trimpath -ldflags "$(LDFLAGS)" -o dist/coldship-$${p%/*}-$${p#*/} ./cmd/coldship || exit 1; \
 	done
 	./bin/coldship release manifest --version $(VERSION) --out dist/latest.json \
-		--notes "$(NOTES)" --notes-url "$(NOTES_URL)" \
+		--notes "$$NOTES" --notes-url "$$NOTES_URL" \
 		$(foreach p,$(RELEASE_PLATFORMS),$(p)=dist/coldship-$(subst /,-,$(p)))
 	cd dist && sha256sum coldship-* latest.json > SHA256SUMS
 
