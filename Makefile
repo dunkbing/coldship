@@ -1,4 +1,4 @@
-.PHONY: build dashboard go test vet run website website-dev screenshots release clean
+.PHONY: build dashboard go test vet run website website-dev docker-smoke screenshots release clean
 
 # The dashboard is built into internal/web/dist and embedded in the binary.
 build: dashboard go
@@ -38,6 +38,10 @@ website-dev:
 	cd website && bun run dev
 
 # Regenerate the docs screenshots (needs Docker).
+# End-to-end deploys against real Docker.
+docker-smoke: build
+	./scripts/docker-smoke.sh
+
 screenshots:
 	./scripts/screenshots.sh
 

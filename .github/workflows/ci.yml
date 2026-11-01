@@ -69,6 +69,8 @@ jobs:
           for i in $(seq 30); do curl -sf http://127.0.0.1:7070/healthz && break; sleep 1; done
           curl -sf http://127.0.0.1:7070/ | grep -q "<title>Coldship"
           echo "dashboard is served by the binary"
+      - name: Docker smoke test
+        run: ./scripts/docker-smoke.sh
 
   docs:
     name: Docs site
