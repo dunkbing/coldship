@@ -58,3 +58,23 @@ func TestRemoveRefusesContainersOfOthers(t *testing.T) {
 		t.Fatal("an app container must not be removed as a database")
 	}
 }
+
+// Newer Docker versions report missing objects in lower case.
+func TestMissingContainerIsNotAnError(t *testing.T) {
+	for _, msg := range []string{"Error: No such container: x", "error: no such object: x"} {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "docker")
+		script := "#!/bin/sh\ncase \"$1\" in inspect) echo '" + msg + "' >&2; exit 1;; esac\n"
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		d := NewDocker()
+		d.Bin = bin
+		if err := d.Remove(context.Background(), "web", nil); err != nil {
+			t.Fatalf("%q: %v", msg, err)
+		}
+		if st, err := d.Status(context.Background(), "web"); err != nil || st.Exists {
+			t.Fatalf("%q: status %+v %v", msg, st, err)
+		}
+	}
+}

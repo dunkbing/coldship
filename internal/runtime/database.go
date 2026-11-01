@@ -156,7 +156,7 @@ func (d *Docker) dbReady(ctx context.Context, db DB) bool {
 func (d *Docker) DatabaseStatus(ctx context.Context, app, name string) (DBStatus, error) {
 	out, se, err := d.run(ctx, "inspect", "-f", "{{.State.Status}} {{.Config.Image}}", dbContainer(app, name))
 	if err != nil {
-		if strings.Contains(se, "No such") {
+		if notFound(se) {
 			return DBStatus{}, nil
 		}
 		return DBStatus{}, apierr.New(502, "runtime_unavailable", "docker inspect failed: %s", se)
@@ -169,10 +169,10 @@ func (d *Docker) RemoveDatabase(ctx context.Context, app, name string) error {
 	if err := d.checkOwner(ctx, dbContainer(app, name), app, name); err != nil {
 		return err
 	}
-	if _, se, err := d.run(ctx, "rm", "-f", dbContainer(app, name)); err != nil && !strings.Contains(se, "No such container") {
+	if _, se, err := d.run(ctx, "rm", "-f", dbContainer(app, name)); err != nil && !notFound(se) {
 		return apierr.New(502, "database_remove_failed", "could not remove database %s: %s", name, se)
 	}
-	if _, se, err := d.run(ctx, "volume", "rm", dbVolume(app, name)); err != nil && !strings.Contains(se, "no such volume") {
+	if _, se, err := d.run(ctx, "volume", "rm", dbVolume(app, name)); err != nil && !notFound(se) {
 		return apierr.New(502, "database_remove_failed", "could not remove database volume %s: %s", name, se)
 	}
 	return nil

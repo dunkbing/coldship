@@ -61,6 +61,13 @@ var (
 	ReservedVolumes = []string{"coldship-proxy-data", "coldship-proxy-config"}
 )
 
+// notFound reports whether docker's error output says the object doesn't
+// exist. The wording and case vary between Docker versions ("No such
+// container", "error: no such object").
+func notFound(stderr string) bool {
+	return strings.Contains(strings.ToLower(stderr), "no such")
+}
+
 func (d *Docker) run(ctx context.Context, args ...string) (string, string, error) {
 	return d.runEnv(ctx, nil, args...)
 }
@@ -177,7 +184,7 @@ func (d *Docker) deployAlongside(ctx context.Context, depID string, app spec.App
 			return fail(err)
 		}
 		fmt.Fprintf(log, "coldship: stopping the previous version (up to %s for graceful shutdown)\n", d.StopTimeout)
-		if _, se, err := d.run(ctx, "stop", "-t", strconv.Itoa(int(d.StopTimeout.Seconds())), ContainerName(app.Name)); err != nil && !strings.Contains(se, "No such container") {
+		if _, se, err := d.run(ctx, "stop", "-t", strconv.Itoa(int(d.StopTimeout.Seconds())), ContainerName(app.Name)); err != nil && !notFound(se) {
 			fmt.Fprintf(log, "coldship: warning: stopping the previous version failed: %s\n", se)
 		}
 		if err := d.removeContainer(ctx, ContainerName(app.Name), app.Name); err != nil {
@@ -346,7 +353,7 @@ func (d *Docker) removeContainer(ctx context.Context, name, app string) error {
 	if err := d.checkOwner(ctx, name, app, ""); err != nil {
 		return err
 	}
-	if _, se, err := d.run(ctx, "rm", "-f", name); err != nil && !strings.Contains(se, "No such container") {
+	if _, se, err := d.run(ctx, "rm", "-f", name); err != nil && !notFound(se) {
 		return apierr.New(502, "container_remove_failed", "could not remove container %s: %s", name, se)
 	}
 	return nil
@@ -358,7 +365,7 @@ func (d *Docker) checkOwner(ctx context.Context, name, app, db string) error {
 	out, se, err := d.run(ctx, "inspect", "--type", "container", "-f",
 		`{{index .Config.Labels "coldship.app"}}|{{index .Config.Labels "coldship.db"}}`, name)
 	if err != nil {
-		if strings.Contains(se, "No such") {
+		if notFound(se) {
 			return nil
 		}
 		return apierr.New(502, "runtime_unavailable", "docker inspect failed: %s", se)
@@ -381,7 +388,7 @@ func (d *Docker) Remove(ctx context.Context, app string, volumes []string) error
 
 func (d *Docker) RemoveVolumes(ctx context.Context, app string, volumes []string) error {
 	for _, v := range volumes {
-		if _, se, err := d.run(ctx, "volume", "rm", VolumeName(app, v)); err != nil && !strings.Contains(se, "no such volume") {
+		if _, se, err := d.run(ctx, "volume", "rm", VolumeName(app, v)); err != nil && !notFound(se) {
 			return apierr.New(502, "volume_remove_failed", "could not remove volume %s: %s", v, se)
 		}
 	}
@@ -395,7 +402,7 @@ func (d *Docker) Status(ctx context.Context, app string) (Status, error) {
 func (d *Docker) inspect(ctx context.Context, name string) (Status, error) {
 	out, se, err := d.run(ctx, "inspect", "--type", "container", name)
 	if err != nil {
-		if strings.Contains(se, "No such") {
+		if notFound(se) {
 			return Status{}, nil
 		}
 		return Status{}, apierr.New(502, "runtime_unavailable", "docker inspect failed: %s", se)
@@ -434,7 +441,7 @@ func (d *Docker) Logs(ctx context.Context, app string, tail int, since string) (
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		s := strings.TrimSpace(string(out))
-		if strings.Contains(s, "No such container") {
+		if notFound(s) {
 			return []string{}, nil
 		}
 		return nil, apierr.New(502, "logs_unavailable", "docker logs failed: %s", s)
