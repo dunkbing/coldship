@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Run gofmt -w on:"; echo "$unformatted"; exit 1; fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        # Builder tests use real git; git needs an identity to commit.
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.com
+          go test -race ./...
+
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Type-check and build
+        working-directory: dashboard
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+  binary:
+    name: Binary with dashboard
+    needs: [go, dashboard]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: make build
+        run: make build
+      - name: Smoke test
+        run: |
+          ./bin/coldship --version
+          ./bin/coldship server --addr 127.0.0.1:7070 --data "$RUNNER_TEMP/coldship.db" --proxy=false 2> "$RUNNER_TEMP/server.log" &
+          for i in $(seq 30); do curl -sf http://127.0.0.1:7070/healthz && break; sleep 1; done
+          curl -sf http://127.0.0.1:7070/ | grep -q "<title>Coldship"
+          echo "dashboard is served by the binary"
+
+  docs:
+    name: Docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Build
+        working-directory: website
+        run: |
+          bun install --frozen-lockfile
+          bun run build
