@@ -1,6 +1,6 @@
 import { LiveLog } from '../components/LiveLog'
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, GitBranch, Info, Loader2 } from 'lucide-react'
 import { api, type Patch, type Plan } from '../api'
 import { ErrorBox, PageHeader } from '@/components/common'
@@ -68,9 +68,11 @@ function parseEnv(text: string): Record<string, string> | string {
 
 export default function NewApp() {
   const nav = useNavigate()
-  const [kind, setKind] = useState<'git' | 'image'>('git')
-  const [source, setSource] = useState('')
-  const [ref, setRef] = useState('')
+  // A GitHub pick on the launch page arrives as ?git=…&ref=…
+  const [params] = useSearchParams()
+  const [kind, setKind] = useState<'git' | 'image'>(params.get('image') ? 'image' : 'git')
+  const [source, setSource] = useState(params.get('git') ?? params.get('image') ?? '')
+  const [ref, setRef] = useState(params.get('ref') ?? '')
   const [name, setName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
   const [port, setPort] = useState('')
@@ -173,7 +175,11 @@ export default function NewApp() {
 
   return (
     <>
-      <PageHeader title="New app" description="Deploy from a Git repository (with or without a Dockerfile) or a container image." />
+      <PageHeader
+        crumbs={<Link to="/apps/new" className="hover:underline">Launch an app</Link>}
+        title="Configure and deploy"
+        description="Deploy from a Git repository (with or without a Dockerfile) or a container image."
+      />
 
       <Card className="max-w-2xl">
         <CardContent>

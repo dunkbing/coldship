@@ -5,6 +5,7 @@ import { api, ApiError, type WhoAmI } from './api'
 import { useLoad } from './hooks'
 import Login from './pages/Login'
 import NewApp from './pages/NewApp'
+import Launch from './pages/Launch'
 import Data from './pages/Data'
 import NewData from './pages/NewData'
 import DataDetail from './pages/DataDetail'
@@ -99,7 +100,8 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Navigate to="/apps" replace />} />
                 <Route path="/apps" element={<Apps />} />
-                <Route path="/apps/new" element={<NewApp />} />
+                <Route path="/apps/new" element={<Launch />} />
+                <Route path="/apps/new/configure" element={<NewApp />} />
                 <Route path="/apps/:name" element={<AppDetail />} />
                 <Route path="/data" element={<Data />} />
                 <Route path="/data/new" element={<NewData />} />

@@ -145,6 +145,21 @@ export interface AppMetrics {
   points: MetricPoint[]
 }
 
+export interface GitHubStatus {
+  connected: boolean
+  account?: string
+  since?: string
+}
+
+export interface GitHubRepo {
+  full_name: string
+  private: boolean
+  default_branch: string
+  clone_url: string
+  description?: string
+  updated_at: string
+}
+
 export interface Usage {
   total: number
   used: number
@@ -417,6 +432,13 @@ export const api = {
     req<{ message: string }>('POST', `/v1/data/${enc(name)}/restore`, { snapshot, reason }),
   system: () => req<SystemStatus>('GET', '/v1/system'),
   metrics: (name: string) => req<AppMetrics>('GET', `/v1/apps/${enc(name)}/metrics`),
+  github: () => req<GitHubStatus>('GET', '/v1/integrations/github'),
+  connectGitHub: (token: string) => req<GitHubStatus>('PUT', '/v1/integrations/github', { token }),
+  disconnectGitHub: () => req<{ connected: boolean }>('DELETE', '/v1/integrations/github'),
+  githubRepos: () => req<GitHubRepo[]>('GET', '/v1/integrations/github/repos'),
+  githubBranches: (fullName: string) => req<string[]>('GET', `/v1/integrations/github/repos/${fullName.split('/').map(enc).join('/')}/branches`),
+  createToken: (name: string, scope: string, apps?: string[]) =>
+    req<{ name: string; scope: string; apps?: string[]; token: string }>('POST', '/v1/tokens', { name, scope, apps }),
   serverStatus: () => req<ServerStatus>('GET', '/v1/system/status'),
   upgrade: () => req<SystemStatus>('POST', '/v1/system/upgrade'),
   audit: (limit = 200) => req<AuditEntry[]>('GET', `/v1/audit?limit=${limit}`),
