@@ -115,6 +115,9 @@ func serverCmd() *cobra.Command {
 				snapshotDir = filepath.Join(filepath.Dir(dataAbs), "coldship-snapshots")
 			}
 			eng.SnapshotDir, eng.SnapshotKeep = snapshotDir, snapshotKeep
+			if abs, err := filepath.Abs(data); err == nil {
+				eng.DataDir = filepath.Dir(abs)
+			}
 			eng.Previews = engine.PreviewConfig{Domain: previewDomain, DefaultTTL: previewTTL, MaxTTL: previewMaxTTL, Max: maxPreviews}
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

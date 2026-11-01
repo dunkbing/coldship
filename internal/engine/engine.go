@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/dunkbing/coldship/internal/hostinfo"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -33,6 +34,9 @@ type Engine struct {
 	px      proxy.Proxy // nil when the proxy is disabled
 	proxyMu sync.Mutex
 	routes  map[string]proxy.Route // live route table, by app
+	// DataDir is where Coldship keeps its state, for the server page.
+	DataDir string
+	started time.Time
 	// live holds the logs of deployments in progress, for following.
 	liveMu   sync.Mutex
 	live     map[string]*builder.LogTail
@@ -51,7 +55,7 @@ type Engine struct {
 
 // New creates an engine. px may be nil, which disables domains.
 func New(st *store.Store, rt runtime.Runtime, bd builder.Builder, px proxy.Proxy) *Engine {
-	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{}, live: map[string]*builder.LogTail{},
+	return &Engine{st: st, rt: rt, bd: bd, px: px, routes: map[string]proxy.Route{}, locks: map[string]*sync.Mutex{}, live: map[string]*builder.LogTail{}, started: time.Now(),
 		PlanTTL: 30 * time.Minute, Previews: defaultPreviewConfig(), SnapshotDir: "snapshots", SnapshotKeep: 20, Now: time.Now}
 }
 
@@ -116,6 +120,56 @@ func (e *Engine) setRouteTo(ctx context.Context, r proxy.Route) error {
 		return err
 	}
 	return nil
+}
+
+// ServerStatus is the dashboard's server page: the host, the container
+// engine, and Coldship itself.
+type ServerStatus struct {
+	Host         hostinfo.Info          `json:"host"`
+	Engine       *runtime.EngineDetails `json:"engine,omitempty"`
+	EngineError  string                 `json:"engine_error,omitempty"`
+	Proxy        *proxy.Status          `json:"proxy,omitempty"`
+	DataDir      string                 `json:"data_dir"`
+	StartedAt    time.Time              `json:"started_at"`
+	Apps         int                    `json:"apps"`
+	DataServices int                    `json:"data_services"`
+}
+
+// Status samples the host for a moment (CPU usage) and gathers the rest.
+func (e *Engine) Status(ctx context.Context) ServerStatus {
+	st := ServerStatus{DataDir: e.DataDir, StartedAt: e.started}
+	paths := map[string]string{}
+	if e.DataDir != "" {
+		paths[e.DataDir] = "Coldship's data"
+	}
+	if ed, ok := e.rt.(interface {
+		EngineDetails(context.Context) (runtime.EngineDetails, error)
+	}); ok {
+		if d, err := ed.EngineDetails(ctx); err != nil {
+			st.EngineError = err.Error()
+		} else {
+			st.Engine = &d
+			if d.RootDir != "" {
+				paths[d.RootDir] = "images and volumes"
+			}
+		}
+	}
+	st.Host = hostinfo.Read(300*time.Millisecond, paths)
+	if e.px != nil {
+		ps := e.px.Status(ctx)
+		st.Proxy = &ps
+	}
+	if apps, err := e.st.ListApps(ctx); err == nil {
+		st.Apps = len(apps)
+	}
+	if recs, err := e.st.AllDatabases(ctx); err == nil {
+		for _, r := range recs {
+			if r.App == "" {
+				st.DataServices++
+			}
+		}
+	}
+	return st
 }
 
 // HostInfo describes what the server runs on: its container engine and

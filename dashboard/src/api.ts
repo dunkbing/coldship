@@ -122,6 +122,35 @@ export interface Snapshot {
   created_at: string
 }
 
+export interface Usage {
+  total: number
+  used: number
+}
+
+export interface ServerStatus {
+  version: string
+  host: {
+    hostname: string
+    os: string
+    kernel: string
+    arch: string
+    cpus: number
+    cpu_used_percent: number
+    load: [number, number, number]
+    uptime_seconds: number
+    memory: Usage
+    swap: Usage
+    disks: (Usage & { path: string; for: string })[]
+  }
+  engine?: { name: string; version: string; containers: number; running: number; images: number; storage_driver: string; root_dir: string; host: string }
+  engine_error?: string
+  proxy?: { enabled: boolean; running: boolean; http_port?: number; https_port?: number; error?: string }
+  data_dir: string
+  started_at: string
+  apps: number
+  data_services: number
+}
+
 export type DataEngine = 'postgres' | 'mysql' | 'redis' | 's3'
 
 // A data service (app === undefined) or a database an app owns.
@@ -354,6 +383,7 @@ export const api = {
   restoreData: (name: string, snapshot: string, reason: string) =>
     req<{ message: string }>('POST', `/v1/data/${enc(name)}/restore`, { snapshot, reason }),
   system: () => req<SystemStatus>('GET', '/v1/system'),
+  serverStatus: () => req<ServerStatus>('GET', '/v1/system/status'),
   upgrade: () => req<SystemStatus>('POST', '/v1/system/upgrade'),
   audit: (limit = 200) => req<AuditEntry[]>('GET', `/v1/audit?limit=${limit}`),
 }

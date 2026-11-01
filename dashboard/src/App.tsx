@@ -7,6 +7,7 @@ import NewApp from './pages/NewApp'
 import Data from './pages/Data'
 import NewData from './pages/NewData'
 import DataDetail from './pages/DataDetail'
+import Server from './pages/Server'
 import Apps from './pages/Apps'
 import AppDetail from './pages/AppDetail'
 import Approvals from './pages/Approvals'
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/data" element={<Data />} />
             <Route path="/data/new" element={<NewData />} />
             <Route path="/data/:name" element={<DataDetail />} />
+            <Route path="/server" element={<Server />} />
             <Route path="/approvals" element={<Approvals />} />
             <Route path="/audit" element={<Audit />} />
             <Route path="*" element={<Navigate to="/apps" replace />} />
@@ -94,6 +96,7 @@ function Sidebar({ me, onSignOut }: { me: WhoAmI; onSignOut: () => void }) {
           {needApproval > 0 && <span className="count">{needApproval}</span>}
         </NavLink>
         <NavLink to="/audit">Audit log</NavLink>
+        {!me.apps?.length && <NavLink to="/server">Server</NavLink>}
       </div>
       <div className="whoami">
         <div>

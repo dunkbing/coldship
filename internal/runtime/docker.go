@@ -78,6 +78,36 @@ func (d *Docker) EngineInfo(ctx context.Context) (name, version string, err erro
 	return name, v.Version, nil
 }
 
+// EngineDetails is the container engine's own view of the host.
+type EngineDetails struct {
+	Name       string `json:"name"` // docker | podman
+	Version    string `json:"version"`
+	Containers int    `json:"containers"`
+	Running    int    `json:"running"`
+	Images     int    `json:"images"`
+	Driver     string `json:"storage_driver"`
+	RootDir    string `json:"root_dir"`
+	Host       string `json:"host"`
+}
+
+func (d *Docker) EngineDetails(ctx context.Context) (EngineDetails, error) {
+	cli, err := d.api()
+	if err != nil {
+		return EngineDetails{}, err
+	}
+	res, err := cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return EngineDetails{}, unavailable("can't reach the container engine", err)
+	}
+	i := res.Info
+	name := "docker"
+	if d.IsPodman(ctx) {
+		name = "podman"
+	}
+	return EngineDetails{Name: name, Version: i.ServerVersion, Containers: i.Containers, Running: i.ContainersRunning,
+		Images: i.Images, Driver: i.Driver, RootDir: i.DockerRootDir, Host: d.Host}, nil
+}
+
 // IsPodman reports whether the engine is Podman (through its
 // Docker-compatible API) rather than Docker.
 func (d *Docker) IsPodman(ctx context.Context) bool {

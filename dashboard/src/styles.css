@@ -998,3 +998,49 @@ section.card {
 .live-card {
   border-color: var(--accent);
 }
+
+/* Server page */
+.meter {
+  margin: 10px 0 14px;
+}
+.meter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.meter-bar {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s;
+}
+.meter-fill.ok {
+  background: var(--accent);
+}
+.meter-fill.warn {
+  background: #d4a017;
+}
+.meter-fill.danger {
+  background: #c0392b;
+}
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+.facts dt {
+  color: var(--muted);
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

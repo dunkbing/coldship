@@ -12,7 +12,7 @@ const browser = await chromium.launch()
 // Sign in the way the dashboard does: exchange the token for a session cookie.
 async function session(colorScheme) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, colorScheme })
-  const res = await ctx.request.post(base + '/v1/sessions', { data: { token } })
+  const res = await ctx.request.post(base + '/v1/sessions', { data: { token }, headers: { 'X-Coldship-Request': '1' } })
   if (!res.ok()) throw new Error(`sign-in failed: ${res.status()} ${await res.text()}`)
   return ctx
 }

@@ -104,6 +104,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/audit", store.ScopeRead, s.audit)
 	s.route("GET /v1/system", store.ScopeRead, s.system)
 	s.route("GET /v1/system/secrets", store.ScopeAdmin, s.secretsStatus)
+	s.route("GET /v1/system/status", store.ScopeRead, s.serverStatus)
 	s.route("POST /v1/system/secrets/rotate", store.ScopeAdmin, s.rotateSecrets)
 	s.route("POST /v1/system/check", store.ScopeAdmin, s.systemCheck)
 	s.route("POST /v1/system/upgrade", store.ScopeAdmin, s.systemUpgrade)
@@ -905,4 +906,24 @@ func (s *Server) streamDeployLog(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// serverStatus is the whole server's status: tokens limited to some apps
+// don't see it.
+func (s *Server) serverStatus(r *http.Request, p principal) (any, error) {
+	if p.limited() {
+		return nil, apierr.New(403, "app_not_allowed", "token %q is limited to some apps and can't see the whole server", p.name)
+	}
+	st := s.eng.Status(r.Context())
+	return struct {
+		engine.ServerStatus
+		Version string `json:"version"`
+	}{st, s.version()}, nil
+}
+
+func (s *Server) version() string {
+	if s.upd == nil {
+		return "unknown"
+	}
+	return s.upd.Status().Version
 }
