@@ -146,6 +146,52 @@ jobs:
         if: failure()
         run: sudo journalctl -u coldship -n 100 --no-pager
 
+  podman:
+    name: Podman
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: make build
+        run: make build
+      - name: Start Podman's API socket
+        run: |
+          podman --version
+          sudo systemctl start podman.socket
+          sudo curl -fsS --unix-socket /run/podman/podman.sock http://podman/_ping
+      - name: Smoke test against Podman
+        # Rootful Podman (the socket is root's); the docker CLI in the script
+        # talks to Podman too.
+        run: sudo env "PATH=$PATH" DOCKER_HOST=unix:///run/podman/podman.sock ./scripts/docker-smoke.sh
+      - name: Build a release and serve it locally
+        run: |
+          make release VERSION=0.0.0-ci RELEASE_PLATFORMS=linux/amd64
+          (cd dist && exec python3 -m http.server 8000 --bind 127.0.0.1) >/dev/null 2>&1 &
+          for i in $(seq 30); do curl -sf http://127.0.0.1:8000/SHA256SUMS >/dev/null && break; sleep 0.5; done
+      - name: Install with COLDSHIP_ENGINE=podman
+        run: |
+          COLDSHIP_ENGINE=podman COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh | tee "$RUNNER_TEMP/install.log"
+          grep -q "Podman" "$RUNNER_TEMP/install.log"
+          sudo journalctl -u coldship --no-pager | grep -q 'engine=podman'
+      - name: Deploy through Podman
+        run: |
+          coldship deploy --name ci-hello --image nginx:1.27-alpine --port 80 --host-port 18090
+          curl -sf http://127.0.0.1:18090/ | grep -q nginx
+          test "$(sudo podman inspect -f '{{.HostConfig.RestartPolicy.Name}}' coldship-ci-hello)" = always
+          sudo systemctl restart coldship
+          for i in $(seq 30); do curl -sf http://127.0.0.1:7070/healthz >/dev/null && break; sleep 0.5; done
+          coldship apps | grep -q ci-hello
+          coldship uninstall --yes
+          test -z "$(sudo podman ps -aq --filter label=coldship.app)"
+      - name: Service log on failure
+        if: failure()
+        run: sudo journalctl -u coldship -n 100 --no-pager || true
+
   docs:
     name: Docs site
     runs-on: ubuntu-latest

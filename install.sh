@@ -8,6 +8,8 @@
 #
 # Options, as environment variables:
 #   COLDSHIP_CLI_ONLY=1       install only the coldship command, no server
+#   COLDSHIP_ENGINE=podman    run apps with Podman instead of Docker (default:
+#                             Docker, or Podman if only Podman is installed)
 #   COLDSHIP_VERSION=0.2.0    install a specific version
 #   COLDSHIP_INSTALL_DIR=...  where the binary goes (default /usr/local/bin)
 set -eu
@@ -55,20 +57,24 @@ printf '\n%sInstalling Coldship%s %s(%s/%s, %s)%s\n\n' "$bold" "$reset" "$dim" "
 
 if [ "$mode" = server ] && [ "$(id -u)" != 0 ]; then
   command -v sudo >/dev/null 2>&1 || die "installing the server needs root: run this as root, or install sudo"
-  step "Asking for sudo (to install Docker and the service)"
+  step "Asking for sudo (to set up the container engine and the service)"
   # sudo reads the password from the terminal, even when this script is piped.
   sudo -v || die "sudo is needed to install the server"
   ok "sudo ok"
 fi
 
-# --- Docker ---
+# --- container engine: Docker, or Podman ---
 
+podman_sock=/run/podman/podman.sock
 docker_answers() { as_root docker version >/dev/null 2>&1; }
+podman_answers() { as_root curl -fsS --unix-socket "$podman_sock" http://podman/_ping >/dev/null 2>&1; }
+# The podman-docker package installs a "docker" command that is Podman.
+real_docker() { command -v docker >/dev/null 2>&1 && ! docker --version 2>/dev/null | grep -qi podman; }
+
+os_id() { [ -r /etc/os-release ] && (. /etc/os-release && echo "${ID:-}"); }
 
 install_docker() {
-  id=""
-  [ -r /etc/os-release ] && id=$(. /etc/os-release && echo "${ID:-}")
-  case "$id" in
+  case "$(os_id)" in
     ol | rhel | rocky | almalinux | centos)
       # get.docker.com doesn't support these; Docker's RHEL-family repo does.
       as_root dnf -y -q install dnf-plugins-core
@@ -81,21 +87,57 @@ install_docker() {
   esac
 }
 
+install_podman() {
+  if command -v dnf >/dev/null 2>&1; then as_root dnf -y -q install podman
+  elif command -v apt-get >/dev/null 2>&1; then as_root apt-get update -qq && as_root apt-get install -y -qq podman
+  else return 1
+  fi
+}
+
+engine="${COLDSHIP_ENGINE:-}"
 if [ "$mode" = server ]; then
-  step "Docker"
-  if ! command -v docker >/dev/null 2>&1; then
-    printf '  installing Docker Engine (this takes a minute)...\n'
-    install_docker >/tmp/coldship-docker-install.log 2>&1 ||
-      die "Docker couldn't be installed automatically (log: /tmp/coldship-docker-install.log). Install it (https://docs.docker.com/engine/install/), then run this again."
-    ok "Docker installed"
+  if [ -z "$engine" ]; then
+    if real_docker; then engine=docker
+    elif command -v podman >/dev/null 2>&1; then engine=podman
+    else engine=docker
+    fi
   fi
-  if ! docker_answers; then
-    as_root systemctl enable --now docker >/dev/null 2>&1 || true
-    i=0
-    while ! docker_answers && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
-    docker_answers || die "Docker is installed but won't start. Check: sudo systemctl status docker"
-  fi
-  ok "Docker $(as_root docker version --format '{{.Server.Version}}' 2>/dev/null) is running"
+  case "$engine" in
+    docker)
+      step "Docker"
+      if ! real_docker; then
+        printf '  installing Docker Engine (this takes a minute)...\n'
+        install_docker >/tmp/coldship-engine-install.log 2>&1 ||
+          die "Docker couldn't be installed automatically (log: /tmp/coldship-engine-install.log). Install it (https://docs.docker.com/engine/install/), then run this again."
+        ok "Docker installed"
+      fi
+      if ! docker_answers; then
+        as_root systemctl enable --now docker >/dev/null 2>&1 || true
+        i=0
+        while ! docker_answers && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+        docker_answers || die "Docker is installed but won't start. Check: sudo systemctl status docker"
+      fi
+      ok "Docker $(as_root docker version --format '{{.Server.Version}}' 2>/dev/null) is running"
+      ;;
+    podman)
+      step "Podman"
+      if ! command -v podman >/dev/null 2>&1; then
+        printf '  installing Podman...\n'
+        install_podman >/tmp/coldship-engine-install.log 2>&1 ||
+          die "Podman couldn't be installed automatically (log: /tmp/coldship-engine-install.log). Install it, then run this again."
+        ok "Podman installed"
+      fi
+      # Coldship talks to Podman's Docker-compatible API (rootful). The
+      # restart service starts apps again after a reboot.
+      as_root systemctl enable --now podman.socket >/dev/null 2>&1 || true
+      as_root systemctl enable podman-restart.service >/dev/null 2>&1 || true
+      i=0
+      while ! podman_answers && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+      podman_answers || die "Podman's API socket won't start. Check: sudo systemctl status podman.socket"
+      ok "Podman $(as_root podman version --format '{{.Server.Version}}' 2>/dev/null || podman --version | awk '{print $NF}') is running"
+      ;;
+    *) die "COLDSHIP_ENGINE must be docker or podman, not $engine" ;;
+  esac
 fi
 
 # --- the coldship binary ---
@@ -153,13 +195,20 @@ fresh=no
 as_root test -e "$data/coldship.db" || fresh=yes
 as_root mkdir -p "$data"
 as_root chmod 700 "$data"
+engine_env=""
+engine_unit="docker.service"
+if [ "$engine" = podman ]; then
+  engine_env="Environment=DOCKER_HOST=unix://$podman_sock"
+  engine_unit="podman.socket"
+fi
 cat > "$tmp/coldship.service" <<EOF
 [Unit]
 Description=Coldship
-After=network-online.target docker.service
-Wants=network-online.target docker.service
+After=network-online.target $engine_unit
+Wants=network-online.target $engine_unit
 
 [Service]
+$engine_env
 ExecStart=$dir/coldship server --data $data/coldship.db --admin-token-file $token_file
 WorkingDirectory=$data
 Restart=on-failure

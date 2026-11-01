@@ -37,8 +37,8 @@ func unavailable(what string, err error) *apierr.Error {
 	case client.IsErrConnectionFailed(err) || strings.Contains(s, "no such file") || strings.Contains(s, "connection refused") ||
 		strings.Contains(s, "is the docker daemon running"):
 		e.Code = "docker_not_running"
-		e.WithHint("Docker isn't running, or isn't installed. Install it (https://docs.docker.com/engine/install/) " +
-			"or start it (`sudo systemctl enable --now docker`), check with `docker ps`, then start coldship server again")
+		e.WithHint("no container engine is running. Install Docker (https://docs.docker.com/engine/install/) and start it " +
+			"(`sudo systemctl enable --now docker`), or with Podman start its API socket (`sudo systemctl enable --now podman.socket`); then start coldship server again")
 	}
 	return e
 }
@@ -74,9 +74,15 @@ func (d *Docker) RunContainer(ctx context.Context, s ContainerSpec) (string, err
 		return err.Error(), err
 	}
 	cfg := &container.Config{Image: s.Image, Cmd: s.Cmd, Entrypoint: s.Entrypoint, Env: s.Env, Labels: s.Labels}
+	// Podman's boot-time restart (podman-restart.service) only starts
+	// containers whose policy is "always".
+	restart := container.RestartPolicyUnlessStopped
+	if d.IsPodman(ctx) {
+		restart = container.RestartPolicyAlways
+	}
 	host := &container.HostConfig{
 		Binds:         s.Binds,
-		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
+		RestartPolicy: container.RestartPolicy{Name: restart},
 		Resources:     container.Resources{Memory: s.Memory},
 		// Rotate logs so a chatty app can't fill the disk (at most 3×10 MB).
 		LogConfig: container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},

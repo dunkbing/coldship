@@ -12,6 +12,7 @@ export COLDSHIP_URL="http://127.0.0.1:$PORT" COLDSHIP_NO_UPDATE_NOTICE=1
 
 cleanup() {
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true
+  [ -n "${GIT_PID:-}" ] && kill "$GIT_PID" 2>/dev/null || true
   docker ps -aq --filter label=coldship.app --filter name=coldship-smoke- | xargs -r docker rm -f >/dev/null
   docker rm -f coldship-smoke-squatter >/dev/null 2>&1 || true
   docker volume ls -q --filter name=coldship-smoke- | xargs -r docker volume rm >/dev/null 2>&1 || true
@@ -59,6 +60,24 @@ DB=$(spec db $'name: smoke-db\nimage: nginx:1.27-alpine\nport: 80\ndatabases:\n 
 "$H" db snapshot smoke-db main --reason smoke >/dev/null || fail "postgres snapshot"
 "$H" db snapshot smoke-db cache --reason smoke >/dev/null || fail "redis snapshot"
 ps -eo args | grep -v grep | grep -q 'REDISCLI_AUTH=' && fail "redis password visible in the process list"
+# Apps reach their databases by hostname on the coldship network.
+docker exec coldship-smoke-db nslookup smoke-db-db-main >/dev/null 2>&1 ||
+  docker exec coldship-smoke-db getent hosts smoke-db-db-main >/dev/null 2>&1 ||
+  fail "the app can't resolve its database's hostname (container DNS on the coldship network)"
+
+echo "==> build from Git (no Dockerfile)"
+mkdir -p "$WORK/site" "$WORK/git"
+printf '<h1>smoke site</h1>\n' > "$WORK/site/index.html"
+git -C "$WORK/site" init -q -b main
+git -C "$WORK/site" -c user.name=s -c user.email=s@s add .
+git -C "$WORK/site" -c user.name=s -c user.email=s@s commit -qm site
+git clone -q --bare "$WORK/site" "$WORK/git/site.git"
+git -C "$WORK/git/site.git" update-server-info
+(cd "$WORK/git" && exec python3 -m http.server 7072 --bind 127.0.0.1) >/dev/null 2>&1 &
+GIT_PID=$!
+for _ in $(seq 50); do curl -sf http://127.0.0.1:7072/site.git/HEAD >/dev/null && break; sleep 0.2; done
+"$H" deploy --name smoke-git --git http://127.0.0.1:7072/site.git --ref main --host-port 18082 >/dev/null || fail "build from Git"
+curl -sf http://127.0.0.1:18082/ | grep -q "smoke site" || fail "the site built from Git isn't served"
 
 echo "==> a container Coldship doesn't own is left alone"
 docker run -d --name coldship-smoke-squatter busybox sleep 300 >/dev/null
@@ -67,7 +86,7 @@ if "$H" deploy -f "$SQ" --reason smoke >/dev/null 2>&1; then fail "deploy replac
 docker inspect coldship-smoke-squatter >/dev/null 2>&1 || fail "unlabeled container was removed"
 
 echo "==> delete"
-for app in smoke-web smoke-flags smoke-hp smoke-db; do
+for app in smoke-web smoke-flags smoke-hp smoke-db smoke-git; do
   id=$("$H" plan --delete "$app" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
   "$H" apply "$id" --reason smoke >/dev/null || fail "delete $app"
 done

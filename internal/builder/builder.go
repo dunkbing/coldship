@@ -79,6 +79,7 @@ func ImageTag(app string, b spec.Build) string {
 type Git struct {
 	GitBin    string
 	DockerBin string
+	podman    bool
 	// CredentialsFile is a git-credential-store file used for private
 	// https repositories. SSH uses the server user's keys.
 	CredentialsFile string
@@ -103,6 +104,9 @@ func (g *Git) env() []string {
 		"DOCKER_BUILDKIT=1",
 	)
 }
+
+// UsePodman builds with the podman command (which has no --progress flag).
+func (g *Git) UsePodman() { g.DockerBin, g.podman = "podman", true }
 
 // gitArgs prefixes args with config that disables interactive credential
 // helpers and, if configured, uses the server's credential store.
@@ -219,8 +223,11 @@ func (g *Git) Build(ctx context.Context, app string, b spec.Build, log io.Writer
 		return nil, err
 	}
 
-	args := []string{"build", "--progress=plain", "-t", tag, "-f", dockerfile,
+	args := []string{"build", "-t", tag, "-f", dockerfile,
 		"--label", "coldship.app=" + app, "--label", "coldship.commit=" + b.Commit, "--label", "coldship.git=" + b.Git}
+	if !g.podman {
+		args = append(args[:1], append([]string{"--progress=plain"}, args[1:]...)...)
+	}
 	if det.Mode == "auto" {
 		args = append(args, "--label", "coldship.builder=auto", "--label", "coldship.detected="+det.Summary())
 		fmt.Fprintf(log, "coldship: no Dockerfile used; detected %s\n", det.Summary())

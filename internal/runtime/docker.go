@@ -6,9 +6,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -23,6 +25,11 @@ import (
 type Docker struct {
 	cli     *client.Client
 	initErr error
+	// Host is the engine socket in use, for messages.
+	Host string
+
+	engineOnce sync.Once
+	podman     bool
 	// StartupGrace is how long a new container must stay up before it counts
 	// as started, on top of passing its health check.
 	StartupGrace time.Duration
@@ -30,9 +37,51 @@ type Docker struct {
 	StopTimeout time.Duration
 }
 
+// Engine sockets tried, in order, when DOCKER_HOST isn't set: Docker's,
+// then rootful Podman's (its Docker-compatible API).
+var defaultSockets = []string{"/var/run/docker.sock", "/run/podman/podman.sock"}
+
 func NewDocker() *Docker {
-	cli, err := client.New(client.FromEnv)
-	return &Docker{cli: cli, initErr: err, StartupGrace: 3 * time.Second, StopTimeout: 10 * time.Second}
+	opts := []client.Opt{client.FromEnv}
+	host := os.Getenv("DOCKER_HOST")
+	if host == "" {
+		for _, s := range defaultSockets {
+			if _, err := os.Stat(s); err == nil {
+				host = "unix://" + s
+				opts = append(opts, client.WithHost(host))
+				break
+			}
+		}
+	}
+	if host == "" {
+		host = "unix:///var/run/docker.sock"
+	}
+	cli, err := client.New(opts...)
+	return &Docker{cli: cli, initErr: err, Host: host, StartupGrace: 3 * time.Second, StopTimeout: 10 * time.Second}
+}
+
+// IsPodman reports whether the engine is Podman (through its
+// Docker-compatible API) rather than Docker.
+func (d *Docker) IsPodman(ctx context.Context) bool {
+	d.engineOnce.Do(func() {
+		cli, err := d.api()
+		if err != nil {
+			return
+		}
+		v, err := cli.ServerVersion(ctx, client.ServerVersionOptions{})
+		if err != nil {
+			return
+		}
+		for _, c := range v.Components {
+			if strings.Contains(strings.ToLower(c.Name), "podman") {
+				d.podman = true
+			}
+		}
+		if strings.Contains(strings.ToLower(v.Platform.Name), "podman") {
+			d.podman = true
+		}
+	})
+	return d.podman
 }
 
 func ContainerName(app string) string      { return "coldship-" + app }

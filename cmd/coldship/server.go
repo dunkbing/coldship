@@ -57,8 +57,18 @@ func serverCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := exec.LookPath("docker"); err != nil {
-				log.Warn("the docker command isn't installed: apps from images work, but builds from Git need it (install docker-ce-cli)")
+			podman := rt.IsPodman(cmd.Context())
+			engineName := "docker"
+			if podman {
+				engineName = "podman"
+			}
+			log.Info("container engine", "engine", engineName, "host", rt.Host)
+			buildCmd := "docker"
+			if podman {
+				buildCmd = "podman"
+			}
+			if _, err := exec.LookPath(buildCmd); err != nil {
+				log.Warn("the " + buildCmd + " command isn't installed: apps from images work, but builds from Git need it")
 			}
 			if keyFile == "" {
 				keyFile = defaultKeyFile(data)
@@ -75,6 +85,9 @@ func serverCmd() *cobra.Command {
 			rt.StartupGrace = grace
 			bd := builder.NewGit()
 			bd.CredentialsFile, bd.WorkDir, bd.Timeout = gitCreds, buildDir, buildTimeout
+			if podman {
+				bd.UsePodman()
+			}
 			var px proxy.Proxy
 			if proxyOn {
 				dataAbs, err := filepath.Abs(data)
