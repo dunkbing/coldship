@@ -2,10 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -66,7 +63,7 @@ func upgradeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade",
 		Short: "Upgrade the Coldship server to the latest release (admin)",
-		Long: "Upgrade the Coldship server to the latest signed release. The server waits for running\n" +
+		Long: "Upgrade the Coldship server to the latest release. The server waits for running\n" +
 			"deployments to finish, verifies and installs the new binary, and restarts itself.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -123,36 +120,20 @@ func upgradeCmd() *cobra.Command {
 }
 
 func selfUpdateCmd() *cobra.Command {
-	var manifestURL, pubKey string
+	var manifestURL string
 	cmd := &cobra.Command{
 		Use:   "self-update",
-		Short: "Update this coldship binary to the latest signed release",
-		Long: "Update the local coldship binary (for CLIs on other machines than the server). The release\n" +
-			"manifest comes from the server (or --manifest-url) and is verified with the built-in key.",
-		Args: cobra.NoArgs,
+		Short: "Update this coldship binary to the latest release (like bun upgrade)",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if pubKey == "" {
-				pubKey = updatePublicKey
+			if manifestURL == "" {
+				manifestURL = defaultUpdateURL
 			}
-			if pubKey == "" {
-				return apierr.New(400, "updates_disabled", "this coldship binary has no update signing key built in, so releases cannot be verified").
-					WithHint("install an official release build, or pass --public-key")
+			if manifestURL == "" {
+				return apierr.New(400, "updates_disabled", "this coldship was built from source, so it doesn't know where releases are").
+					WithHint("install a release with install.sh, or pass --manifest-url")
 			}
-			pub, err := update.ParsePublicKey(pubKey)
-			if err != nil {
-				return err
-			}
-			var m *update.Manifest
-			if manifestURL != "" {
-				m, _, err = update.Fetch(cmd.Context(), manifestURL, pub)
-			} else {
-				var p *update.Published
-				if p, err = newClient().SystemManifest(cmd.Context()); err == nil {
-					if m, err = update.Verify(p.Signed, pub); err == nil {
-						err = update.ResolveAssets(m, p.URL)
-					}
-				}
-			}
+			m, err := update.Fetch(cmd.Context(), manifestURL)
 			if err != nil {
 				return err
 			}
@@ -179,55 +160,21 @@ func selfUpdateCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&manifestURL, "manifest-url", "", "fetch the release manifest from this URL instead of the server")
-	cmd.Flags().StringVar(&pubKey, "public-key", os.Getenv("COLDSHIP_UPDATE_PUBLIC_KEY"), "Ed25519 public key (base64) to verify releases with")
+	cmd.Flags().StringVar(&manifestURL, "manifest-url", "", "release manifest to use instead of the built-in one")
 	return cmd
 }
 
 // --- release tooling ---
 
 func releaseCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "release", Short: "Sign Coldship releases (for maintainers)"}
+	cmd := &cobra.Command{Use: "release", Short: "Release tooling (for maintainers)"}
 
-	var keyOut string
-	keygen := &cobra.Command{
-		Use:   "keygen",
-		Short: "Create an Ed25519 key pair for signing release manifests",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			pub, priv, err := ed25519.GenerateKey(rand.Reader)
-			if err != nil {
-				return err
-			}
-			f, err := os.OpenFile(keyOut, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-			if err != nil {
-				return fmt.Errorf("writing private key: %w (refusing to overwrite an existing key)", err)
-			}
-			fmt.Fprintln(f, base64.StdEncoding.EncodeToString(priv))
-			if err := f.Close(); err != nil {
-				return err
-			}
-			fmt.Printf("Private key written to %s (keep it secret; it signs releases).\n\n", keyOut)
-			fmt.Printf("Public key (build it into binaries with -X main.updatePublicKey=...):\n\n  %s\n", base64.StdEncoding.EncodeToString(pub))
-			return nil
-		},
-	}
-	keygen.Flags().StringVar(&keyOut, "out", "coldship-release.key", "where to write the private key")
-
-	var relVersion, keyFile, notes, notesURL, baseURL, out string
+	var relVersion, notes, notesURL, baseURL, out string
 	manifest := &cobra.Command{
 		Use:   "manifest GOOS/GOARCH=path [...]",
-		Short: "Write a signed release manifest for the given binaries",
+		Short: "Write the release manifest (latest.json) for the given binaries",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keyData, err := os.ReadFile(keyFile)
-			if err != nil {
-				return err
-			}
-			priv, err := update.ParsePrivateKey(string(keyData))
-			if err != nil {
-				return err
-			}
 			m := update.Manifest{Version: strings.TrimPrefix(relVersion, "v"), PublishedAt: time.Now().UTC().Truncate(time.Second),
 				Notes: notes, NotesURL: notesURL, Assets: map[string]update.Asset{}}
 			for _, a := range args {
@@ -251,26 +198,28 @@ func releaseCmd() *cobra.Command {
 				}
 				m.Assets[plat] = update.Asset{URL: u, SHA256: hex.EncodeToString(h.Sum(nil)), Size: n}
 			}
-			signed, err := update.Sign(m, priv)
+			if err := m.Validate(); err != nil {
+				return err
+			}
+			out_, err := json.MarshalIndent(m, "", "  ")
 			if err != nil {
 				return err
 			}
 			if out == "" || out == "-" {
-				_, err = os.Stdout.Write(append(signed, '\n'))
+				_, err = os.Stdout.Write(append(out_, '\n'))
 				return err
 			}
-			return os.WriteFile(out, append(signed, '\n'), 0o644)
+			return os.WriteFile(out, append(out_, '\n'), 0o644)
 		},
 	}
 	manifest.Flags().StringVar(&relVersion, "version", "", "release version, e.g. 0.2.0")
-	manifest.Flags().StringVar(&keyFile, "key-file", "coldship-release.key", "private key from `coldship release keygen`")
 	manifest.Flags().StringVar(&notes, "notes", "", "short release notes shown in the dashboard and CLI")
 	manifest.Flags().StringVar(&notesURL, "notes-url", "", "link to full release notes")
 	manifest.Flags().StringVar(&baseURL, "base-url", "", "URL the binaries are served from (default: next to the manifest)")
 	manifest.Flags().StringVarP(&out, "out", "o", "", "write the manifest here instead of stdout")
 	manifest.MarkFlagRequired("version")
 
-	cmd.AddCommand(keygen, manifest)
+	cmd.AddCommand(manifest)
 	return cmd
 }
 
@@ -327,7 +276,7 @@ func noticeLines(st *update.Status) []string {
 // clean output, and it asks the server at most once an hour.
 func maybeNotice(cmd *cobra.Command) {
 	switch cmd.Name() {
-	case "server", "mcp", "upgrade", "self-update", "version", "keygen", "manifest", "completion", "help":
+	case "server", "mcp", "upgrade", "self-update", "version", "manifest", "completion", "help":
 		return
 	}
 	if flagJSON || !isTerminal(os.Stderr) || os.Getenv("COLDSHIP_NO_UPDATE_NOTICE") != "" {

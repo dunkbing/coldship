@@ -83,7 +83,6 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("POST /v1/system/secrets/rotate", store.ScopeAdmin, s.rotateSecrets)
 	s.route("POST /v1/system/check", store.ScopeAdmin, s.systemCheck)
 	s.route("POST /v1/system/upgrade", store.ScopeAdmin, s.systemUpgrade)
-	s.mux.HandleFunc("GET /v1/system/manifest", s.systemManifest)
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
 	notFound := func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, s.log, apierr.New(404, "route_not_found", "no route for %s %s", r.Method, r.URL.Path))
@@ -549,25 +548,6 @@ func (s *Server) systemUpgrade(_ *http.Request, p principal) (any, error) {
 	}()
 	time.Sleep(50 * time.Millisecond)
 	return s.upd.Status(), nil
-}
-
-// systemManifest returns the latest signed release manifest, so remote CLIs
-// can verify and install it themselves (coldship self-update). Any token may
-// read it; it contains nothing secret.
-func (s *Server) systemManifest(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.auth(r); err != nil {
-		writeErr(w, s.log, err)
-		return
-	}
-	var pub *update.Published
-	if s.upd != nil {
-		pub = s.upd.Published()
-	}
-	if pub == nil {
-		writeErr(w, s.log, apierr.New(404, "no_manifest", "this server has not fetched a release manifest yet"))
-		return
-	}
-	writeJSON(w, http.StatusOK, pub)
 }
 
 type TokenRequest struct {

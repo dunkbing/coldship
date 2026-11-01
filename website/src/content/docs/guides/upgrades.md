@@ -36,16 +36,16 @@ The CLI waits until the server reports the new version.
 
 **Automatic upgrades** do the same on their own, for minor and patch releases. **Major versions are never installed automatically**: the banner and the CLI say so, and you run `coldship upgrade` after reading the release notes. Turn automatic upgrades off with `coldship server --auto-upgrade=false`.
 
-A CLI on another machine updates itself with `coldship self-update`. It fetches the release manifest from the server and verifies it with its own built-in key.
+A CLI on another machine updates itself with `coldship self-update`, straight from GitHub Releases, like `bun upgrade`.
 
-## How releases are verified
+## How upgrades stay safe
 
-An upgrade replaces the binary that controls your Docker host, so nothing is trusted on faith:
+Like `bun upgrade`, Coldship trusts releases from its GitHub repository, downloaded over HTTPS. On top of that:
 
-- **Signed manifests.** Releases are described by a manifest signed with an Ed25519 key. The public key is built into the binary. If the signature doesn't verify, the manifest is ignored.
-- **Checked downloads.** Each binary's SHA-256 is in the signed manifest. A mismatch is never installed.
+- **Checked downloads.** Each binary's SHA-256 is listed in the release's `latest.json`. A mismatch is never installed.
 - **A test run first.** The new binary must run and report the expected version (`coldship --version`) before it replaces the old one.
-- **No key, no updates.** A binary built without a signing key never checks for or installs updates.
+- **No surprises.** Upgrades wait for running deployments, major versions are never installed automatically, and the previous binary is kept as `coldship.old`.
+- **Builds from source don't update themselves.** Only release binaries know where releases are.
 
 To roll back by hand, stop the server, move `coldship.old` back over `coldship`, and start it again. Rolling back to a version from **before secrets encryption** needs one more step first: `coldship secrets decrypt --yes` (see [Downgrading](/guides/secrets/#downgrading)). Otherwise the older binary can't read the database.
 
@@ -62,12 +62,10 @@ The workflow:
 
 1. runs the tests
 2. builds the dashboard and binaries for Linux and macOS (amd64 and arm64)
-3. writes `SHA256SUMS` and a `latest.json` manifest signed with the release key
-4. **verifies the release before publishing**: an older Coldship build must install it through the real `self-update` path (signature, checksum, `--version`)
+3. writes `latest.json` (versions and checksums) and `SHA256SUMS`
+4. **verifies the release before publishing**: an older Coldship build must install it through the real `self-update` path (checksum, `--version`)
 5. publishes the GitHub release with generated notes
 
 Tags with a suffix, like `v0.2.0-rc.1`, become pre-releases. Servers never install them automatically, because `releases/latest` skips pre-releases.
 
-**The signing key.** The private key is the `COLDSHIP_RELEASE_KEY` Actions secret. The public key is committed in `release/coldship-release.pub` and built into every binary. Keep an offline backup of the private key: if it's lost, existing installations can't verify new releases. If it leaks, someone could sign releases your servers would install.
-
-To build a release locally (for testing): `make release VERSION=0.2.0 RELEASE_KEY=path/to/key`, which writes `dist/`.
+To build a release locally (for testing): `make release VERSION=0.2.0`, which writes `dist/`.

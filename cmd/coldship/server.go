@@ -30,7 +30,7 @@ func serverCmd() *cobra.Command {
 	var addr, data, gitCreds, buildDir, acmeEmail string
 	var grace, buildTimeout time.Duration
 	var proxyOn, autoUpgrade bool
-	var updURL, updKey string
+	var updURL string
 	var updInterval time.Duration
 	var previewDomain string
 	var previewTTL, previewMaxTTL time.Duration
@@ -130,13 +130,6 @@ func serverCmd() *cobra.Command {
 			}
 			checker := &update.Checker{URL: updURL, Current: version, Interval: updInterval, Auto: autoUpgrade,
 				Busy: eng.Busy, Restart: restart, Log: log}
-			if updKey != "" {
-				pub, err := update.ParsePublicKey(updKey)
-				if err != nil {
-					return err
-				}
-				checker.PublicKey = pub
-			}
 			apiSrv.SetUpdater(checker)
 			apiSrv.SetPublicURL(publicURL)
 			apiSrv.SetKeyRotation(rotator.rotate)
@@ -206,8 +199,7 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", envOr("COLDSHIP_ADDR", "127.0.0.1:7070"), "listen address")
 	cmd.Flags().StringVar(&data, "data", envOr("COLDSHIP_DATA", "coldship.db"), "SQLite state file")
 	cmd.Flags().DurationVar(&grace, "startup-grace", 3*time.Second, "how long a new container must stay up to count as deployed")
-	cmd.Flags().StringVar(&updURL, "update-url", envOr("COLDSHIP_UPDATE_URL", defaultUpdateURL), "signed release manifest to check for new versions")
-	cmd.Flags().StringVar(&updKey, "update-public-key", envOr("COLDSHIP_UPDATE_PUBLIC_KEY", updatePublicKey), "Ed25519 public key (base64) that release manifests must be signed with")
+	cmd.Flags().StringVar(&updURL, "update-url", envOr("COLDSHIP_UPDATE_URL", defaultUpdateURL), "release manifest to check for new versions")
 	cmd.Flags().BoolVar(&autoUpgrade, "auto-upgrade", true, "install new minor and patch versions automatically when no deployment is running")
 	cmd.Flags().DurationVar(&updInterval, "update-interval", 6*time.Hour, "how often to check for new versions")
 	cmd.Flags().StringVar(&previewDomain, "preview-domain", envOr("COLDSHIP_PREVIEW_DOMAIN", ""), "give previews URLs under this domain (needs a wildcard DNS record *.<domain> pointing here)")

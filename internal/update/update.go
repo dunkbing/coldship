@@ -1,24 +1,19 @@
-// Package update checks for, verifies and installs new Coldship releases.
+// Package update checks for, downloads and installs new Coldship releases,
+// the way `bun upgrade` does: releases come from GitHub over HTTPS.
 //
-// A release is described by a signed manifest:
+// A release publishes latest.json next to its binaries:
 //
-//	{"manifest": {"version": "0.2.0", "assets": {"linux/arm64": {"url": ..., "sha256": ...}}, ...},
-//	 "signature": "<base64 ed25519 signature of the compacted manifest JSON>"}
+//	{"version": "0.2.0", "assets": {"linux/arm64": {"url": "coldship-linux-arm64", "sha256": ...}}, ...}
 //
-// The public key is built into the binary. Nothing is installed unless the
-// manifest signature, the asset's SHA-256 and the new binary's own --version
-// output all check out.
+// Nothing is installed unless the download matches its SHA-256 and the new
+// binary runs and reports the expected version.
 package update
 
 import (
-	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,66 +42,15 @@ type Manifest struct {
 	Assets      map[string]Asset `json:"assets"` // keyed by "GOOS/GOARCH"
 }
 
-type Envelope struct {
-	Manifest  json.RawMessage `json:"manifest"`
-	Signature string          `json:"signature"`
-}
-
 // Platform is this binary's asset key, e.g. "linux/arm64".
 func Platform() string { return goruntime.GOOS + "/" + goruntime.GOARCH }
 
-// ParsePublicKey decodes a base64 Ed25519 public key.
-func ParsePublicKey(s string) (ed25519.PublicKey, error) {
-	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
-	if err != nil || len(b) != ed25519.PublicKeySize {
-		return nil, errors.New("update public key must be a base64-encoded 32-byte Ed25519 key")
-	}
-	return ed25519.PublicKey(b), nil
-}
-
-func ParsePrivateKey(s string) (ed25519.PrivateKey, error) {
-	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
-	if err != nil || len(b) != ed25519.PrivateKeySize {
-		return nil, errors.New("update private key must be a base64-encoded 64-byte Ed25519 key")
-	}
-	return ed25519.PrivateKey(b), nil
-}
-
-// Sign produces a signed envelope for m.
-func Sign(m Manifest, priv ed25519.PrivateKey) ([]byte, error) {
+// Validate checks a manifest's version.
+func (m *Manifest) Validate() error {
 	if !semver.IsValid(v(m.Version)) {
-		return nil, fmt.Errorf("version %q is not semver (e.g. 1.4.2)", m.Version)
+		return fmt.Errorf("release version %q is not semver (e.g. 1.4.2)", m.Version)
 	}
-	raw, err := json.Marshal(m)
-	if err != nil {
-		return nil, err
-	}
-	env := Envelope{Manifest: raw, Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, raw))}
-	return json.MarshalIndent(env, "", "  ")
-}
-
-// Verify checks the envelope's signature and returns the manifest.
-func Verify(data []byte, pub ed25519.PublicKey) (*Manifest, error) {
-	var env Envelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("update manifest is not valid JSON: %w", err)
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, env.Manifest); err != nil {
-		return nil, fmt.Errorf("update manifest is not valid JSON: %w", err)
-	}
-	sig, err := base64.StdEncoding.DecodeString(env.Signature)
-	if err != nil || !ed25519.Verify(pub, compact.Bytes(), sig) {
-		return nil, errors.New("update manifest signature is invalid: refusing to trust it")
-	}
-	var m Manifest
-	if err := json.Unmarshal(env.Manifest, &m); err != nil {
-		return nil, err
-	}
-	if !semver.IsValid(v(m.Version)) {
-		return nil, fmt.Errorf("update manifest version %q is not semver", m.Version)
-	}
-	return &m, nil
+	return nil
 }
 
 func v(s string) string {
@@ -131,34 +75,37 @@ func SameMajor(a, b string) bool { return semver.Major(v(a)) == semver.Major(v(b
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
-// Fetch downloads and verifies the manifest at manifestURL. Relative asset
-// URLs are resolved against it. It also returns the raw signed bytes.
-func Fetch(ctx context.Context, manifestURL string, pub ed25519.PublicKey) (*Manifest, []byte, error) {
+// Fetch downloads the release manifest at manifestURL. Relative asset URLs
+// are resolved against it.
+func Fetch(ctx context.Context, manifestURL string) (*Manifest, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", manifestURL, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", "coldship-update-check")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetching update manifest: %w", err)
+		return nil, fmt.Errorf("fetching the release manifest: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, nil, fmt.Errorf("fetching update manifest: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("fetching the release manifest: HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	m, err := Verify(data, pub)
-	if err != nil {
-		return nil, nil, err
+	var m Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("the release manifest is not valid JSON: %w", err)
 	}
-	if err := ResolveAssets(m, manifestURL); err != nil {
-		return nil, nil, err
+	if err := m.Validate(); err != nil {
+		return nil, err
 	}
-	return m, data, nil
+	if err := ResolveAssets(&m, manifestURL); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // ResolveAssets makes relative asset URLs absolute against the manifest's
@@ -175,13 +122,6 @@ func ResolveAssets(m *Manifest, manifestURL string) error {
 		}
 	}
 	return nil
-}
-
-// Published is what a server hands to remote CLIs for self-update: the
-// signed manifest exactly as fetched, and where it came from.
-type Published struct {
-	URL    string          `json:"url"`
-	Signed json.RawMessage `json:"signed"`
 }
 
 // Download fetches this platform's asset into dir and verifies its SHA-256.

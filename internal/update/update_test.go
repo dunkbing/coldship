@@ -3,10 +3,9 @@ package update
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,39 +17,6 @@ import (
 	"testing"
 	"time"
 )
-
-func keys(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
-	t.Helper()
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pub, priv
-}
-
-func TestSignVerify(t *testing.T) {
-	pub, priv := keys(t)
-	signed, err := Sign(Manifest{Version: "1.2.3", Assets: map[string]Asset{"linux/arm64": {URL: "x", SHA256: "ab"}}}, priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := Verify(signed, pub)
-	if err != nil || m.Version != "1.2.3" {
-		t.Fatalf("verify: %v %+v", err, m)
-	}
-	// Any change to the manifest breaks the signature.
-	tampered := bytes.Replace(signed, []byte(`"1.2.3"`), []byte(`"9.9.9"`), 1)
-	if _, err := Verify(tampered, pub); err == nil {
-		t.Fatal("a tampered manifest must be rejected")
-	}
-	otherPub, _ := keys(t)
-	if _, err := Verify(signed, otherPub); err == nil {
-		t.Fatal("a manifest signed with another key must be rejected")
-	}
-	if _, err := Sign(Manifest{Version: "latest"}, priv); err == nil {
-		t.Fatal("non-semver versions must be refused")
-	}
-}
 
 func TestNewer(t *testing.T) {
 	cases := []struct {
@@ -80,20 +46,20 @@ func fakeBinary(t *testing.T, version string) []byte {
 	return []byte("#!/bin/sh\necho \"coldship version " + version + "\"\n")
 }
 
-func serveRelease(t *testing.T, priv ed25519.PrivateKey, version string, bin []byte, shaOverride string) *httptest.Server {
+func serveRelease(t *testing.T, version string, bin []byte, shaOverride string) *httptest.Server {
 	t.Helper()
 	sum := sha256.Sum256(bin)
 	sha := hex.EncodeToString(sum[:])
 	if shaOverride != "" {
 		sha = shaOverride
 	}
-	signed, err := Sign(Manifest{Version: version, Notes: "faster deploys",
-		Assets: map[string]Asset{Platform(): {URL: "bin/coldship", SHA256: sha, Size: int64(len(bin))}}}, priv)
+	manifest, err := json.Marshal(Manifest{Version: version, Notes: "faster deploys",
+		Assets: map[string]Asset{Platform(): {URL: "bin/coldship", SHA256: sha, Size: int64(len(bin))}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/releases/latest.json", func(w http.ResponseWriter, _ *http.Request) { w.Write(signed) })
+	mux.HandleFunc("/releases/latest.json", func(w http.ResponseWriter, _ *http.Request) { w.Write(manifest) })
 	mux.HandleFunc("/releases/bin/coldship", func(w http.ResponseWriter, _ *http.Request) { w.Write(bin) })
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -101,12 +67,11 @@ func serveRelease(t *testing.T, priv ed25519.PrivateKey, version string, bin []b
 }
 
 func TestFetchDownloadInstall(t *testing.T) {
-	pub, priv := keys(t)
 	bin := fakeBinary(t, "0.2.0")
-	srv := serveRelease(t, priv, "0.2.0", bin, "")
+	srv := serveRelease(t, "0.2.0", bin, "")
 	ctx := context.Background()
 
-	m, _, err := Fetch(ctx, srv.URL+"/releases/latest.json", pub)
+	m, err := Fetch(ctx, srv.URL+"/releases/latest.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,9 +97,8 @@ func TestFetchDownloadInstall(t *testing.T) {
 }
 
 func TestDownloadRejectsWrongHash(t *testing.T) {
-	pub, priv := keys(t)
-	srv := serveRelease(t, priv, "0.2.0", fakeBinary(t, "0.2.0"), strings.Repeat("0", 64))
-	m, _, err := Fetch(context.Background(), srv.URL+"/releases/latest.json", pub)
+	srv := serveRelease(t, "0.2.0", fakeBinary(t, "0.2.0"), strings.Repeat("0", 64))
+	m, err := Fetch(context.Background(), srv.URL+"/releases/latest.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,9 +126,8 @@ func TestInstallRejectsBinaryThatDoesNotRun(t *testing.T) {
 }
 
 func TestCheckerStatusAndAutoBlock(t *testing.T) {
-	pub, priv := keys(t)
-	srv := serveRelease(t, priv, "1.0.0", fakeBinary(t, "1.0.0"), "")
-	c := &Checker{URL: srv.URL + "/releases/latest.json", PublicKey: pub, Current: "0.9.0", Auto: true,
+	srv := serveRelease(t, "1.0.0", fakeBinary(t, "1.0.0"), "")
+	c := &Checker{URL: srv.URL + "/releases/latest.json", Current: "0.9.0", Auto: true,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err := c.Check(context.Background()); err != nil {
 		t.Fatal(err)
@@ -174,15 +137,14 @@ func TestCheckerStatusAndAutoBlock(t *testing.T) {
 		t.Fatalf("a major upgrade must be available but not automatic: %+v", st)
 	}
 
-	disabled := &Checker{URL: srv.URL, Current: "0.9.0"}
-	if st := disabled.Status(); st.Enabled || !strings.Contains(st.DisabledReason, "signing key") {
-		t.Fatalf("without a key, updates must be disabled: %+v", st)
+	disabled := &Checker{Current: "0.9.0"}
+	if st := disabled.Status(); st.Enabled || !strings.Contains(st.DisabledReason, "update URL") {
+		t.Fatalf("builds without an update URL must not update: %+v", st)
 	}
 }
 
 func TestCheckerUpgradeWaitsForIdle(t *testing.T) {
-	pub, priv := keys(t)
-	srv := serveRelease(t, priv, "0.2.0", fakeBinary(t, "0.2.0"), "")
+	srv := serveRelease(t, "0.2.0", fakeBinary(t, "0.2.0"), "")
 	dir := t.TempDir()
 	target := filepath.Join(dir, "coldship")
 	os.WriteFile(target, fakeBinary(t, "0.1.0"), 0o755)
@@ -190,7 +152,7 @@ func TestCheckerUpgradeWaitsForIdle(t *testing.T) {
 	var busy atomic.Bool
 	busy.Store(true)
 	restarted := make(chan string, 1)
-	c := &Checker{URL: srv.URL + "/releases/latest.json", PublicKey: pub, Current: "0.1.0", Target: target,
+	c := &Checker{URL: srv.URL + "/releases/latest.json", Current: "0.1.0", Target: target,
 		Busy: busy.Load, Restart: func(p string) { restarted <- p }, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err := c.Check(context.Background()); err != nil {
 		t.Fatal(err)

@@ -13,10 +13,10 @@ import (
 	"github.com/dunkbing/coldship/internal/client"
 )
 
-// Set at release time with -ldflags "-X main.version=... -X main.updatePublicKey=...".
+// Set at release time with -ldflags "-X main.version=... -X main.defaultUpdateURL=...".
+// Builds from source have no update URL, so they never replace themselves.
 var (
 	version          = "0.1.0-dev"
-	updatePublicKey  = ""
 	defaultUpdateURL = ""
 )
 

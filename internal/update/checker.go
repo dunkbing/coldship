@@ -2,7 +2,6 @@ package update
 
 import (
 	"context"
-	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -33,11 +32,10 @@ type Status struct {
 // Checker periodically checks for releases and, if enabled, installs them
 // when the server is idle.
 type Checker struct {
-	URL       string
-	PublicKey ed25519.PublicKey
-	Current   string
-	Interval  time.Duration
-	Auto      bool
+	URL      string
+	Current  string
+	Interval time.Duration
+	Auto     bool
 	// Busy reports whether deployments are in progress; upgrades wait.
 	Busy func() bool
 	// Restart replaces the running process with the binary at path.
@@ -48,7 +46,6 @@ type Checker struct {
 
 	mu       sync.Mutex
 	latest   *Manifest
-	raw      []byte
 	checked  time.Time
 	checkErr string
 	state    string
@@ -57,11 +54,8 @@ type Checker struct {
 }
 
 func (c *Checker) disabledReason() string {
-	switch {
-	case c.URL == "":
-		return "no update URL configured (coldship server --update-url)"
-	case c.PublicKey == nil:
-		return "no update signing key built in or configured (--update-public-key), so releases cannot be verified"
+	if c.URL == "" {
+		return "this build has no update URL (builds from source don't update themselves; install a release, or set --update-url)"
 	}
 	return ""
 }
@@ -96,21 +90,11 @@ func (c *Checker) Status() Status {
 	return st
 }
 
-// Published returns the latest verified manifest as fetched, or nil.
-func (c *Checker) Published() *Published {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.raw == nil {
-		return nil
-	}
-	return &Published{URL: c.URL, Signed: c.raw}
-}
-
 func (c *Checker) Check(ctx context.Context) error {
 	if r := c.disabledReason(); r != "" {
 		return fmt.Errorf("updates are disabled: %s", r)
 	}
-	m, raw, err := Fetch(ctx, c.URL, c.PublicKey)
+	m, err := Fetch(ctx, c.URL)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.checked = time.Now()
@@ -118,7 +102,7 @@ func (c *Checker) Check(ctx context.Context) error {
 		c.checkErr = err.Error()
 		return err
 	}
-	c.latest, c.raw, c.checkErr = m, raw, ""
+	c.latest, c.checkErr = m, ""
 	return nil
 }
 

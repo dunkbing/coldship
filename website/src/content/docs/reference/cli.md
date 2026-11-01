@@ -47,8 +47,7 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--db-snapshot-interval` | | `24h` | Scheduled snapshots of every database (`0` disables) |
 | `--proxy-http-port` / `--proxy-https-port` | | `80` / `443` | Host ports for the proxy |
 | `--acme-email` | `COLDSHIP_ACME_EMAIL` | | Email for Let's Encrypt notices |
-| `--update-url` | `COLDSHIP_UPDATE_URL` | built in | Signed release manifest to check |
-| `--update-public-key` | `COLDSHIP_UPDATE_PUBLIC_KEY` | built in | Key release manifests must be signed with |
+| `--update-url` | `COLDSHIP_UPDATE_URL` | built in (release binaries) | Release manifest to check for new versions |
 | `--auto-upgrade` | | `true` | Install new minor/patch versions automatically when no deployment is running |
 | `--update-interval` | | `6h` | How often to check for updates |
 
@@ -124,10 +123,9 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 
 | Command | Description |
 |---|---|
-| `coldship upgrade` | Upgrade the server to the latest signed release (admin). Waits for the restart. `--check` checks now; `--no-wait` returns at once. |
-| `coldship self-update` | Update this coldship binary (for CLIs on other machines). Verifies the release with the built-in key. |
-| `coldship release keygen` | Create the Ed25519 key pair that signs releases (maintainers) |
-| `coldship release manifest --version X os/arch=path ...` | Write a signed release manifest (maintainers; `make release` runs it) |
+| `coldship upgrade` | Upgrade the server to the latest release (admin). Waits for the restart. `--check` checks now; `--no-wait` returns at once. |
+| `coldship self-update` | Update this binary to the latest release, like `bun upgrade` |
+| `coldship release manifest --version X os/arch=path ...` | Write the release manifest, `latest.json` (maintainers; `make release` runs it) |
 
 After other commands, the CLI prints a one-line note on stderr when a new version is available or the CLI is older than the server. It checks at most once an hour, and never prints with `--json`, when stderr isn't a terminal, or with `COLDSHIP_NO_UPDATE_NOTICE=1`.
 | `coldship audit [--limit 50]` | Audit log |

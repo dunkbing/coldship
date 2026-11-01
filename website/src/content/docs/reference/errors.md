@@ -69,7 +69,7 @@ Every error from every interface has the same shape:
 | `proxy_disabled` | 400 | The app has domains but the server runs with `--proxy=false` |
 | `proxy_unavailable`, `proxy_reload_failed` | 502 | The proxy container couldn't start or reload its config |
 | `updates_disabled`, `no_update_available`, `upgrade_in_progress` | 409 | From `/v1/system/upgrade` |
-| `update_check_failed` | 502 | The release manifest couldn't be fetched, or its signature is invalid |
+| `update_check_failed` | 502 | The release manifest couldn't be fetched or isn't valid |
 | `container_exited` | 502 | The new container didn't stay up. Call `diagnose`, then fix or roll back. |
 | `container_start_failed` | 502 | Docker refused to start the container |
 | `host_port_in_use` | 502 | Another process uses `host_port`. Pick another. |

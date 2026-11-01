@@ -213,13 +213,6 @@ func (c *Client) SystemUpgrade(ctx context.Context) (*update.Status, error) {
 	return &out, c.do(ctx, "POST", "/v1/system/upgrade", nil, &out)
 }
 
-// SystemManifest returns the server's latest signed release manifest and its
-// URL. Callers must verify the signature themselves.
-func (c *Client) SystemManifest(ctx context.Context) (*update.Published, error) {
-	var out update.Published
-	return &out, c.do(ctx, "GET", "/v1/system/manifest", nil, &out)
-}
-
 func (c *Client) WhoAmI(ctx context.Context) (*api.WhoAmI, error) {
 	var out api.WhoAmI
 	return &out, c.do(ctx, "GET", "/v1/whoami", nil, &out)

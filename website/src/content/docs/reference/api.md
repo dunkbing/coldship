@@ -27,7 +27,6 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/system/secrets/rotate` | admin | Rotate the secret key |
 | `POST` | `/v1/system/check` | admin | Check for a new version now |
 | `POST` | `/v1/system/upgrade` | admin | Start an upgrade: waits for deployments, installs, restarts |
-| `GET` | `/v1/system/manifest` | read | The latest signed release manifest and its URL, for `coldship self-update` |
 | `POST` | `/hooks/git/{app}` | webhook signature | Git push webhooks. Authenticated only by the app's secret; see [Git webhooks](/guides/webhooks/) |
 | `GET` | `/v1/apps/{name}/webhook` | read | Webhook URL, settings and recent deliveries |
 | `POST` | `/v1/apps/{name}/webhook` | admin | Enable, or with `{rotate: true}` replace, the secret; returns it once |
