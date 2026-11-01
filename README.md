@@ -16,36 +16,26 @@ like deleting production data, waits for your approval.
 
 ## Install
 
-You need a Linux server with [Docker](https://docs.docker.com/engine/install/), and a user that can run
-`docker` (if `docker ps` says "permission denied": `sudo usermod -aG docker $USER`, then log in again). Then:
+On a Linux server with [Docker](https://docs.docker.com/engine/install/):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh -s -- --service
 ```
 
-This installs the latest release to `/usr/local/bin`. Coldship keeps itself up to date after that.
+This installs `coldship`, runs it as a service that starts on boot, and prints your **admin token**.
+Save it: it's shown only once. Coldship keeps itself up to date after that. Back up
+`/var/lib/coldship/coldship.key` (it encrypts your stored secrets) away from the database.
 
-To build from source instead, you need [Go](https://go.dev/dl/) and [Bun](https://bun.sh): `git clone https://github.com/dunkbing/coldship.git && cd coldship && make build`.
-
-## Start the server
-
-```sh
-coldship server
-```
-
-On first start, it prints an **admin token**. Save it: it's shown only once.
-
-The server also creates `coldship.key`, which encrypts your stored secrets. **Back it up somewhere safe**,
-away from `coldship.db`.
-
-Point the CLI at your server:
+Point the CLI at it:
 
 ```sh
-export COLDSHIP_URL=http://127.0.0.1:7070
 export COLDSHIP_TOKEN=cst_...        # the admin token
 ```
 
-The dashboard is at http://127.0.0.1:7070.
+The dashboard is at http://127.0.0.1:7070 on the server (from your laptop: `ssh -L 7070:127.0.0.1:7070 your-server`).
+
+For just the CLI (on a laptop), leave out `-s -- --service`. To build from source, you need
+[Go](https://go.dev/dl/) and [Bun](https://bun.sh): `git clone https://github.com/dunkbing/coldship.git && cd coldship && make build`.
 
 ## Deploy an app
 

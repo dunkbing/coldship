@@ -45,18 +45,32 @@ Stored secrets are [encrypted](/guides/secrets/) with a key that is created on f
 
 ## Running as a service
 
+The installer sets Coldship up as a systemd service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh -s -- --service
+```
+
+It keeps state in `/var/lib/coldship`, starts on boot, and prints the admin token once. Running it again updates the binary and keeps your data and token. Manage it with `sudo systemctl status|restart|stop coldship` and read its log with `sudo journalctl -u coldship`.
+
+The service runs as **root**. It needs Docker, and access to Docker is equivalent to root on the host anyway, so a separate user in the `docker` group adds no real isolation. Running as root also lets self-upgrades replace the binary. Your own user only talks to the server over HTTP with a token, so it doesn't need Docker access.
+
+The installed unit, if you'd rather write it yourself:
+
 ```ini title="/etc/systemd/system/coldship.service"
 [Unit]
 Description=Coldship
-After=docker.service
-Requires=docker.service
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
-ExecStart=/usr/local/bin/coldship server --addr 127.0.0.1:7070 --data /var/lib/coldship/coldship.db
+ExecStart=/usr/local/bin/coldship server --data /var/lib/coldship/coldship.db --admin-token-file /var/lib/coldship/admin-token
+WorkingDirectory=/var/lib/coldship
 Restart=on-failure
-User=coldship
-Group=docker
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+`--admin-token-file` writes the first admin token to that file (mode 0600) instead of the log. Read it once, store it, and delete the file.

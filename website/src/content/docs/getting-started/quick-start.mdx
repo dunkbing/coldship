@@ -7,34 +7,30 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 
 ## Requirements
 
-- A Linux server with [Docker](https://docs.docker.com/engine/install/), and a user able to run `docker`. If `docker ps` says "permission denied", run `sudo usermod -aG docker $USER` and log in again.
+- A Linux server with [Docker](https://docs.docker.com/engine/install/) and systemd. No Docker setup for your user is needed when Coldship runs as a service.
 - To build from source only: Go 1.26+ and [Bun](https://bun.sh)
 
 ## Run it
 
 <Steps>
 
-1. **Install it.**
+1. **Install it on your server.** This installs the `coldship` command and runs Coldship as a service that starts on boot:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
+   curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh -s -- --service
    ```
 
-   Or build from source with `make build` (needs Go and Bun), which builds the dashboard and embeds it in the binary.
+   At the end it prints your **admin token**. It is shown only once, so save it.
 
-2. **Start the server.** On first start it prints an admin token. It is shown only once, so save it.
+   Leave out `-s -- --service` to install only the CLI (on your laptop, for example). Or build from source with `make build` (needs Go and Bun).
+
+2. **Or run the server by hand** instead of as a service, for a quick try:
 
    ```sh
    coldship server
    ```
 
-   ```txt
-   Created admin token (shown once, store it safely):
-
-     cst_3f9c...
-   ```
-
-   The server listens on `127.0.0.1:7070` and keeps its state in `./coldship.db`. Change these with `--addr` and `--data`. If Docker isn't installed, running, or usable by your user, it stops and tells you how to fix it.
+   It prints the admin token on first start, listens on `127.0.0.1:7070`, and keeps its state in `./coldship.db`. Your user must be able to run `docker`; if not, the server stops and tells you how to fix it.
 
 3. **Point the CLI at it.**
 

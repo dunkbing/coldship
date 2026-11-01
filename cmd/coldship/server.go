@@ -41,6 +41,7 @@ func serverCmd() *cobra.Command {
 	var publicURL string
 	var keyFile string
 	var httpPort, httpsPort int
+	var adminTokenFile string
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run the Coldship control plane (API server + Docker runtime)",
@@ -94,6 +95,12 @@ func serverCmd() *cobra.Command {
 
 			if tok, err := eng.EnsureAdminToken(ctx); err != nil {
 				return err
+			} else if tok != "" && adminTokenFile != "" {
+				// For installers and services: keep the token out of logs.
+				if err := os.WriteFile(adminTokenFile, []byte(tok+"\n"), 0o600); err != nil {
+					return fmt.Errorf("writing the admin token to %s: %w", adminTokenFile, err)
+				}
+				log.Info("created the admin token", "file", adminTokenFile)
 			} else if tok != "" {
 				fmt.Fprintf(os.Stderr, "\nCreated admin token (shown once, store it safely):\n\n  %s\n\n"+
 					"Give agents their own deploy-scoped token instead:\n  COLDSHIP_TOKEN=%s coldship token create --name my-agent --scope deploy\n\n", tok, tok)
@@ -209,6 +216,7 @@ func serverCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&addr, "addr", envOr("COLDSHIP_ADDR", "127.0.0.1:7070"), "listen address")
 	cmd.Flags().StringVar(&data, "data", envOr("COLDSHIP_DATA", "coldship.db"), "SQLite state file")
+	cmd.Flags().StringVar(&adminTokenFile, "admin-token-file", "", "on first start, write the admin token to this file (0600) instead of printing it")
 	cmd.Flags().DurationVar(&grace, "startup-grace", 3*time.Second, "how long a new container must stay up to count as deployed")
 	cmd.Flags().StringVar(&updURL, "update-url", envOr("COLDSHIP_UPDATE_URL", defaultUpdateURL), "release manifest to check for new versions")
 	cmd.Flags().BoolVar(&autoUpgrade, "auto-upgrade", true, "install new minor and patch versions automatically when no deployment is running")

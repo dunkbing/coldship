@@ -32,6 +32,7 @@ Runs the API server, the Docker runtime and the dashboard.
 |---|---|---|---|
 | `--addr` | `COLDSHIP_ADDR` | `127.0.0.1:7070` | Listen address |
 | `--data` | `COLDSHIP_DATA` | `coldship.db` | SQLite state file |
+| `--admin-token-file` | | | On first start, write the admin token to this file (0600) instead of printing it. The installer uses it. |
 | `--startup-grace` | | `3s` | How long a new container must stay up for the deploy to count as successful |
 | `--build-timeout` | | `20m` | Maximum time for one Git build |
 | `--git-credentials` | `COLDSHIP_GIT_CREDENTIALS` | | git-credential-store file for private HTTPS repositories |
@@ -51,7 +52,7 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--auto-upgrade` | | `true` | Install new minor/patch versions automatically when no deployment is running |
 | `--update-interval` | | `6h` | How often to check for updates |
 
-On first start, with no tokens in the database, it creates an `admin` token and prints it once.
+On first start, with no tokens in the database, it creates an `admin` token and prints it once (or writes it to `--admin-token-file`). It exits with a hint if Docker isn't installed, running, or usable by this user.
 
 ### `coldship mcp`
 
