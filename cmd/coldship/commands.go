@@ -312,7 +312,7 @@ also lets the token create new apps, but only with matching names:
   coldship token create --name sandbox --app 'agent-*'
 
 A limited token sees and changes only those apps and their previews.`,
-		Args:  cobra.NoArgs,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			t, err := newClient().CreateToken(cmd.Context(), name, scope, apps...)
 			if err != nil {
