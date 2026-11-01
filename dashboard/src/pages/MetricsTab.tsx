@@ -92,25 +92,28 @@ export function MetricsTab({ app }: { app: AppView }) {
       ) : (
         <div className="chart-grid">
           {m.container && (
-            <LineChart title="CPU (100% = one core)" times={times} format={pct} series={[{ name: 'CPU', slot: 1, values: pts.map((p) => p.cpu_percent) }]} />
+            <LineChart title="CPU (100% = one core)" times={times} format={pct} minTop={1} series={[{ name: 'CPU', slot: 1, values: pts.map((p) => p.cpu_percent) }]} />
           )}
           {m.container && (
             <LineChart
               title="Memory"
               times={times}
               format={bytes}
+              binary
+              minTop={1 << 20}
               series={[{ name: 'Memory', slot: 1, values: pts.map((p) => p.memory_bytes) }]}
               refLine={limit ? { value: limit, label: 'limit' } : undefined}
             />
           )}
           {m.http && (
-            <LineChart title="Requests per second" times={times} format={perS} series={[{ name: 'Requests', slot: 1, values: pts.map((p) => p.requests_per_s) }]} />
+            <LineChart title="Requests per second" times={times} format={perS} minTop={1} series={[{ name: 'Requests', slot: 1, values: pts.map((p) => p.requests_per_s) }]} />
           )}
           {m.http && (
             <LineChart
               title="Errors per second"
               times={times}
               format={perS}
+              minTop={1}
               series={[
                 { name: '4xx', slot: 1, values: pts.map((p) => p.errors_4xx_per_s) },
                 { name: '5xx', slot: 2, values: pts.map((p) => p.errors_5xx_per_s) },
@@ -118,13 +121,15 @@ export function MetricsTab({ app }: { app: AppView }) {
             />
           )}
           {m.http && (
-            <LineChart title="Average response time" times={times} format={ms} series={[{ name: 'Response', slot: 1, values: pts.map((p) => p.avg_latency_ms) }]} />
+            <LineChart title="Average response time" times={times} format={ms} minTop={1} series={[{ name: 'Response', slot: 1, values: pts.map((p) => p.avg_latency_ms) }]} />
           )}
           {m.container && (
             <LineChart
               title="Network"
               times={times}
               format={rate}
+              binary
+              minTop={1024}
               series={[
                 { name: 'In', slot: 1, values: pts.map((p) => p.net_in_bps) },
                 { name: 'Out', slot: 2, values: pts.map((p) => p.net_out_bps) },
@@ -136,6 +141,8 @@ export function MetricsTab({ app }: { app: AppView }) {
               title="Disk"
               times={times}
               format={rate}
+              binary
+              minTop={1024}
               series={[
                 { name: 'Read', slot: 1, values: pts.map((p) => p.disk_read_bps) },
                 { name: 'Write', slot: 2, values: pts.map((p) => p.disk_write_bps) },

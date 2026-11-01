@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { Boxes, Database, Gauge, ScrollText, ShieldCheck, Ship } from 'lucide-react'
 import { api, ApiError, type WhoAmI } from './api'
 import { useLoad } from './hooks'
 import Login from './pages/Login'
@@ -82,22 +83,41 @@ function Sidebar({ me, onSignOut }: { me: WhoAmI; onSignOut: () => void }) {
   return (
     <nav className="sidebar" aria-label="Main">
       <div className="brand">
-        <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden>
-          <rect width="32" height="32" rx="7" fill="var(--accent)" />
-          <path d="M6 23V13l10-6 10 6v10h-4v-7H10v7z" fill="#fff" />
-        </svg>
+        <span className="brand-mark" aria-hidden>
+          <Ship size={18} strokeWidth={2.2} />
+        </span>
         <span>Coldship</span>
       </div>
+      <div className="nav-section">Deploy</div>
       <div className="nav-links">
-        <NavLink to="/apps">Apps</NavLink>
-        <NavLink to="/data">Data &amp; Storage</NavLink>
+        <NavLink to="/apps">
+          <Boxes size={17} />
+          Apps
+        </NavLink>
+        <NavLink to="/data">
+          <Database size={17} />
+          Data &amp; Storage
+        </NavLink>
+      </div>
+      <div className="nav-section">Operate</div>
+      <div className="nav-links">
         <NavLink to="/approvals">
+          <ShieldCheck size={17} />
           Approvals
           {needApproval > 0 && <span className="count">{needApproval}</span>}
         </NavLink>
-        <NavLink to="/audit">Audit log</NavLink>
-        {!me.apps?.length && <NavLink to="/server">Server</NavLink>}
+        <NavLink to="/audit">
+          <ScrollText size={17} />
+          Audit log
+        </NavLink>
+        {!me.apps?.length && (
+          <NavLink to="/server">
+            <Gauge size={17} />
+            Server
+          </NavLink>
+        )}
       </div>
+      <div className="sidebar-spacer" />
       <div className="whoami">
         <div>
           <div className="whoami-name">{me.name}</div>

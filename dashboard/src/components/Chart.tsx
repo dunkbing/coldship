@@ -6,9 +6,14 @@ export interface Series {
   values: number[]
 }
 
-// Fewest "nice" ticks (1, 2, 5 × 10^n) covering max.
-function niceMax(max: number): { top: number; step: number } {
+// Fewest "nice" ticks (1, 2, 5 × 10^n, in units of 1024^k for bytes) covering max.
+function niceMax(max: number, binary = false): { top: number; step: number } {
   if (max <= 0) return { top: 1, step: 0.5 }
+  if (binary) {
+    const unit = 1024 ** Math.max(0, Math.floor(Math.log(max) / Math.log(1024)))
+    const n = niceMax(max / unit)
+    return { top: n.top * unit, step: n.step * unit }
+  }
   const raw = max / 3
   const pow = 10 ** Math.floor(Math.log10(raw))
   const step = [1, 2, 5, 10].map((m) => m * pow).find((s) => s >= raw) ?? 10 * pow
@@ -25,12 +30,16 @@ export function LineChart({
   series,
   format,
   refLine,
+  minTop = 0,
+  binary = false,
 }: {
   title: string
   times: Date[]
   series: Series[]
   format: (v: number) => string
   refLine?: { value: number; label: string }
+  minTop?: number // smallest axis top, so tiny values don't get a microscopic scale
+  binary?: boolean // byte values: ticks in powers of 1024
 }) {
   const wrap = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(480)
@@ -45,8 +54,8 @@ export function LineChart({
   }, [])
 
   const n = times.length
-  const max = Math.max(0, ...series.flatMap((s) => s.values), refLine?.value ?? 0)
-  const { top, step } = niceMax(max)
+  const max = Math.max(minTop, ...series.flatMap((s) => s.values), refLine?.value ?? 0)
+  const { top, step } = niceMax(max, binary)
   const iw = Math.max(10, w - PAD.left - PAD.right)
   const ih = H - PAD.top - PAD.bottom
   const x = (i: number) => PAD.left + (n <= 1 ? iw : (i / (n - 1)) * iw)
@@ -55,6 +64,14 @@ export function LineChart({
   for (let v = 0; v <= top + step / 2; v += step) ticks.push(v)
   const fmtTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const last = series.map((s) => s.values[n - 1] ?? 0)
+  // End labels: keep two at least 12px apart.
+  const labelY = last.map((v) => y(v) + 4)
+  if (labelY.length === 2 && Math.abs(labelY[0] - labelY[1]) < 12) {
+    const mid = (labelY[0] + labelY[1]) / 2
+    const up = labelY[0] <= labelY[1] ? 0 : 1
+    labelY[up] = mid - 6
+    labelY[1 - up] = mid + 6
+  }
 
   function onMove(e: React.MouseEvent<SVGRectElement>) {
     const r = e.currentTarget.getBoundingClientRect()
@@ -113,7 +130,7 @@ export function LineChart({
           ))}
           {series.length > 1 &&
             series.map((s, i) => (
-              <text key={s.name} className="chart-label" x={PAD.left + iw + 4} y={y(last[i]) + 4}>
+              <text key={s.name} className="chart-label" x={PAD.left + iw + 4} y={labelY[i]}>
                 {s.name}
               </text>
             ))}

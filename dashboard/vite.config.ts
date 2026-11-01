@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react'
 // which serves it on the same origin as the API.
 export default defineConfig({
   plugins: [react()],
-  build: { outDir: '../internal/web/dist', emptyOutDir: true },
+  // No data: URLs: the dashboard's CSP only allows files from its own origin.
+  build: { outDir: '../internal/web/dist', emptyOutDir: true, assetsInlineLimit: 0 },
   server: {
     proxy: { '/v1': process.env.COLDSHIP_URL ?? 'http://127.0.0.1:7070' },
   },
