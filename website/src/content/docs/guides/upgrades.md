@@ -36,7 +36,7 @@ The CLI waits until the server reports the new version.
 
 **Automatic upgrades** do the same on their own, for minor and patch releases. **Major versions are never installed automatically**: the banner and the CLI say so, and you run `coldship upgrade` after reading the release notes. Turn automatic upgrades off with `coldship server --auto-upgrade=false`.
 
-A CLI on another machine updates itself with `coldship self-update`, straight from GitHub Releases, like `bun upgrade`.
+`coldship upgrade` also updates the CLI you run it from, straight from GitHub Releases, like `bun upgrade`. If the binary is in a folder only root can write (such as `/usr/local/bin`), it asks for sudo. With no server running, it updates just the CLI; `--cli-only` does that on purpose.
 
 ## How upgrades stay safe
 
@@ -63,7 +63,7 @@ The workflow:
 1. runs the tests
 2. builds the dashboard and binaries for Linux and macOS (amd64 and arm64)
 3. writes `latest.json` (versions and checksums) and `SHA256SUMS`
-4. **verifies the release before publishing**: an older Coldship build must install it through the real `self-update` path (checksum, `--version`)
+4. **verifies the release before publishing**: an older Coldship build must install it through the real `coldship upgrade` path (checksum, `--version`)
 5. publishes the GitHub release with generated notes
 
 Tags with a suffix, like `v0.2.0-rc.1`, become pre-releases. Servers never install them automatically, because `releases/latest` skips pre-releases.

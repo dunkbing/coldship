@@ -47,15 +47,15 @@ jobs:
           ls -l dist
 
       # Gate: an older build must be able to install this release through the
-      # real self-update path (checksum, then the new binary's --version).
-      - name: Verify with a real self-update
+      # real upgrade path (checksum, then the new binary's --version).
+      - name: Verify with a real upgrade
         run: |
           (cd dist && sha256sum -c SHA256SUMS)
           mkdir -p "$RUNNER_TEMP/old"
           go build -ldflags "-X main.version=0.0.0" -o "$RUNNER_TEMP/old/coldship" ./cmd/coldship
           (cd dist && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
           for i in $(seq 20); do curl -sf -o /dev/null http://127.0.0.1:8765/latest.json && break; sleep 0.5; done
-          "$RUNNER_TEMP/old/coldship" self-update --manifest-url http://127.0.0.1:8765/latest.json
+          "$RUNNER_TEMP/old/coldship" upgrade --cli-only --manifest-url http://127.0.0.1:8765/latest.json
           "$RUNNER_TEMP/old/coldship" --version | grep -F "$VERSION"
 
       - name: Publish

@@ -5,14 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/update"
@@ -58,114 +61,178 @@ func versionCmd() *cobra.Command {
 	}
 }
 
+// upgradeCmd updates everything the user runs: the server, when one is
+// reachable, and this CLI binary.
 func upgradeCmd() *cobra.Command {
-	var check, noWait bool
-	cmd := &cobra.Command{
-		Use:   "upgrade",
-		Short: "Upgrade the Coldship server to the latest release (admin)",
-		Long: "Upgrade the Coldship server to the latest release. The server waits for running\n" +
-			"deployments to finish, verifies and installs the new binary, and restarts itself.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			c := newClient()
-			if check {
-				st, err := c.SystemCheck(cmd.Context())
-				if err != nil {
-					return err
-				}
-				clearNoticeCache()
-				return emit(st, func() {
-					if st.UpdateAvailable {
-						fmt.Printf("Coldship %s is available (server runs %s). Run `coldship upgrade` to install it.\n", st.Latest, st.Version)
-					} else {
-						fmt.Printf("The server runs the latest version (%s).\n", st.Version)
-					}
-				})
-			}
-			st, err := c.SystemUpgrade(cmd.Context())
-			if ae, ok := apierr.As(err); ok && ae.Code == "server_unreachable" {
-				return ae.WithHint("`coldship upgrade` asks a running server to upgrade itself. " +
-					"With the server stopped, update this binary with `coldship self-update`, then start the server again")
-			}
-			if err != nil {
-				return err
-			}
-			target := st.Latest
-			if !flagJSON {
-				fmt.Printf("Upgrading the server from %s to %s. It waits for running deployments, then restarts.\n", st.Version, target)
-			}
-			if noWait {
-				return emit(st, nil)
-			}
-			deadline := time.Now().Add(45 * time.Minute)
-			for time.Now().Before(deadline) {
-				time.Sleep(2 * time.Second)
-				ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
-				cur, err := c.System(ctx)
-				cancel()
-				if err != nil {
-					continue // restarting
-				}
-				if cur.Version == target {
-					clearNoticeCache()
-					return emit(cur, func() { fmt.Printf("The server now runs %s.\n", cur.Version) })
-				}
-				if cur.State == "idle" && cur.UpgradeError != "" {
-					return apierr.New(500, "upgrade_failed", "%s", cur.UpgradeError).
-						WithHint("the server kept running the current version")
-				}
-			}
-			return apierr.New(504, "upgrade_timeout", "the server did not report version %s in time", target)
-		},
-	}
-	cmd.Flags().BoolVar(&check, "check", false, "only check for a new version now")
-	cmd.Flags().BoolVar(&noWait, "no-wait", false, "start the upgrade and return without waiting for the restart")
-	return cmd
-}
-
-func selfUpdateCmd() *cobra.Command {
+	var check, noWait, cliOnly bool
 	var manifestURL string
 	cmd := &cobra.Command{
-		Use:   "self-update",
-		Short: "Update this coldship binary to the latest release (like bun upgrade)",
-		Args:  cobra.NoArgs,
+		Use:   "upgrade",
+		Short: "Upgrade Coldship to the latest release: the server, if one is running, and this CLI",
+		Long: `Upgrade Coldship to the latest release.
+
+If a server is running at COLDSHIP_URL, it is upgraded first (admin token): it
+waits for running deployments, installs the new version and restarts itself.
+Then this coldship binary is updated, using sudo if it lives in a folder only
+root can write, such as /usr/local/bin.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if manifestURL == "" {
 				manifestURL = defaultUpdateURL
 			}
-			if manifestURL == "" {
-				return apierr.New(400, "updates_disabled", "this coldship was built from source, so it doesn't know where releases are").
-					WithHint("install a release with install.sh, or pass --manifest-url")
+			out := map[string]any{}
+			if !cliOnly {
+				srv, err := upgradeServer(cmd, check, noWait)
+				if err != nil {
+					return err
+				}
+				out["server"] = srv
 			}
-			m, err := update.Fetch(cmd.Context(), manifestURL)
+			cli, err := upgradeCLI(cmd, manifestURL, check)
 			if err != nil {
 				return err
 			}
-			if !update.Newer(m.Version, version) {
-				return emit(map[string]any{"version": version, "latest": m.Version, "updated": false}, func() {
-					fmt.Printf("coldship %s is up to date.\n", version)
-				})
-			}
-			target, err := update.Executable()
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(os.Stderr, "Downloading coldship %s for %s…\n", m.Version, update.Platform())
-			bin, err := update.Download(cmd.Context(), m, filepath.Dir(target))
-			if err != nil {
-				return err
-			}
-			if err := update.Install(cmd.Context(), bin, target, m.Version); err != nil {
-				return err
-			}
+			out["cli"] = cli
 			clearNoticeCache()
-			return emit(map[string]any{"version": m.Version, "previous": version, "updated": true, "backup": target + ".old"}, func() {
-				fmt.Printf("Updated %s from %s to %s (previous binary kept as %s.old).\n", target, version, m.Version, target)
-			})
+			return emit(out, func() {})
 		},
 	}
+	cmd.Flags().BoolVar(&check, "check", false, "only check for a new version")
+	cmd.Flags().BoolVar(&noWait, "no-wait", false, "start the server upgrade and return without waiting for the restart")
 	cmd.Flags().StringVar(&manifestURL, "manifest-url", "", "release manifest to use instead of the built-in one")
+	cmd.Flags().BoolVar(&cliOnly, "cli-only", false, "update only this binary, not the server")
 	return cmd
+}
+
+// selfUpdateCmd is the old name of `upgrade --cli-only`, kept for scripts.
+func selfUpdateCmd() *cobra.Command {
+	cmd := upgradeCmd()
+	cmd.Use, cmd.Hidden = "self-update", true
+	cmd.Short = "Update this coldship binary (same as upgrade --cli-only)"
+	cmd.Flags().Set("cli-only", "true")
+	return cmd
+}
+
+func say(format string, a ...any) {
+	if !flagJSON {
+		fmt.Printf(format+"\n", a...)
+	}
+}
+
+// upgradeServer upgrades the server at COLDSHIP_URL, if one is running.
+func upgradeServer(cmd *cobra.Command, check, noWait bool) (map[string]any, error) {
+	c := newClient()
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	st, err := c.SystemCheck(ctx) // admin: checks for a new version now
+	cancel()
+	if ae, ok := apierr.As(err); ok && ae.Code == "insufficient_scope" {
+		st, err = c.System(cmd.Context())
+	}
+	if ae, ok := apierr.As(err); ok {
+		switch ae.Code {
+		case "server_unreachable":
+			say("No Coldship server is running at %s, so only this CLI is checked.", c.BaseURL)
+			return map[string]any{"reachable": false}, nil
+		case "updates_disabled":
+			say("The server at %s was built from source, so it doesn't update itself.", c.BaseURL)
+			return map[string]any{"reachable": true, "skipped": "built from source"}, nil
+		case "unauthenticated":
+			say("Skipping the server at %s: set COLDSHIP_TOKEN to an admin token to upgrade it.", c.BaseURL)
+			return map[string]any{"reachable": true, "skipped": "no token"}, nil
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case !st.UpdateAvailable:
+		say("The server is up to date (%s).", st.Version)
+		return map[string]any{"version": st.Version, "updated": false}, nil
+	case check:
+		say("The server runs %s; %s is available.", st.Version, st.Latest)
+		return map[string]any{"version": st.Version, "latest": st.Latest, "updated": false}, nil
+	}
+	st, err = c.SystemUpgrade(cmd.Context())
+	if err != nil {
+		return nil, err
+	}
+	from, target := st.Version, st.Latest
+	say("Upgrading the server from %s to %s. It waits for running deployments, then restarts…", from, target)
+	if noWait {
+		return map[string]any{"version": from, "latest": target, "updated": false, "started": true}, nil
+	}
+	deadline := time.Now().Add(45 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+		cur, err := c.System(ctx)
+		cancel()
+		if err != nil {
+			continue // restarting
+		}
+		if cur.Version == target {
+			say("The server now runs %s.", cur.Version)
+			return map[string]any{"version": cur.Version, "previous": from, "updated": true}, nil
+		}
+		if cur.State == "idle" && cur.UpgradeError != "" {
+			return nil, apierr.New(500, "upgrade_failed", "%s", cur.UpgradeError).
+				WithHint("the server kept running the current version")
+		}
+	}
+	return nil, apierr.New(504, "upgrade_timeout", "the server did not report version %s in time", target)
+}
+
+// upgradeCLI updates this binary to the latest release.
+func upgradeCLI(cmd *cobra.Command, manifestURL string, check bool) (map[string]any, error) {
+	if manifestURL == "" {
+		say("This CLI was built from source, so it doesn't update itself.")
+		return map[string]any{"version": version, "updated": false, "reason": "built from source"}, nil
+	}
+	target, err := update.Executable()
+	if err != nil {
+		return nil, err
+	}
+	m, err := update.Fetch(cmd.Context(), manifestURL)
+	if err != nil {
+		return nil, err
+	}
+	// The server may have just replaced this same file (a service on this
+	// machine shares it), so ask the file, not this process.
+	cur := diskVersion(target)
+	switch {
+	case !update.Newer(m.Version, cur):
+		say("The CLI is up to date (%s).", cur)
+		return map[string]any{"version": cur, "updated": false}, nil
+	case check:
+		say("The CLI is %s; %s is available.", cur, m.Version)
+		return map[string]any{"version": cur, "latest": m.Version, "updated": false}, nil
+	case !canWrite(filepath.Dir(target)):
+		return nil, upgradeAsRoot(cmd, target, manifestURL)
+	}
+	fmt.Fprintf(os.Stderr, "Downloading coldship %s for %s…\n", m.Version, update.Platform())
+	bin, err := update.Download(cmd.Context(), m, filepath.Dir(target))
+	if err != nil {
+		return nil, err
+	}
+	if err := update.Install(cmd.Context(), bin, target, m.Version); err != nil {
+		return nil, err
+	}
+	say("Updated the CLI (%s) from %s to %s.", target, cur, m.Version)
+	return map[string]any{"version": m.Version, "previous": cur, "updated": true, "backup": target + ".old"}, nil
+}
+
+// diskVersion is the version of the coldship binary at path, or this
+// process's version if it can't be run.
+func diskVersion(path string) string {
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		return version
+	}
+	f := strings.Fields(string(out))
+	if len(f) == 0 {
+		return version
+	}
+	return f[len(f)-1]
 }
 
 // --- release tooling ---
@@ -270,7 +337,7 @@ func noticeLines(st *update.Status) []string {
 		}
 	}
 	if update.Newer(st.Version, version) {
-		lines = append(lines, fmt.Sprintf("This coldship CLI (%s) is older than the server (%s): run `coldship self-update`.", version, st.Version))
+		lines = append(lines, fmt.Sprintf("This coldship CLI (%s) is older than the server (%s): run `coldship upgrade`.", version, st.Version))
 	}
 	return lines
 }
@@ -324,7 +391,44 @@ func maybeNotice(cmd *cobra.Command) {
 	}
 }
 
+// isTerminal reports whether f is an interactive terminal (not just any
+// character device, such as /dev/null).
 func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
+}
+
+// canWrite reports whether this user can create files in dir.
+func canWrite(dir string) bool {
+	f, err := os.CreateTemp(dir, ".coldship-write-check-*")
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(f.Name())
+	return true
+}
+
+// upgradeAsRoot re-runs the CLI upgrade with sudo when the binary lives in a
+// folder only root can write, such as /usr/local/bin.
+func upgradeAsRoot(cmd *cobra.Command, target, manifestURL string) error {
+	sudo, err := exec.LookPath("sudo")
+	if os.Geteuid() == 0 || err != nil || !isTerminal(os.Stdin) || flagJSON {
+		return apierr.New(403, "permission_denied", "this user can't replace %s", target).
+			WithHint("run: sudo " + target + " upgrade --cli-only")
+	}
+	fmt.Fprintf(os.Stderr, "%s belongs to root, so updating it needs sudo.\n", target)
+	args := []string{target, "upgrade", "--cli-only"}
+	if manifestURL != defaultUpdateURL {
+		args = append(args, "--manifest-url", manifestURL)
+	}
+	c := exec.CommandContext(cmd.Context(), sudo, args...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := c.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.ExitCode())
+		}
+		return err
+	}
+	return nil
 }
