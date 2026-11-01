@@ -40,6 +40,7 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--preview-domain` | `HANGAR_PREVIEW_DOMAIN` | | Previews get `https://<name>.<domain>` (needs wildcard DNS) |
 | `--preview-ttl` / `--preview-max-ttl` | | `24h` / `168h` | Default and maximum preview lifetime |
 | `--max-previews` | | `20` | Most previews at once |
+| `--secret-key-file` | `HANGAR_SECRET_KEY_FILE` | `hangar.key` next to `--data` | Key that encrypts stored secrets. `HANGAR_SECRET_KEY` (base64 32 bytes) supplies the key directly instead. |
 | `--public-url` | `HANGAR_PUBLIC_URL` | | How Git hosts reach this server, for webhook URLs |
 | `--snapshot-dir` | `HANGAR_SNAPSHOT_DIR` | `hangar-snapshots` next to `--data` | Where database snapshots are stored |
 | `--snapshot-keep` | | `20` | Snapshots kept per database |
@@ -79,6 +80,14 @@ Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tool
 | `hangar diagnose <app>` | Findings and suggested fixes |
 | `hangar deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
 | `hangar version` | CLI and server versions, and whether an update is available |
+
+## Secrets
+
+| Command | Description |
+|---|---|
+| `hangar secrets status` | Key id, key source, and how many stored values are encrypted (admin) |
+| `hangar secrets rotate-key` | Re-encrypt all stored secrets with a new key, then drop the old one (admin) |
+| `hangar secrets decrypt --data hangar.db --yes` | Offline, server stopped: write secrets back as plaintext, for downgrading to a version without encryption |
 
 ## Builds
 

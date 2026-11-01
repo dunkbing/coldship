@@ -11,4 +11,4 @@ Hangar today deploys container images, or builds them from Git repositories (wit
 - **Policies.** Spend and instance caps per token, and per-app permissions.
 - **Notifications.** Approval requests to Slack or a webhook, and event webhooks that can wake an agent when a deploy fails.
 - **Multi-node.** A separate node agent, with Postgres as the state store.
-- **Secrets at rest.** Encrypt env values in the state store.
+- **Encrypted snapshots.** Encrypt database snapshot files with the same key, and ship them off the server (S3-compatible).

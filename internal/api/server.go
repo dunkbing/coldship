@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,7 +34,11 @@ type Server struct {
 	upd *update.Checker
 	// publicURL is how Git hosts reach this server, for webhook URLs.
 	publicURL string
+	rotateKey func(context.Context) (map[string]any, error)
 }
+
+// SetKeyRotation enables rotating the secret key through the API.
+func (s *Server) SetKeyRotation(f func(context.Context) (map[string]any, error)) { s.rotateKey = f }
 
 // SetPublicURL sets the externally reachable base URL (for webhook URLs).
 func (s *Server) SetPublicURL(u string) { s.publicURL = strings.TrimRight(u, "/") }
@@ -74,6 +79,8 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("POST /v1/plans/{id}/approve", store.ScopeAdmin, s.approvePlan)
 	s.route("GET /v1/audit", store.ScopeRead, s.audit)
 	s.route("GET /v1/system", store.ScopeRead, s.system)
+	s.route("GET /v1/system/secrets", store.ScopeAdmin, s.secretsStatus)
+	s.route("POST /v1/system/secrets/rotate", store.ScopeAdmin, s.rotateSecrets)
 	s.route("POST /v1/system/check", store.ScopeAdmin, s.systemCheck)
 	s.route("POST /v1/system/upgrade", store.ScopeAdmin, s.systemUpgrade)
 	s.mux.HandleFunc("GET /v1/system/manifest", s.systemManifest)
@@ -488,6 +495,22 @@ func (s *Server) system(*http.Request, principal) (any, error) {
 		return update.Status{Version: "unknown", DisabledReason: "updates are not configured on this server", State: "idle"}, nil
 	}
 	return s.upd.Status(), nil
+}
+
+func (s *Server) secretsStatus(r *http.Request, _ principal) (any, error) {
+	return s.st.SecretsStatus(r.Context())
+}
+
+func (s *Server) rotateSecrets(r *http.Request, p principal) (any, error) {
+	if s.rotateKey == nil {
+		return nil, apierr.New(409, "rotation_unavailable", "key rotation is not available on this server")
+	}
+	res, err := s.rotateKey(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	_ = s.st.AddAudit(r.Context(), store.AuditEntry{Actor: p.name, Action: "secrets.rotate", Target: fmt.Sprint(res["key_id"])})
+	return res, nil
 }
 
 func (s *Server) systemCheck(r *http.Request, _ principal) (any, error) {

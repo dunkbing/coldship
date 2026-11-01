@@ -77,4 +77,6 @@ Every error from every interface has the same shape:
 | `deploy_failed` | 502 | Another runtime failure during apply |
 | `runtime_unavailable`, `logs_unavailable` | 502 | Hangar couldn't talk to Docker |
 | `server_unreachable` | 503 | (CLI and MCP) The server isn't running at `HANGAR_URL` |
+| `secrets_unreadable` | 500 | A stored secret doesn't decrypt with the configured key (wrong key, corrupted, or copied from another row) |
+| `key_from_environment` | 409 | Keys from `HANGAR_SECRET_KEY` can't be rotated in place; see [rotation](/guides/secrets/#status-and-rotation) |
 | `internal` | 500 | A bug. Details are in the server log. |

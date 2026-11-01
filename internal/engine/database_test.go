@@ -19,7 +19,7 @@ import (
 func dbSetup(t *testing.T) (*Engine, *runtime.Fake) {
 	t.Helper()
 	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "h.db"))
+	st, err := store.Open(filepath.Join(dir, "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}

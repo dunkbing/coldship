@@ -11,13 +11,17 @@ import (
 	"hangar/internal/builder"
 	"hangar/internal/proxy"
 	"hangar/internal/runtime"
+	"hangar/internal/secrets"
 	"hangar/internal/spec"
 	"hangar/internal/store"
 )
 
+// testKeys encrypts every test database; tests that reopen a database reuse it.
+var testKeys = secrets.New()
+
 func setup(t *testing.T) (*Engine, *runtime.Fake) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +279,7 @@ func gitApp(ref string) *spec.App {
 }
 
 func TestGitBuildFlow(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +389,7 @@ func webDomains(image string, domains ...string) *spec.App {
 
 func setupProxy(t *testing.T) (*Engine, *runtime.Fake, *proxy.Fake) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +488,7 @@ func TestDomainConflictsAndProxyDisabled(t *testing.T) {
 		t.Fatalf("want domain_in_use naming web, got %v", err)
 	}
 
-	st, _ := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, _ := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	defer st.Close()
 	noProxy := New(st, runtime.NewFake(), builder.NewFake(), nil)
 	if _, err := noProxy.Plan(ctx, "agent", PlanRequest{Spec: webDomains("app:1", "a.example.com")}); code(err) != "proxy_disabled" {
@@ -494,12 +498,12 @@ func TestDomainConflictsAndProxyDisabled(t *testing.T) {
 
 func TestStartProxyRestoresRoutes(t *testing.T) {
 	dir := t.TempDir()
-	st, _ := store.Open(filepath.Join(dir, "h.db"))
+	st, _ := store.Open(filepath.Join(dir, "h.db"), testKeys)
 	e := New(st, runtime.NewFake(), builder.NewFake(), &proxy.Fake{})
 	res := deploy(t, e, webDomains("app:1", "web.example.com"))
 	st.Close()
 
-	st2, _ := store.Open(filepath.Join(dir, "h.db"))
+	st2, _ := store.Open(filepath.Join(dir, "h.db"), testKeys)
 	defer st2.Close()
 	px := &proxy.Fake{}
 	e2 := New(st2, runtime.NewFake(), builder.NewFake(), px)

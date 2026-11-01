@@ -20,7 +20,7 @@ func sha(c string) string { return strings.Repeat(c, 40) }
 
 func hookSetup(t *testing.T, onPush *spec.OnPush) (*Engine, *runtime.Fake, *builder.Fake) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}

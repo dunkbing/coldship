@@ -37,7 +37,11 @@ App data lives in Docker volumes named `hangar-<app>-<volume>`. Back those up se
 
 ## Secrets
 
-Env values are redacted in every output, but they are stored **unencrypted** in the SQLite file. Protect the file accordingly (`chmod 600`, encrypted disk). Encryption at rest is on the [roadmap](/project/roadmap/).
+Stored secrets are [encrypted](/guides/secrets/) with a key that is created on first start as `hangar.key` next to the database. For production:
+
+- Keep the key off the server's data disk with `--secret-key-file`, or provide it with `HANGAR_SECRET_KEY` from a secret manager.
+- Back up the key, and back it up separately from `hangar.db`. Without it, the stored secrets can't be recovered.
+- Delete backups of `hangar.db` taken before upgrading to encryption: they contain plaintext.
 
 ## Running as a service
 

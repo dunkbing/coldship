@@ -188,6 +188,16 @@ func (c *Client) DeletePreview(ctx context.Context, name, reason string) (*engin
 	return &out, c.do(ctx, "DELETE", "/v1/previews/"+esc(name)+"?reason="+url.QueryEscape(reason), nil, &out)
 }
 
+func (c *Client) SecretsStatus(ctx context.Context) (*store.SecretsStatus, error) {
+	var out store.SecretsStatus
+	return &out, c.do(ctx, "GET", "/v1/system/secrets", nil, &out)
+}
+
+func (c *Client) RotateSecretKey(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	return out, c.do(ctx, "POST", "/v1/system/secrets/rotate", nil, &out)
+}
+
 func (c *Client) System(ctx context.Context) (*update.Status, error) {
 	var out update.Status
 	return &out, c.do(ctx, "GET", "/v1/system", nil, &out)

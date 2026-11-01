@@ -16,15 +16,19 @@ import (
 	"hangar/internal/client"
 	"hangar/internal/engine"
 	"hangar/internal/runtime"
+	"hangar/internal/secrets"
 	"hangar/internal/spec"
 	"hangar/internal/store"
 	"hangar/internal/webhook"
 )
 
+// testKeys encrypts every test database; tests that reopen a database reuse it.
+var testKeys = secrets.New()
+
 // End to end through HTTP: scoped tokens, plan/apply, and agent-blocked approval.
 func TestAPIEndToEnd(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +105,7 @@ func errCode(err error) string {
 
 func TestDashboardSessions(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +169,7 @@ func TestDashboardSessions(t *testing.T) {
 
 func TestGitHookEndpoint(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}

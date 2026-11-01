@@ -20,7 +20,6 @@ import (
 	"hangar/internal/mcpserver"
 	"hangar/internal/proxy"
 	"hangar/internal/runtime"
-	"hangar/internal/store"
 	"hangar/internal/update"
 	"hangar/internal/web"
 
@@ -40,17 +39,22 @@ func serverCmd() *cobra.Command {
 	var snapshotKeep int
 	var snapshotInterval time.Duration
 	var publicURL string
+	var keyFile string
 	var httpPort, httpsPort int
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run the Hangar control plane (API server + Docker runtime)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-			st, err := store.Open(data)
+			if keyFile == "" {
+				keyFile = defaultKeyFile(data)
+			}
+			st, kr, err := openStore(data, keyFile, log)
 			if err != nil {
 				return err
 			}
 			defer st.Close()
+			rotator := &keyRotator{st: st, kr: kr, keyFile: keyFile, fromEnv: os.Getenv("HANGAR_SECRET_KEY") != ""}
 			rt := runtime.NewDocker()
 			rt.StartupGrace = grace
 			bd := builder.NewGit()
@@ -132,6 +136,7 @@ func serverCmd() *cobra.Command {
 			}
 			apiSrv.SetUpdater(checker)
 			apiSrv.SetPublicURL(publicURL)
+			apiSrv.SetKeyRotation(rotator.rotate)
 			go checker.Run(ctx)
 			if snapshotInterval > 0 {
 				go func() {
@@ -206,6 +211,7 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&previewTTL, "preview-ttl", 24*time.Hour, "default lifetime of a preview")
 	cmd.Flags().DurationVar(&previewMaxTTL, "preview-max-ttl", 7*24*time.Hour, "longest lifetime a preview may ask for")
 	cmd.Flags().IntVar(&maxPreviews, "max-previews", 20, "most previews that may exist at once")
+	cmd.Flags().StringVar(&keyFile, "secret-key-file", envOr("HANGAR_SECRET_KEY_FILE", ""), "key file that encrypts stored secrets (default: hangar.key next to --data; or set HANGAR_SECRET_KEY)")
 	cmd.Flags().StringVar(&publicURL, "public-url", envOr("HANGAR_PUBLIC_URL", ""), "URL Git hosts use to reach this server, for webhook URLs (e.g. https://hangar.example.com)")
 	cmd.Flags().StringVar(&snapshotDir, "snapshot-dir", envOr("HANGAR_SNAPSHOT_DIR", ""), "where database snapshots are kept (default: hangar-snapshots next to --data)")
 	cmd.Flags().IntVar(&snapshotKeep, "snapshot-keep", 20, "snapshots to keep per database (older ones are deleted)")

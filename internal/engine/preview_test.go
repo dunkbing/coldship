@@ -19,7 +19,7 @@ const repo = "https://github.com/acme/shop.git"
 
 func previewSetup(t *testing.T) (*Engine, *runtime.Fake, *builder.Fake) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"), testKeys)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -47,7 +47,7 @@ An upgrade replaces the binary that controls your Docker host, so nothing is tru
 - **A test run first.** The new binary must run and report the expected version (`hangar --version`) before it replaces the old one.
 - **No key, no updates.** A binary built without a signing key never checks for or installs updates.
 
-To roll back by hand, stop the server, move `hangar.old` back over `hangar`, and start it again.
+To roll back by hand, stop the server, move `hangar.old` back over `hangar`, and start it again. Rolling back to a version from **before secrets encryption** needs one more step first: `hangar secrets decrypt --yes` (see [Downgrading](/guides/secrets/#downgrading)). Otherwise the older binary can't read the database.
 
 ## Publishing a release (maintainers)
 

@@ -22,6 +22,7 @@ and a web dashboard embedded in the binary.
 | Preview environments | `hangar preview create web --ref feat/x --ttl 2h`: a throwaway copy with fresh volumes and no production secrets by default, deleted automatically. |
 | Git webhooks | `on_push: {action: plan\|deploy, previews: true}`: signed pushes from GitHub, GitLab or Gitea plan or deploy the branch tip, and branches get previews. |
 | Managed databases | `databases: [{name: main, engine: postgres}]`: credentials generated and injected as `DATABASE_URL`, never shown; snapshots daily and before anything destructive; restores are approved plans. |
+| Secrets at rest | Env values, database passwords, webhook secrets and deploy logs are AES-256-GCM encrypted in the state file; `hangar secrets rotate-key`. Back up `hangar.key` separately. |
 | Self-upgrades | Signed releases (Ed25519 + SHA-256), installed automatically when idle; "new version available" in the dashboard and CLI. |
 | Build from Git | `build: {git, ref}` instead of `image`; no Dockerfile needed for Node, Bun, Python, Go and static sites (`hangar build detect` explains the generated one). Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
 | No secret leaks | Env values are redacted in all output. The runtime gets them through a 0600 env file, never argv. |
@@ -133,7 +134,7 @@ Private repos: `hangar server --git-credentials <git-credential-store file>`, or
 - [ ] Policies: spend/instance caps per token, per-app permissions
 - [ ] Approval notifications (Slack/webhook) and event webhooks to wake agents on failures
 - [ ] Multi-node: a separate node agent; Postgres as the state store
-- [ ] Secrets encrypted at rest
+- [x] Secrets encrypted at rest (AES-256-GCM, rotatable key)
 
 ## Development
 

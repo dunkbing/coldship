@@ -13,12 +13,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
 
 	"hangar/internal/apierr"
 	"hangar/internal/planner"
+	"hangar/internal/secrets"
 	"hangar/internal/spec"
 )
 
@@ -144,7 +146,48 @@ type AuditEntry struct {
 	Detail json.RawMessage `json:"detail,omitempty"`
 }
 
-type Store struct{ db *sql.DB }
+// Store keeps Hangar's state. Columns that can hold secrets (app specs with
+// env values, plans and deployments that embed specs, database passwords,
+// webhook secrets, deploy logs) are encrypted with the keyring; nothing
+// is ever written to them in plaintext.
+type Store struct {
+	db *sql.DB
+	kr atomic.Pointer[secrets.Keyring]
+}
+
+// ErrKeyMismatch means the configured key cannot read this database.
+var ErrKeyMismatch = errors.New("the secret key does not match this database")
+
+// sealedColumns lists every encrypted column, how to find its rows, and the
+// additional data each value is bound to.
+var sealedColumns = []struct {
+	table, col string
+	keys       []string
+	aad        func(k []string) string
+}{
+	{"apps", "spec", []string{"name"}, func(k []string) string { return "apps.spec:" + k[0] }},
+	{"plans", "body", []string{"id"}, func(k []string) string { return "plans.body:" + k[0] }},
+	{"deployments", "body", []string{"id"}, func(k []string) string { return "deployments.body:" + k[0] }},
+	{"databases", "password", []string{"app", "name"}, func(k []string) string { return "databases.password:" + k[0] + "/" + k[1] }},
+	{"webhooks", "secret", []string{"app"}, func(k []string) string { return "webhooks.secret:" + k[0] }},
+	{"deploy_logs", "lines", []string{"deployment"}, func(k []string) string { return "deploy_logs.lines:" + k[0] }},
+}
+
+func (s *Store) seal(plain []byte, aad string) (string, error) { return s.kr.Load().Seal(plain, aad) }
+
+// open decrypts a stored value. Plaintext (from before encryption, or
+// written by an older binary) is accepted and gets encrypted on the next
+// start; ciphertext that doesn't decrypt is an error, never returned as is.
+func (s *Store) open(v, aad string) ([]byte, error) {
+	if !secrets.Sealed(v) {
+		return []byte(v), nil
+	}
+	b, err := s.kr.Load().Open(v, aad)
+	if err != nil {
+		return nil, apierr.New(500, "secrets_unreadable", "%v (%s)", err, aad)
+	}
+	return b, nil
+}
 
 const schema = `
 CREATE TABLE IF NOT EXISTS tokens (
@@ -170,6 +213,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   id TEXT PRIMARY KEY, app TEXT NOT NULL, delivery TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS deliveries_by_app ON webhook_deliveries(app, created_at);
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY, token_name TEXT NOT NULL, scope TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (
@@ -182,8 +226,16 @@ const tsFormat = "2006-01-02T15:04:05.000000000Z"
 
 func ts(t time.Time) string { return t.UTC().Format(tsFormat) }
 
-func Open(path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+// Open opens the state database with the keyring that encrypts its
+// secrets. It refuses a keyring that can't read the database, and encrypts
+// any plaintext secrets left from before encryption existed.
+func Open(path string, kr *secrets.Keyring) (*Store, error) {
+	if kr == nil {
+		return nil, errors.New("a secret keyring is required")
+	}
+	// secure_delete zeroes freed pages, so replaced plaintext doesn't linger
+	// in the file.
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=secure_delete(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -204,7 +256,246 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate: %w", err)
 		}
 	}
-	return &Store{db: db}, nil
+	st := &Store{db: db}
+	st.kr.Store(kr)
+	if err := st.checkKey(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	n, err := st.reseal(context.Background(), false)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("encrypting stored secrets: %w", err)
+	}
+	if n > 0 {
+		if err := st.scrub(); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	return st, nil
+}
+
+// checkKey verifies the keyring against a value sealed when the database
+// was first encrypted, and creates that value for a new database.
+func (s *Store) checkKey() error {
+	const aad = "meta:key_check"
+	var v string
+	err := s.db.QueryRow(`SELECT v FROM meta WHERE k = 'key_check'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		sealed, err := s.seal([]byte("hangar"), aad)
+		if err != nil {
+			return err
+		}
+		_, err = s.db.Exec(`INSERT INTO meta(k, v) VALUES('key_check', ?)`, sealed)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.kr.Load().Open(v, aad); err != nil {
+		return fmt.Errorf("%w: %v", ErrKeyMismatch, err)
+	}
+	return nil
+}
+
+// reseal encrypts plaintext values (all=false) or re-encrypts every value
+// with the current key (all=true), in one transaction.
+func (s *Store) reseal(ctx context.Context, all bool) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	kr := s.kr.Load()
+	n := 0
+	for _, c := range sealedColumns {
+		cols := strings.Join(c.keys, ", ")
+		rows, err := tx.QueryContext(ctx, `SELECT `+cols+`, `+c.col+` FROM `+c.table+` WHERE `+c.col+` IS NOT NULL`)
+		if err != nil {
+			return 0, err
+		}
+		type row struct {
+			keys []string
+			val  string
+		}
+		var todo []row
+		for rows.Next() {
+			keys := make([]string, len(c.keys))
+			dest := make([]any, 0, len(keys)+1)
+			for i := range keys {
+				dest = append(dest, &keys[i])
+			}
+			var val string
+			if err := rows.Scan(append(dest, &val)...); err != nil {
+				rows.Close()
+				return 0, err
+			}
+			if all || !secrets.Sealed(val) {
+				todo = append(todo, row{keys, val})
+			}
+		}
+		rows.Close()
+		where := make([]string, len(c.keys))
+		for i, k := range c.keys {
+			where[i] = k + " = ?"
+		}
+		for _, r := range todo {
+			aad := c.aad(r.keys)
+			plain := []byte(r.val)
+			if secrets.Sealed(r.val) {
+				if plain, err = kr.Open(r.val, aad); err != nil {
+					return 0, fmt.Errorf("%s.%s: %w", c.table, c.col, err)
+				}
+			}
+			sealed, err := kr.Seal(plain, aad)
+			if err != nil {
+				return 0, err
+			}
+			args := []any{sealed}
+			for _, k := range r.keys {
+				args = append(args, k)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE `+c.table+` SET `+c.col+` = ? WHERE `+strings.Join(where, " AND "), args...); err != nil {
+				return 0, err
+			}
+			n++
+		}
+	}
+	if all {
+		var v string
+		if err := tx.QueryRowContext(ctx, `SELECT v FROM meta WHERE k = 'key_check'`).Scan(&v); err == nil {
+			plain, err := kr.Open(v, "meta:key_check")
+			if err != nil {
+				return 0, err
+			}
+			sealed, err := kr.Seal(plain, "meta:key_check")
+			if err != nil {
+				return 0, err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE meta SET v = ? WHERE k = 'key_check'`, sealed); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return n, tx.Commit()
+}
+
+// scrub removes old copies of rewritten values: it checkpoints and
+// truncates the WAL and vacuums the database file.
+func (s *Store) scrub() error {
+	for _, stmt := range []string{`PRAGMA wal_checkpoint(TRUNCATE)`, `VACUUM`, `PRAGMA wal_checkpoint(TRUNCATE)`} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("scrubbing old plaintext (%s): %w", stmt, err)
+		}
+	}
+	return nil
+}
+
+// RotateKey switches to next (which must also hold the old key), then
+// re-encrypts every secret with its current key and scrubs old copies.
+func (s *Store) RotateKey(ctx context.Context, next *secrets.Keyring) (int, error) {
+	s.kr.Store(next)
+	n, err := s.reseal(ctx, true)
+	if err != nil {
+		return 0, err
+	}
+	return n, s.scrub()
+}
+
+// DecryptAll opens the database at path and writes every secret back as
+// plaintext (for downgrading to a version without encryption). The server
+// must not be running.
+func DecryptAll(ctx context.Context, path string, kr *secrets.Keyring) (int, error) {
+	st, err := Open(path, kr)
+	if err != nil {
+		return 0, err
+	}
+	defer st.Close()
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	n := 0
+	for _, c := range sealedColumns {
+		cols := strings.Join(c.keys, ", ")
+		rows, err := tx.QueryContext(ctx, `SELECT `+cols+`, `+c.col+` FROM `+c.table+` WHERE substr(`+c.col+`, 1, 5) = 'hgs1:'`)
+		if err != nil {
+			return 0, err
+		}
+		type row struct {
+			keys []string
+			val  string
+		}
+		var todo []row
+		for rows.Next() {
+			keys := make([]string, len(c.keys))
+			dest := make([]any, 0, len(keys)+1)
+			for i := range keys {
+				dest = append(dest, &keys[i])
+			}
+			var val string
+			if err := rows.Scan(append(dest, &val)...); err != nil {
+				rows.Close()
+				return 0, err
+			}
+			todo = append(todo, row{keys, val})
+		}
+		rows.Close()
+		where := make([]string, len(c.keys))
+		for i, k := range c.keys {
+			where[i] = k + " = ?"
+		}
+		for _, r := range todo {
+			plain, err := kr.Open(r.val, c.aad(r.keys))
+			if err != nil {
+				return 0, err
+			}
+			args := []any{string(plain)}
+			for _, k := range r.keys {
+				args = append(args, k)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE `+c.table+` SET `+c.col+` = ? WHERE `+strings.Join(where, " AND "), args...); err != nil {
+				return 0, err
+			}
+			n++
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE k = 'key_check'`); err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
+}
+
+// SetKeyring replaces the keyring (after rotation, with one holding only
+// the new key).
+func (s *Store) SetKeyring(kr *secrets.Keyring) { s.kr.Store(kr) }
+
+// SecretsStatus describes encryption without revealing key material.
+type SecretsStatus struct {
+	KeyID     string         `json:"key_id"`
+	Keys      int            `json:"keys"`
+	Source    string         `json:"source"`
+	Encrypted map[string]int `json:"encrypted"`
+	Plaintext int            `json:"plaintext"`
+}
+
+func (s *Store) SecretsStatus(ctx context.Context) (*SecretsStatus, error) {
+	kr := s.kr.Load()
+	st := &SecretsStatus{KeyID: kr.CurrentID(), Keys: len(kr.IDs()), Source: kr.Source, Encrypted: map[string]int{}}
+	for _, c := range sealedColumns {
+		var enc, plain int
+		if err := s.db.QueryRowContext(ctx, `SELECT
+			coalesce(sum(CASE WHEN substr(`+c.col+`, 1, 5) = 'hgs1:' THEN 1 ELSE 0 END), 0),
+			coalesce(sum(CASE WHEN substr(`+c.col+`, 1, 5) = 'hgs1:' THEN 0 ELSE 1 END), 0)
+			FROM `+c.table+` WHERE `+c.col+` IS NOT NULL`).Scan(&enc, &plain); err != nil {
+			return nil, err
+		}
+		st.Encrypted[c.table+"."+c.col] = enc
+		st.Plaintext += plain
+	}
+	return st, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -329,14 +620,23 @@ func (s *Store) GetDatabase(ctx context.Context, app, name string) (*Database, e
 	if err != nil {
 		return nil, err
 	}
+	pw, err := s.open(d.Password, "databases.password:"+app+"/"+name)
+	if err != nil {
+		return nil, err
+	}
+	d.Password = string(pw)
 	d.CreatedAt, _ = time.Parse(tsFormat, created)
 	return &d, nil
 }
 
 func (s *Store) SaveDatabase(ctx context.Context, d *Database) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO databases(app, name, engine, version, password, created_at) VALUES(?,?,?,?,?,?)
+	pw, err := s.seal([]byte(d.Password), "databases.password:"+d.App+"/"+d.Name)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO databases(app, name, engine, version, password, created_at) VALUES(?,?,?,?,?,?)
 		ON CONFLICT(app, name) DO UPDATE SET engine=excluded.engine, version=excluded.version`,
-		d.App, d.Name, d.Engine, d.Version, d.Password, ts(d.CreatedAt))
+		d.App, d.Name, d.Engine, d.Version, pw, ts(d.CreatedAt))
 	return err
 }
 
@@ -433,13 +733,22 @@ func (s *Store) GetWebhook(ctx context.Context, app string) (*Webhook, error) {
 	if err != nil {
 		return nil, err
 	}
+	secret, err := s.open(w.Secret, "webhooks.secret:"+app)
+	if err != nil {
+		return nil, err
+	}
+	w.Secret = string(secret)
 	w.CreatedAt, _ = time.Parse(tsFormat, created)
 	return &w, nil
 }
 
 func (s *Store) SaveWebhook(ctx context.Context, w *Webhook) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO webhooks(app, secret, created_at) VALUES(?,?,?)
-		ON CONFLICT(app) DO UPDATE SET secret=excluded.secret, created_at=excluded.created_at`, w.App, w.Secret, ts(w.CreatedAt))
+	secret, err := s.seal([]byte(w.Secret), "webhooks.secret:"+w.App)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO webhooks(app, secret, created_at) VALUES(?,?,?)
+		ON CONFLICT(app) DO UPDATE SET secret=excluded.secret, created_at=excluded.created_at`, w.App, secret, ts(w.CreatedAt))
 	return err
 }
 
@@ -523,8 +832,12 @@ func (s *Store) SaveDeployLog(ctx context.Context, deployment string, lines []st
 	if err != nil {
 		return err
 	}
+	sealed, err := s.seal(b, "deploy_logs.lines:"+deployment)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO deploy_logs(deployment, lines) VALUES(?,?)
-		ON CONFLICT(deployment) DO UPDATE SET lines=excluded.lines`, deployment, string(b))
+		ON CONFLICT(deployment) DO UPDATE SET lines=excluded.lines`, deployment, sealed)
 	return err
 }
 
@@ -538,15 +851,19 @@ func (s *Store) GetDeployLog(ctx context.Context, deployment string) ([]string, 
 	if err != nil {
 		return nil, err
 	}
+	plain, err := s.open(body, "deploy_logs.lines:"+deployment)
+	if err != nil {
+		return nil, err
+	}
 	var lines []string
-	return lines, json.Unmarshal([]byte(body), &lines)
+	return lines, json.Unmarshal(plain, &lines)
 }
 
 // --- apps ---
 
 func (s *Store) GetApp(ctx context.Context, name string) (*App, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT name, spec, current_deployment, preview_of, expires_at, created_at, updated_at FROM apps WHERE name = ?`, name)
-	a, err := scanApp(row)
+	a, err := s.scanApp(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -561,7 +878,7 @@ func (s *Store) ListApps(ctx context.Context) ([]App, error) {
 	defer rows.Close()
 	out := []App{}
 	for rows.Next() {
-		a, err := scanApp(rows)
+		a, err := s.scanApp(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -572,7 +889,7 @@ func (s *Store) ListApps(ctx context.Context) ([]App, error) {
 
 type scanner interface{ Scan(...any) error }
 
-func scanApp(r scanner) (*App, error) {
+func (s *Store) scanApp(r scanner) (*App, error) {
 	var a App
 	var specJSON sql.NullString
 	var created, updated, expires string
@@ -585,8 +902,12 @@ func scanApp(r scanner) (*App, error) {
 		}
 	}
 	if specJSON.Valid {
+		plain, err := s.open(specJSON.String, "apps.spec:"+a.Name)
+		if err != nil {
+			return nil, err
+		}
 		a.Spec = &spec.App{}
-		if err := json.Unmarshal([]byte(specJSON.String), a.Spec); err != nil {
+		if err := json.Unmarshal(plain, a.Spec); err != nil {
 			return nil, err
 		}
 	}
@@ -602,7 +923,11 @@ func (s *Store) UpsertApp(ctx context.Context, a *App) error {
 		if err != nil {
 			return err
 		}
-		specJSON = sql.NullString{String: string(b), Valid: true}
+		sealed, err := s.seal(b, "apps.spec:"+a.Name)
+		if err != nil {
+			return err
+		}
+		specJSON = sql.NullString{String: sealed, Valid: true}
 	}
 	expires := ""
 	if a.ExpiresAt != nil {
@@ -643,7 +968,7 @@ func (s *Store) GetPlan(ctx context.Context, id string) (*Plan, error) {
 
 // ListPlans returns plans newest first, optionally filtered by status.
 func (s *Store) ListPlans(ctx context.Context, status string, limit int) ([]Plan, error) {
-	q, args := `SELECT body FROM plans`, []any{}
+	q, args := `SELECT id, body FROM plans`, []any{}
 	if status != "" {
 		q += ` WHERE status = ?`
 		args = append(args, status)
@@ -656,12 +981,16 @@ func (s *Store) ListPlans(ctx context.Context, status string, limit int) ([]Plan
 	defer rows.Close()
 	out := []Plan{}
 	for rows.Next() {
-		var body string
-		if err := rows.Scan(&body); err != nil {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, err
+		}
+		plain, err := s.open(body, "plans.body:"+id)
+		if err != nil {
 			return nil, err
 		}
 		var p Plan
-		if err := json.Unmarshal([]byte(body), &p); err != nil {
+		if err := json.Unmarshal(plain, &p); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -684,19 +1013,23 @@ func (s *Store) GetDeployment(ctx context.Context, id string) (*Deployment, erro
 
 // ListDeployments returns an app's deployments, newest first.
 func (s *Store) ListDeployments(ctx context.Context, app string, limit int) ([]Deployment, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT body FROM deployments WHERE app = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, app, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, body FROM deployments WHERE app = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, app, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Deployment{}
 	for rows.Next() {
-		var body string
-		if err := rows.Scan(&body); err != nil {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, err
+		}
+		plain, err := s.open(body, "deployments.body:"+id)
+		if err != nil {
 			return nil, err
 		}
 		var d Deployment
-		if err := json.Unmarshal([]byte(body), &d); err != nil {
+		if err := json.Unmarshal(plain, &d); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -709,8 +1042,12 @@ func (s *Store) saveDoc(ctx context.Context, table, id, app, status string, crea
 	if err != nil {
 		return err
 	}
+	sealed, err := s.seal(b, table+".body:"+id)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO `+table+`(id, app, status, body, created_at) VALUES(?,?,?,?,?)
-		ON CONFLICT(id) DO UPDATE SET status=excluded.status, body=excluded.body`, id, app, status, string(b), ts(created))
+		ON CONFLICT(id) DO UPDATE SET status=excluded.status, body=excluded.body`, id, app, status, sealed, ts(created))
 	return err
 }
 
@@ -723,7 +1060,11 @@ func (s *Store) getDoc(ctx context.Context, table, id string, v any) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	return true, json.Unmarshal([]byte(body), v)
+	plain, err := s.open(body, table+".body:"+id)
+	if err != nil {
+		return false, err
+	}
+	return true, json.Unmarshal(plain, v)
 }
 
 // --- audit ---

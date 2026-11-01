@@ -23,6 +23,8 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/apps/{name}/rollback` | deploy | Body `{reason, to_deployment?}` |
 | `GET` | `/v1/deployments/{id}/log` | read | Deploy log: `{lines, commit, untrusted: true, note}` |
 | `GET` | `/v1/system` | read | Version and update status: `{version, latest, update_available, auto_upgrade, upgrade_state, ...}` |
+| `GET` | `/v1/system/secrets` | admin | Encryption status: key id, source, counts. Never key material |
+| `POST` | `/v1/system/secrets/rotate` | admin | Rotate the secret key |
 | `POST` | `/v1/system/check` | admin | Check for a new version now |
 | `POST` | `/v1/system/upgrade` | admin | Start an upgrade: waits for deployments, installs, restarts |
 | `GET` | `/v1/system/manifest` | read | The latest signed release manifest and its URL, for `hangar self-update` |

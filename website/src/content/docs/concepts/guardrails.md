@@ -40,9 +40,9 @@ Approving doesn't apply the plan. The agent, or you, still applies it with a rea
 
 ![The approvals page showing a destructive production plan waiting for approval](../../../assets/screenshots/approvals.png)
 
-## Secrets are write-only
+## Secrets are write-only, and encrypted at rest
 
-Env values go into the spec but never come back out. API responses, plans, CLI output, MCP results and the dashboard all show `<redacted>`. The runtime passes values to Docker through a file readable only by its owner, never on the command line where other processes could see them.
+Env values go into the spec but never come back out. On disk, they're [encrypted](/guides/secrets/) along with database passwords and webhook secrets. API responses, plans, CLI output, MCP results and the dashboard all show `<redacted>`. The runtime passes values to Docker through a file readable only by its owner, never on the command line where other processes could see them.
 
 ## Logs are untrusted
 
