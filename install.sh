@@ -1,58 +1,104 @@
 #!/bin/sh
-# Install Coldship from GitHub Releases.
+# Install Coldship:
 #
-#   On a server (installs the CLI and runs Coldship as a system service):
-#     curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh -s -- --service
+#   curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
 #
-#   On a laptop (just the CLI):
-#     curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
+# On Linux this installs the server as a system service (installing Docker
+# first if needed) and logs the CLI in. On macOS it installs only the CLI.
 #
-# COLDSHIP_VERSION=0.2.0 installs a specific version; COLDSHIP_INSTALL_DIR
-# changes where it goes (default /usr/local/bin).
+# Options, as environment variables:
+#   COLDSHIP_CLI_ONLY=1       install only the coldship command, no server
+#   COLDSHIP_VERSION=0.2.0    install a specific version
+#   COLDSHIP_INSTALL_DIR=...  where the binary goes (default /usr/local/bin)
 set -eu
 
 repo="dunkbing/coldship"
 dir="${COLDSHIP_INSTALL_DIR:-/usr/local/bin}"
-service=no
-for arg in "$@"; do
-  case "$arg" in
-    --service) service=yes ;;
-    *) echo "coldship: unknown option $arg (use --service to run Coldship as a system service)" >&2; exit 1 ;;
-  esac
-done
+data=/var/lib/coldship
+url=http://127.0.0.1:7070
 
-case "$(uname -s)" in
-  Linux) os=linux ;;
-  Darwin) os=darwin ;;
-  *) echo "coldship: unsupported OS $(uname -s)" >&2; exit 1 ;;
-esac
-case "$(uname -m)" in
-  x86_64 | amd64) arch=amd64 ;;
-  aarch64 | arm64) arch=arm64 ;;
-  *) echo "coldship: unsupported CPU $(uname -m)" >&2; exit 1 ;;
-esac
+if [ -t 1 ]; then
+  bold=$(printf '\033[1m'); green=$(printf '\033[32m'); yellow=$(printf '\033[33m'); dim=$(printf '\033[2m'); reset=$(printf '\033[0m')
+else
+  bold=; green=; yellow=; dim=; reset=
+fi
+step() { printf '%s==>%s %s\n' "$bold" "$reset" "$1"; }
+ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$1"; }
+note() { printf '  %s!%s %s\n' "$yellow" "$reset" "$1"; }
+die() { printf '\n%scoldship: %s%s\n' "$bold" "$1" "$reset" >&2; exit 1; }
 
 # Root runs commands directly; everyone else through sudo.
 as_root() {
   if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi
 }
 
-if [ "$service" = yes ]; then
-  if [ "$os" != linux ] || ! command -v systemctl >/dev/null 2>&1; then
-    echo "coldship: --service needs Linux with systemd" >&2; exit 1
-  fi
-  # The service runs as root, so only Docker itself has to be there.
-  if ! command -v docker >/dev/null 2>&1; then
-    echo "coldship: Docker isn't installed. Install it, then run this again:" >&2
-    echo "  curl -fsSL https://get.docker.com | sudo sh" >&2
-    exit 1
-  fi
-  if ! as_root docker version >/dev/null 2>&1; then
-    echo "coldship: Docker is installed but not running. Start it, then run this again:" >&2
-    echo "  sudo systemctl enable --now docker" >&2
-    exit 1
-  fi
+case "$(uname -s)" in
+  Linux) os=linux ;;
+  Darwin) os=darwin ;;
+  *) die "unsupported OS $(uname -s)" ;;
+esac
+case "$(uname -m)" in
+  x86_64 | amd64) arch=amd64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) die "unsupported CPU $(uname -m)" ;;
+esac
+
+mode=server
+if [ "${COLDSHIP_CLI_ONLY:-}" = 1 ] || [ "$os" != linux ]; then
+  mode=cli
+elif ! command -v systemctl >/dev/null 2>&1; then
+  mode=cli
+  note "no systemd here, so only the CLI is installed (run the server yourself with: coldship server)"
 fi
+
+printf '\n%sInstalling Coldship%s %s(%s/%s, %s)%s\n\n' "$bold" "$reset" "$dim" "$os" "$arch" "$( [ $mode = server ] && echo "server and CLI" || echo "CLI only")" "$reset"
+
+if [ "$mode" = server ] && [ "$(id -u)" != 0 ]; then
+  command -v sudo >/dev/null 2>&1 || die "installing the server needs root: run this as root, or install sudo"
+  step "Asking for sudo (to install Docker and the service)"
+  # sudo reads the password from the terminal, even when this script is piped.
+  sudo -v || die "sudo is needed to install the server"
+  ok "sudo ok"
+fi
+
+# --- Docker ---
+
+docker_answers() { as_root docker version >/dev/null 2>&1; }
+
+install_docker() {
+  id=""
+  [ -r /etc/os-release ] && id=$(. /etc/os-release && echo "${ID:-}")
+  case "$id" in
+    ol | rhel | rocky | almalinux | centos)
+      # get.docker.com doesn't support these; Docker's RHEL-family repo does.
+      as_root dnf -y -q install dnf-plugins-core
+      as_root dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+      as_root dnf -y -q install docker-ce docker-ce-cli containerd.io docker-buildx-plugin
+      ;;
+    *)
+      curl -fsSL https://get.docker.com | as_root sh
+      ;;
+  esac
+}
+
+if [ "$mode" = server ]; then
+  step "Docker"
+  if ! command -v docker >/dev/null 2>&1; then
+    printf '  installing Docker Engine (this takes a minute)...\n'
+    install_docker >/tmp/coldship-docker-install.log 2>&1 ||
+      die "Docker couldn't be installed automatically (log: /tmp/coldship-docker-install.log). Install it (https://docs.docker.com/engine/install/), then run this again."
+    ok "Docker installed"
+  fi
+  if ! docker_answers; then
+    as_root systemctl enable --now docker >/dev/null 2>&1 || true
+    i=0
+    while ! docker_answers && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+    docker_answers || die "Docker is installed but won't start. Check: sudo systemctl status docker"
+  fi
+  ok "Docker $(as_root docker version --format '{{.Server.Version}}' 2>/dev/null) is running"
+fi
+
+# --- the coldship binary ---
 
 if [ -n "${COLDSHIP_DOWNLOAD_BASE:-}" ]; then
   base="$COLDSHIP_DOWNLOAD_BASE"   # for testing a release before publishing
@@ -63,47 +109,46 @@ else
 fi
 asset="coldship-$os-$arch"
 
+step "Coldship"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-echo "Downloading $asset..."
-curl -fsSL -o "$tmp/$asset" "$base/$asset"
-curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
-
+curl -fsSL -o "$tmp/$asset" "$base/$asset" || die "download failed: $base/$asset"
+curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || die "download failed: $base/SHA256SUMS"
 (
   cd "$tmp"
-  grep " $asset\$" SHA256SUMS > expected || { echo "coldship: $asset is not in SHA256SUMS" >&2; exit 1; }
+  grep " $asset\$" SHA256SUMS > expected || exit 1
   if command -v sha256sum >/dev/null; then sha256sum -c expected >/dev/null; else shasum -a 256 -c expected >/dev/null; fi
-) || { echo "coldship: checksum mismatch, not installing" >&2; exit 1; }
+) || die "checksum mismatch, not installing"
 chmod +x "$tmp/$asset"
-
 if [ -w "$dir" ]; then
   mv "$tmp/$asset" "$dir/coldship"
 else
-  echo "Installing to $dir (needs sudo)..."
+  as_root mkdir -p "$dir"
   as_root mv "$tmp/$asset" "$dir/coldship"
 fi
-echo "Installed $("$dir/coldship" --version)"
+version=$("$dir/coldship" --version | awk '{print $NF}')
+ok "coldship $version installed to $dir/coldship"
 
-if [ "$service" = no ]; then
-  # Running the server by hand needs a user that can use Docker.
-  if [ "$os" = linux ] && command -v docker >/dev/null 2>&1 && ! docker version >/dev/null 2>&1; then
-    echo
-    echo "Note: this user can't use Docker, which \`coldship server\` needs. Either:"
-    echo "  - run Coldship as a service instead:  curl -fsSL https://raw.githubusercontent.com/$repo/main/install.sh | sh -s -- --service"
-    echo "  - or add yourself to the docker group: sudo usermod -aG docker \$USER, then log in again"
-  fi
+if [ "$mode" = cli ]; then
+  printf '\n%sDone.%s Connect to your server with: %scoldship login https://your-server%s\n\n' "$bold" "$reset" "$bold" "$reset"
   exit 0
 fi
 
-# --- system service ---
-data=/var/lib/coldship
+# --- the service ---
+
+step "Service"
+# A Coldship started by hand (coldship server in a terminal) would hold the
+# port the service needs.
+if ! as_root systemctl is-active --quiet coldship && curl -fsS "$url/healthz" >/dev/null 2>&1; then
+  die "something already listens on 127.0.0.1:7070. If it's \`coldship server\` running in a terminal, stop it (Ctrl-C), then run this again."
+fi
 token_file="$data/admin-token"
+fresh=no
+as_root test -e "$data/coldship.db" || fresh=yes
 as_root mkdir -p "$data"
 as_root chmod 700 "$data"
-fresh=no
-[ -e "$data/coldship.db" ] || fresh=yes
-
-unit="[Unit]
+cat > "$tmp/coldship.service" <<EOF
+[Unit]
 Description=Coldship
 After=network-online.target docker.service
 Wants=network-online.target docker.service
@@ -116,48 +161,42 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-"
-# A Coldship started by hand (coldship server in a terminal) would hold the
-# port the service needs.
-if ! as_root systemctl is-active --quiet coldship && curl -fsS http://127.0.0.1:7070/healthz >/dev/null 2>&1; then
-  echo "coldship: something already listens on 127.0.0.1:7070. If it's \`coldship server\` running in a terminal, stop it (Ctrl-C), then run this again." >&2
-  exit 1
-fi
-
-printf '%s' "$unit" > "$tmp/coldship.service"
+EOF
 as_root mv "$tmp/coldship.service" /etc/systemd/system/coldship.service
 as_root chmod 644 /etc/systemd/system/coldship.service
 as_root systemctl daemon-reload
 as_root systemctl enable coldship >/dev/null 2>&1
 as_root systemctl restart coldship
-
-echo "Starting the Coldship service..."
-ok=no
-for _ in $(seq 60); do
-  if as_root systemctl is-active --quiet coldship && curl -fsS http://127.0.0.1:7070/healthz >/dev/null 2>&1; then ok=yes; break; fi
+i=0
+until as_root systemctl is-active --quiet coldship && curl -fsS "$url/healthz" >/dev/null 2>&1; do
+  i=$((i + 1))
+  [ $i -lt 60 ] || die "the service didn't start. See: sudo journalctl -u coldship -n 50"
   sleep 0.5
 done
-if [ "$ok" = no ]; then
-  echo "coldship: the service didn't start. See: sudo journalctl -u coldship -n 50" >&2
-  exit 1
+ok "running, and starts on boot (sudo systemctl status coldship)"
+
+# --- log the CLI in ---
+
+token=""
+if [ "$fresh" = yes ] && as_root test -f "$token_file"; then
+  token=$(as_root cat "$token_file")
+  as_root rm -f "$token_file"
+  step "CLI"
+  # Log in as the person installing, also when the script runs under sudo.
+  if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    sudo -u "$SUDO_USER" -H "$dir/coldship" login "$url" --token "$token" >/dev/null
+  else
+    "$dir/coldship" login "$url" --token "$token" >/dev/null
+  fi
+  ok "logged in: coldship commands work right away"
 fi
 
-echo
-echo "Coldship is running as a service (sudo systemctl status coldship) and starts on boot."
-echo "Data: $data. Back up $data/coldship.key separately from the database."
-if [ "$fresh" = yes ] && as_root test -f "$token_file"; then
-  token="$(as_root cat "$token_file")"
-  as_root rm -f "$token_file"
-  echo
-  echo "Your admin token (shown once, store it safely):"
-  echo
-  echo "  $token"
-  echo
-  echo "Use it with the CLI:"
-  echo "  export COLDSHIP_TOKEN=$token"
-  echo "  coldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8080"
+printf '\n%s%sColdship is ready.%s\n\n' "$bold" "$green" "$reset"
+printf '  Deploy something:  %scoldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8080%s\n' "$bold" "$reset"
+printf '  Dashboard:         %s%s%s %s(on your laptop: ssh -L 7070:127.0.0.1:7070 <this server>)%s\n' "$bold" "$url" "$reset" "$dim" "$reset"
+if [ -n "$token" ]; then
+  printf '\n  Admin token (shown once; for the dashboard and other machines, keep it in a password manager):\n\n    %s%s%s\n' "$bold" "$token" "$reset"
 else
-  echo "Existing installation: use the admin token you saved before."
+  printf '\n  %sExisting installation updated; your data and admin token are unchanged.%s\n' "$dim" "$reset"
 fi
-echo
-echo "Dashboard: http://127.0.0.1:7070 (on your laptop: ssh -L 7070:127.0.0.1:7070 <this server>)"
+printf '\n  %s!%s Back up %s%s/coldship.key%s (it encrypts your secrets), away from this server.\n\n' "$yellow" "$reset" "$bold" "$data" "$reset"

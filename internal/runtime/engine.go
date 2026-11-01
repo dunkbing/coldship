@@ -78,6 +78,8 @@ func (d *Docker) RunContainer(ctx context.Context, s ContainerSpec) (string, err
 		Binds:         s.Binds,
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
 		Resources:     container.Resources{Memory: s.Memory},
+		// Rotate logs so a chatty app can't fill the disk (at most 3×10 MB).
+		LogConfig: container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 	}
 	if len(s.Ports) > 0 {
 		cfg.ExposedPorts = network.PortSet{}

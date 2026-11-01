@@ -9,8 +9,15 @@ The `coldship` binary is the server, the CLI and the MCP server.
 
 | Flag | Env | Default | Description |
 |---|---|---|---|
-| `--url` | `COLDSHIP_URL` | `http://127.0.0.1:7070` | Server URL |
-| `--token` | `COLDSHIP_TOKEN` | | API token |
+| `--url` | `COLDSHIP_URL` | saved by `coldship login`, else `http://127.0.0.1:7070` | Server URL |
+| `--token` | `COLDSHIP_TOKEN` | saved by `coldship login` | API token |
+
+## Signing in
+
+| Command | Description |
+|---|---|
+| `coldship login [server-url] [--token T]` | Check a token and save it with the server URL in `~/.config/coldship/config.json` (mode 0600), so other commands need no env vars. Asks for the token if `--token` isn't given. The installer does this for you on the server. |
+| `coldship logout` | Forget the saved URL and token |
 | `--json` | | off | Machine-readable output on stdout; errors as JSON on stderr |
 
 ## Exit codes

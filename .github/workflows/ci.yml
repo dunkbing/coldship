@@ -73,7 +73,7 @@ jobs:
         run: ./scripts/docker-smoke.sh
 
   install:
-    name: Install as a service
+    name: Install
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,21 +88,22 @@ jobs:
           make release VERSION=0.0.0-ci RELEASE_PLATFORMS=linux/amd64
           (cd dist && exec python3 -m http.server 8000 --bind 127.0.0.1) >/dev/null 2>&1 &
           for i in $(seq 30); do curl -sf http://127.0.0.1:8000/SHA256SUMS >/dev/null && break; sleep 0.5; done
-      - name: Install with --service
+      - name: Install (no options)
         run: |
-          COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh --service | tee "$RUNNER_TEMP/install.log"
+          COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh | tee "$RUNNER_TEMP/install.log"
           systemctl is-active coldship
-          token=$(grep -o 'cst_[0-9a-f]*' "$RUNNER_TEMP/install.log" | head -1)
-          test -n "$token"
+          grep -q 'cst_[0-9a-f]' "$RUNNER_TEMP/install.log"
           sudo test ! -e /var/lib/coldship/admin-token
-          echo "COLDSHIP_TOKEN=$token" >> "$GITHUB_ENV"
-      - name: Deploy through the service
+          test "$(stat -c %a ~/.config/coldship/config.json)" = 600
+      - name: The CLI works without COLDSHIP_TOKEN
         run: |
+          test -z "${COLDSHIP_TOKEN:-}"
           coldship deploy --name ci-hello --image nginx:1.27-alpine --port 80 --host-port 18090
           curl -sf http://127.0.0.1:18090/ | grep -q nginx
+          docker inspect -f '{{.HostConfig.LogConfig.Config}}' coldship-ci-hello | grep -q max-size
       - name: Re-running the installer keeps the installation
         run: |
-          COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh --service | tee "$RUNNER_TEMP/again.log"
+          COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh | tee "$RUNNER_TEMP/again.log"
           grep -q "Existing installation" "$RUNNER_TEMP/again.log"
           coldship apps | grep -q ci-hello
       - name: Survives a restart
@@ -110,6 +111,10 @@ jobs:
           sudo systemctl restart coldship
           for i in $(seq 30); do curl -sf http://127.0.0.1:7070/healthz >/dev/null && break; sleep 0.5; done
           coldship apps | grep -q ci-hello
+      - name: CLI-only install
+        run: |
+          COLDSHIP_CLI_ONLY=1 COLDSHIP_INSTALL_DIR="$RUNNER_TEMP/cli" COLDSHIP_DOWNLOAD_BASE=http://127.0.0.1:8000 sh install.sh
+          "$RUNNER_TEMP/cli/coldship" --version
       - name: Service log on failure
         if: failure()
         run: sudo journalctl -u coldship -n 100 --no-pager

@@ -45,10 +45,10 @@ Stored secrets are [encrypted](/guides/secrets/) with a key that is created on f
 
 ## Running as a service
 
-The installer sets Coldship up as a systemd service:
+On Linux, the installer sets Coldship up as a systemd service:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh -s -- --service
+curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
 ```
 
 It keeps state in `/var/lib/coldship`, starts on boot, and prints the admin token once. Running it again updates the binary and keeps your data and token. Manage it with `sudo systemctl status|restart|stop coldship` and read its log with `sudo journalctl -u coldship`.

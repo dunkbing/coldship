@@ -41,12 +41,12 @@ func main() {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.PersistentFlags().StringVar(&flagURL, "url", "", "Coldship server URL (env COLDSHIP_URL, default http://127.0.0.1:7070)")
-	root.PersistentFlags().StringVar(&flagToken, "token", "", "API token (env COLDSHIP_TOKEN)")
+	root.PersistentFlags().StringVar(&flagURL, "url", "", "Coldship server URL (env COLDSHIP_URL, then `coldship login`, default http://127.0.0.1:7070)")
+	root.PersistentFlags().StringVar(&flagToken, "token", "", "API token (env COLDSHIP_TOKEN, then `coldship login`)")
 	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "machine-readable JSON output")
 
 	root.AddCommand(serverCmd(), mcpCmd())
-	root.AddCommand(deployCmd(), exportCmd(), planCmd(), applyCmd(), approveCmd(), rollbackCmd())
+	root.AddCommand(loginCmd(), logoutCmd(), deployCmd(), exportCmd(), planCmd(), applyCmd(), approveCmd(), rollbackCmd())
 	root.AddCommand(appsCmd(), statusCmd(), logsCmd(), diagnoseCmd(), deploymentsCmd(), deployLogCmd(), auditCmd(), tokenCmd())
 	root.AddCommand(secretsCmd(), buildCmd(), webhookCmd(), dbCmd(), previewCmd(), versionCmd(), upgradeCmd(), selfUpdateCmd(), releaseCmd())
 	root.PersistentPostRun = func(cmd *cobra.Command, _ []string) { maybeNotice(cmd) }
@@ -57,18 +57,7 @@ func main() {
 }
 
 func newClient() *client.Client {
-	u := flagURL
-	if u == "" {
-		u = os.Getenv("COLDSHIP_URL")
-	}
-	if u == "" {
-		u = "http://127.0.0.1:7070"
-	}
-	t := flagToken
-	if t == "" {
-		t = os.Getenv("COLDSHIP_TOKEN")
-	}
-	return client.New(u, t)
+	return client.New(serverURL(), token())
 }
 
 // emit prints v as JSON (--json, or when no human format exists) or via human.

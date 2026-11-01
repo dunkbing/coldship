@@ -7,39 +7,26 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 
 ## Requirements
 
-- A Linux server with [Docker](https://docs.docker.com/engine/install/) and systemd. No Docker setup for your user is needed when Coldship runs as a service.
+- A Linux server with systemd (Ubuntu, Debian, Fedora, RHEL, Oracle Linux, …). Docker is installed for you if it's missing.
 - To build from source only: Go 1.26+ and [Bun](https://bun.sh)
 
 ## Run it
 
 <Steps>
 
-1. **Install it on your server.** This installs the `coldship` command and runs Coldship as a service that starts on boot:
+1. **Install it on your server.**
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh -s -- --service
+   curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
    ```
 
-   At the end it prints your **admin token**. It is shown only once, so save it.
+   It asks for sudo, installs Docker if it's missing, runs Coldship as a service that starts on boot, and logs your CLI in, so `coldship` commands work right away. At the end it prints your **admin token** once: keep it in a password manager for the dashboard and other machines.
 
-   Leave out `-s -- --service` to install only the CLI (on your laptop, for example). Or build from source with `make build` (needs Go and Bun).
+   On macOS, or with `COLDSHIP_CLI_ONLY=1`, it installs only the CLI. Connect that to a server with `coldship login https://your-server`.
 
-2. **Or run the server by hand** instead of as a service, for a quick try:
+2. **Open the dashboard** (optional). It listens on `127.0.0.1:7070` on the server. From your laptop, open a tunnel with `ssh -L 7070:127.0.0.1:7070 your-server`, browse to [http://localhost:7070](http://localhost:7070), and sign in with the admin token.
 
-   ```sh
-   coldship server
-   ```
-
-   It prints the admin token on first start, listens on `127.0.0.1:7070`, and keeps its state in `./coldship.db`. Your user must be able to run `docker`; if not, the server stops and tells you how to fix it.
-
-3. **Point the CLI at it.**
-
-   ```sh
-   export COLDSHIP_URL=http://127.0.0.1:7070
-   export COLDSHIP_TOKEN=cst_3f9c...
-   ```
-
-4. **Deploy an app.** No config file needed:
+3. **Deploy an app.** No config file needed:
 
    ```sh
    coldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8080
@@ -54,13 +41,12 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 
    Coldship names the app after the folder, builds your current branch (with or without a Dockerfile) and serves it on the domain with HTTPS.
 
-5. **Change it.** Flags change only what they name; everything else, secrets included, stays:
+4. **Change it.** Flags change only what they name; everything else, secrets included, stays:
 
    ```sh
    coldship deploy --name hello --env GREETING=hi --db postgres
    ```
 
-6. **Open the dashboard** at [http://127.0.0.1:7070](http://127.0.0.1:7070) and sign in with the admin token.
 
 </Steps>
 

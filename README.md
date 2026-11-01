@@ -19,22 +19,18 @@ like deleting production data, waits for your approval.
 On a Linux server with [Docker](https://docs.docker.com/engine/install/):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh -s -- --service
+curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
 ```
 
-This installs `coldship`, runs it as a service that starts on boot, and prints your **admin token**.
-Save it: it's shown only once. Coldship keeps itself up to date after that. Back up
-`/var/lib/coldship/coldship.key` (it encrypts your stored secrets) away from the database.
-
-Point the CLI at it:
-
-```sh
-export COLDSHIP_TOKEN=cst_...        # the admin token
-```
+That's it. It installs Docker if needed, runs Coldship as a service that starts on boot, and logs
+your CLI in, so `coldship` commands work right away. It prints your **admin token** once: keep it in
+a password manager. Coldship keeps itself up to date after that. Back up
+`/var/lib/coldship/coldship.key` (it encrypts your stored secrets) away from the server.
 
 The dashboard is at http://127.0.0.1:7070 on the server (from your laptop: `ssh -L 7070:127.0.0.1:7070 your-server`).
 
-For just the CLI (on a laptop), leave out `-s -- --service`. To build from source, you need
+On macOS (or with `COLDSHIP_CLI_ONLY=1`) the same command installs just the CLI; connect it with
+`coldship login https://your-server`. To build from source, you need
 [Go](https://go.dev/dl/) and [Bun](https://bun.sh): `git clone https://github.com/dunkbing/coldship.git && cd coldship && make build`.
 
 ## Deploy an app
