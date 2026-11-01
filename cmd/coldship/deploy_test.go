@@ -6,7 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/runtime"
 	"github.com/dunkbing/coldship/internal/spec"
+	"github.com/dunkbing/coldship/internal/store"
 )
 
 func TestDeployFlagsInferFromGitRepo(t *testing.T) {
@@ -65,5 +68,29 @@ func TestEngineHostFromUnit(t *testing.T) {
 	}
 	if m := dataFlagRe.FindStringSubmatch(unit); m == nil || m[1] != "/var/lib/coldship/coldship.db" {
 		t.Fatalf("data: %v", m)
+	}
+}
+
+func TestAppHealth(t *testing.T) {
+	running := &runtime.Status{Exists: true, Running: true}
+	cases := []struct {
+		v    engine.AppView
+		want string
+	}{
+		{engine.AppView{Runtime: running}, "healthy"},
+		{engine.AppView{Runtime: &runtime.Status{Exists: true, Running: true, State: "static"}}, "healthy"},
+		{engine.AppView{Runtime: &runtime.Status{}}, "stopped"},
+		{engine.AppView{Runtime: &runtime.Status{Exists: true, Running: true, RestartCount: 3}}, "failing"},
+		{engine.AppView{Runtime: running, LatestDeployment: &store.Deployment{Status: store.DeployFailed}}, "failing"},
+		{engine.AppView{Runtime: running, LatestDeployment: &store.Deployment{Status: store.DeployFailed, KeptPrevious: true}}, "healthy"},
+		{engine.AppView{LatestDeployment: &store.Deployment{Status: store.DeployBuilding}}, "deploying"},
+	}
+	for i, c := range cases {
+		if got := appHealth(&c.v); got != c.want {
+			t.Errorf("case %d: got %s, want %s", i, got, c.want)
+		}
+	}
+	if !isLocalURL("http://127.0.0.1:7070") || isLocalURL("https://coldship.example.com") {
+		t.Error("isLocalURL")
 	}
 }

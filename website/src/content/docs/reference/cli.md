@@ -84,7 +84,8 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 | Command | Description |
 |---|---|
 | `coldship apps` | List apps |
-| `coldship status <app>` | Spec, container state and latest deployment |
+| `coldship status` | Is Coldship running, and how are the apps? The server's version, container engine and proxy, app health, plans waiting for approval, available updates, and who you're signed in as. If the server isn't reachable, says why and how to start it. |
+| `coldship status <app>` | One app: source, port, env names, databases, URL, whether it runs in a container or as static files, and the latest deployment |
 | `coldship deployments <app> [--limit 20]` | Deployment history, newest first |
 | `coldship logs <app> [--tail 100] [--since 10m]` | Container logs |
 | `coldship diagnose <app>` | Findings and suggested fixes |

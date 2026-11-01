@@ -46,7 +46,7 @@ func serverCmd() *cobra.Command {
 	var adminTokenFile string
 	cmd := &cobra.Command{
 		Use:   "server",
-		Short: "Run the Coldship control plane (API server + Docker runtime)",
+		Short: "Run the Coldship server in this terminal (the installer runs it as a service instead)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 			// Installed as a service, Coldship is already running: say that,

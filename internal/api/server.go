@@ -633,11 +633,19 @@ func (s *Server) audit(r *http.Request, p principal) (any, error) {
 	return out, nil
 }
 
-func (s *Server) system(*http.Request, principal) (any, error) {
-	if s.upd == nil {
-		return update.Status{Version: "unknown", DisabledReason: "updates are not configured on this server", State: "idle"}, nil
+// SystemView is the server's version and update status, plus what it runs
+// on.
+type SystemView struct {
+	update.Status
+	Host engine.HostInfo `json:"host"`
+}
+
+func (s *Server) system(r *http.Request, _ principal) (any, error) {
+	st := update.Status{Version: "unknown", DisabledReason: "updates are not configured on this server", State: "idle"}
+	if s.upd != nil {
+		st = s.upd.Status()
 	}
-	return s.upd.Status(), nil
+	return SystemView{Status: st, Host: s.eng.Host(r.Context())}, nil
 }
 
 func (s *Server) secretsStatus(r *http.Request, _ principal) (any, error) {

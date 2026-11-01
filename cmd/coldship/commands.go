@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/engine"
 	"github.com/dunkbing/coldship/internal/planner"
 	"github.com/dunkbing/coldship/internal/spec"
@@ -145,10 +146,13 @@ func appsCmd() *cobra.Command {
 
 func statusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status <app>",
-		Short: "Show an app's spec, container status and latest deployment",
-		Args:  cobra.ExactArgs(1),
+		Use:   "status [app]",
+		Short: "Is Coldship running, and how are the apps? With an app name: that app's details",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return serverStatus(cmd)
+			}
 			v, err := newClient().GetApp(cmd.Context(), args[0])
 			if err != nil {
 				return err
@@ -498,4 +502,154 @@ func printStatus(v *engine.AppView) {
 	} else {
 		fmt.Println("  Not deployed yet.")
 	}
+}
+
+// appHealth sums up an app the way the dashboard does.
+func appHealth(v *engine.AppView) string {
+	if d := v.LatestDeployment; d != nil && (d.Status == store.DeployBuilding || d.Status == store.DeployInProgress) {
+		return "deploying"
+	}
+	rt := v.Runtime
+	switch {
+	case rt == nil:
+		return "unknown"
+	case !rt.Exists:
+		return "stopped"
+	}
+	failed := v.LatestDeployment != nil && v.LatestDeployment.Status == store.DeployFailed && !v.LatestDeployment.KeptPrevious
+	if rt.Running && rt.RestartCount == 0 && !failed {
+		return "healthy"
+	}
+	return "failing"
+}
+
+func isLocalURL(u string) bool {
+	return strings.Contains(u, "://127.0.0.1") || strings.Contains(u, "://localhost") || strings.Contains(u, "://[::1]")
+}
+
+// serverStatus answers "is Coldship running, and is everything all right?".
+func serverStatus(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+	c := newClient()
+	u := serverURL()
+	_, unitErr := os.Stat(unitPath)
+	service := unitErr == nil && isLocalURL(u)
+
+	sys, err := c.SystemView(ctx)
+	if ae, ok := apierr.As(err); ok {
+		switch ae.Code {
+		case "server_unreachable":
+			e := apierr.New(503, "server_unreachable", "Coldship isn't reachable at %s", u)
+			if isLocalURL(u) {
+				e.Message = "Coldship isn't running at " + u
+			}
+			switch {
+			case service:
+				e.WithHint("the coldship service is installed but not answering: see `sudo systemctl status coldship` and `sudo journalctl -u coldship -n 50`; start it with `sudo systemctl start coldship`")
+			case isLocalURL(u):
+				e.WithHint("install it as a service, which starts on boot (curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh), or run `coldship server` in a terminal")
+			default:
+				e.WithHint("check that the server is up and reachable from here, and the URL you're logged in to (coldship login <url>)")
+			}
+			return e
+		case "unauthenticated":
+			return apierr.New(401, "unauthenticated", "Coldship is running at %s, but this CLI isn't signed in", u).
+				WithHint("coldship login " + u + " (the admin token was printed when Coldship was installed)")
+		}
+	}
+	if err != nil {
+		return err
+	}
+	me, _ := c.WhoAmI(ctx)
+	apps, err := c.ListApps(ctx)
+	if err != nil {
+		return err
+	}
+	var healthy, deploying int
+	var failing []string
+	for _, a := range apps {
+		v, err := c.GetApp(ctx, a.Name)
+		if err != nil {
+			continue
+		}
+		switch appHealth(v) {
+		case "healthy":
+			healthy++
+		case "deploying":
+			deploying++
+		default:
+			failing = append(failing, a.Name)
+		}
+	}
+	var waiting []string
+	if plans, err := c.ListPlans(ctx, "pending", 200); err == nil {
+		for _, p := range plans {
+			if p.RequiresApproval && p.ApprovedBy == "" {
+				waiting = append(waiting, p.ID)
+			}
+		}
+	}
+
+	out := map[string]any{"url": u, "running": true, "service": service, "version": sys.Version, "host": sys.Host,
+		"apps":                 map[string]any{"total": len(apps), "healthy": healthy, "deploying": deploying, "failing": failing},
+		"waiting_for_approval": waiting, "update_available": sys.UpdateAvailable, "latest": sys.Latest}
+	if me != nil {
+		out["signed_in_as"] = me
+	}
+	return emit(out, func() {
+		where := ""
+		if service {
+			where = " (the coldship service)"
+		}
+		fmt.Printf("Coldship %s is running at %s%s\n", sys.Version, u, where)
+		h := sys.Host
+		switch {
+		case h.EngineError != "":
+			fmt.Printf("  Engine:    unreachable: %s\n", h.EngineError)
+		case h.Engine != "":
+			name := map[string]string{"docker": "Docker", "podman": "Podman"}[h.Engine]
+			fmt.Printf("  Engine:    %s %s\n", name, h.EngineVersion)
+		}
+		// Servers before 0.1.6 don't report their engine or proxy.
+		hostKnown := h.Engine != "" || h.EngineError != ""
+		switch p := h.Proxy; {
+		case !hostKnown:
+		case p == nil:
+			fmt.Println("  Proxy:     off (no domains; started with --proxy=false)")
+		case p.Running:
+			fmt.Printf("  Proxy:     running on ports %d and %d\n", p.HTTP, p.HTTPS)
+		default:
+			fmt.Printf("  Proxy:     not running: %s\n", orDash(p.Error))
+		}
+		switch {
+		case len(apps) == 0:
+			fmt.Println("  Apps:      none yet (coldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8090)")
+		default:
+			line := fmt.Sprintf("%d: %d healthy", len(apps), healthy)
+			if deploying > 0 {
+				line += fmt.Sprintf(", %d deploying", deploying)
+			}
+			if len(failing) > 0 {
+				verb := "needs"
+				if len(failing) > 1 {
+					verb = "need"
+				}
+				line += fmt.Sprintf(", %d %s attention (%s; see coldship diagnose <app>)", len(failing), verb, strings.Join(failing, ", "))
+			}
+			fmt.Printf("  Apps:      %s\n", line)
+		}
+		if len(waiting) > 0 {
+			fmt.Printf("  Approvals: %d plan(s) wait for a human: coldship approve %s\n", len(waiting), waiting[0])
+		}
+		if sys.UpdateAvailable {
+			fmt.Printf("  Update:    %s is available (coldship upgrade)\n", sys.Latest)
+		}
+		if me != nil {
+			who := fmt.Sprintf("%s (%s)", me.Name, me.Scope)
+			if len(me.Apps) > 0 {
+				who += ", limited to " + strings.Join(me.Apps, ", ")
+			}
+			fmt.Printf("  Signed in: %s\n", who)
+		}
+	})
 }

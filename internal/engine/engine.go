@@ -115,6 +115,34 @@ func (e *Engine) setRouteTo(ctx context.Context, r proxy.Route) error {
 	return nil
 }
 
+// HostInfo describes what the server runs on: its container engine and
+// its proxy.
+type HostInfo struct {
+	Engine        string        `json:"engine,omitempty"` // docker | podman
+	EngineVersion string        `json:"engine_version,omitempty"`
+	EngineError   string        `json:"engine_error,omitempty"`
+	Proxy         *proxy.Status `json:"proxy,omitempty"` // nil when disabled
+}
+
+// Host reports the container engine and the proxy.
+func (e *Engine) Host(ctx context.Context) HostInfo {
+	var h HostInfo
+	if ei, ok := e.rt.(interface {
+		EngineInfo(context.Context) (string, string, error)
+	}); ok {
+		name, version, err := ei.EngineInfo(ctx)
+		if err != nil {
+			h.EngineError = err.Error()
+		}
+		h.Engine, h.EngineVersion = name, version
+	}
+	if e.px != nil {
+		st := e.px.Status(ctx)
+		h.Proxy = &st
+	}
+	return h
+}
+
 // siteRoot is a static deployment's directory, relative to the proxy's
 // sites directory.
 func siteRoot(app, deployment string) string { return app + "/" + deployment }

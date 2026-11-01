@@ -60,6 +60,23 @@ func NewDocker() *Docker {
 	return &Docker{cli: cli, initErr: err, Host: host, StartupGrace: 3 * time.Second, StopTimeout: 10 * time.Second}
 }
 
+// EngineInfo names the container engine (docker or podman) and its version.
+func (d *Docker) EngineInfo(ctx context.Context) (name, version string, err error) {
+	cli, err := d.api()
+	if err != nil {
+		return "", "", err
+	}
+	v, err := cli.ServerVersion(ctx, client.ServerVersionOptions{})
+	if err != nil {
+		return "", "", unavailable("can't reach the container engine", err)
+	}
+	name = "docker"
+	if d.IsPodman(ctx) {
+		name = "podman"
+	}
+	return name, v.Version, nil
+}
+
 // IsPodman reports whether the engine is Podman (through its
 // Docker-compatible API) rather than Docker.
 func (d *Docker) IsPodman(ctx context.Context) bool {

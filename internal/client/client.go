@@ -198,6 +198,12 @@ func (c *Client) RotateSecretKey(ctx context.Context) (map[string]any, error) {
 	return out, c.do(ctx, "POST", "/v1/system/secrets/rotate", nil, &out)
 }
 
+// SystemView is System plus the container engine and proxy.
+func (c *Client) SystemView(ctx context.Context) (*api.SystemView, error) {
+	var out api.SystemView
+	return &out, c.do(ctx, "GET", "/v1/system", nil, &out)
+}
+
 func (c *Client) System(ctx context.Context) (*update.Status, error) {
 	var out update.Status
 	return &out, c.do(ctx, "GET", "/v1/system", nil, &out)
