@@ -27,15 +27,15 @@ import (
 )
 
 type Engine struct {
-	st       *store.Store
-	rt       runtime.Runtime
-	bd       builder.Builder
-	px       proxy.Proxy // nil when the proxy is disabled
-	proxyMu  sync.Mutex
-	routes   map[string]proxy.Route // live route table, by app
+	st      *store.Store
+	rt      runtime.Runtime
+	bd      builder.Builder
+	px      proxy.Proxy // nil when the proxy is disabled
+	proxyMu sync.Mutex
+	routes  map[string]proxy.Route // live route table, by app
 	// live holds the logs of deployments in progress, for following.
-	liveMu sync.Mutex
-	live   map[string]*builder.LogTail
+	liveMu   sync.Mutex
+	live     map[string]*builder.LogTail
 	locksMu  sync.Mutex
 	locks    map[string]*sync.Mutex // one per app: mutations of an app are serialized
 	active   atomic.Int64           // applies in progress
