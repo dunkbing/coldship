@@ -32,19 +32,18 @@ type Detection struct {
 	ignore         string
 }
 
-// Summary is a one-line description, e.g. "node 22 · pnpm · pnpm start".
+// Summary is a one-line description, e.g. "node 22 · pnpm". It contains
+// only validated values: commands can come from the repository (a Procfile)
+// and stay in the notes and deploy log, which are marked untrusted.
 func (d *Detection) Summary() string {
 	if d.Mode != "auto" {
 		return "the repository's Dockerfile"
 	}
-	parts := []string{d.Language + " " + d.Version}
-	if d.PackageManager != "" {
-		parts = append(parts, d.PackageManager)
+	s := d.Language + " " + d.Version
+	if d.PackageManager != "" && d.PackageManager != d.Language {
+		s += " · " + d.PackageManager
 	}
-	if d.Start != "" {
-		parts = append(parts, d.Start)
-	}
-	return strings.Join(parts, " · ")
+	return s
 }
 
 // project gives safe read access to the build context: no symlinks, no
@@ -288,7 +287,8 @@ func (d *Detection) node(p project, o *spec.AutoBuild) error {
 	d.header(&b)
 	fmt.Fprintf(&b, "FROM %s\n", image)
 	if d.PackageManager == "pnpm" || d.PackageManager == "yarn" {
-		b.WriteString("ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0\nRUN corepack enable\n")
+		// Node 25+ images no longer ship corepack.
+		b.WriteString("ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0\nRUN (command -v corepack >/dev/null || npm install -g corepack) && corepack enable\n")
 	}
 	fmt.Fprintf(&b, "WORKDIR /app\nRUN chown %s:%s /app\nUSER %s\n", user, user, user)
 	fmt.Fprintf(&b, "COPY --chown=%s:%s %s ./\n", user, user, strings.Join(append([]string{"package.json"}, lockfiles...), " "))
@@ -558,8 +558,11 @@ func pick(override, detected string, notes *[]string, what string) string {
 // execCmd renders CMD in exec form through sh, so $PORT expands. JSON
 // encoding escapes quotes; commands never contain newlines (validated).
 func execCmd(cmd string) string {
-	b, _ := json.Marshal([]string{"sh", "-c", cmd})
-	return "CMD " + string(b) + "\n"
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false) // keep && and < > readable in the Dockerfile we show
+	enc.Encode([]string{"sh", "-c", cmd})
+	return "CMD " + b.String()
 }
 
 func (d *Detection) header(b *strings.Builder) {

@@ -346,9 +346,16 @@ func chooseDockerfile(co *checkout, b spec.Build) (string, *Detection, error) {
 		return path, &Detection{Mode: "dockerfile", Notes: []string{"uses " + b.Dockerfile + " from the repository"}}, nil
 	}
 	det, err := Detect(co.ctxDir, b.Auto)
+	found := findDockerfiles(co.repo)
+	if err == nil && b.Builder == "" && len(found) > 0 {
+		// e.g. a monorepo with services/api/Dockerfile: say so, since the
+		// user may have meant to build with one of them.
+		det.note("found Dockerfiles at %s but none at %s; to use one, set build.context and build.dockerfile",
+			strings.Join(found, ", "), filepath.ToSlash(filepath.Join(b.Context, b.Dockerfile)))
+	}
 	if err != nil {
 		if ae, ok := apierr.As(err); ok {
-			if found := findDockerfiles(co.repo); len(found) > 0 {
+			if len(found) > 0 {
 				ae.WithDetail("dockerfiles_found", found)
 			}
 		}

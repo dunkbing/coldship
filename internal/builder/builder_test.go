@@ -238,7 +238,7 @@ func TestAutoBuildGeneratesDockerfileOutsideCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, strings.Join(log.Lines(), "\n"))
 	}
-	if !res.Auto || res.Summary != "node 20 · npm · npm start" {
+	if !res.Auto || res.Summary != "node 20 · npm" {
 		t.Fatalf("result %+v", res)
 	}
 	args, _ := os.ReadFile(filepath.Join(out, "args"))
@@ -301,5 +301,21 @@ func TestDetectDryRun(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(out, "args")); err == nil {
 		t.Fatal("detect must not run docker")
+	}
+}
+
+func TestDetectNotesDockerfilesElsewhere(t *testing.T) {
+	repo := newRepo(t, map[string]string{
+		"package.json":            `{"scripts":{"start":"node server.js"}}`,
+		"services/api/Dockerfile": "FROM scratch\n",
+	})
+	commit := gitRun(t, repo, "rev-parse", "HEAD")
+	g, _ := stubDockerCopyingDockerfile(t)
+	det, err := g.Detect(context.Background(), spec.Build{Git: repo, Commit: commit, Context: ".", Dockerfile: "Dockerfile"}, NewLogTail(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(det.Notes, "\n"), "found Dockerfiles at services/api/Dockerfile") {
+		t.Fatalf("a monorepo's Dockerfiles should be pointed out: %v", det.Notes)
 	}
 }

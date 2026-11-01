@@ -120,12 +120,12 @@ If the repository has no Dockerfile, Hangar works out what kind of project it is
 | Go | `go.mod` | the `go` line (default 1.23) | `go mod download` | the main package at the root or the only one under `cmd/` |
 | Static site | `index.html` | | | nginx |
 
-A `Procfile` `web:` line, if there is one, sets the start command for any language. Generated images run as a non-root user and read their port from `$PORT`, which Hangar sets to the spec's `port`. The static-site server reads it too.
+A `Procfile` `web:` line, if there is one, sets the start command for any language. Generated images for Node, Bun, Python and Go run the app as a non-root user (the static-site image uses nginx's standard setup, with a root master process and unprivileged workers). They read their port from `$PORT`, which Hangar sets to the spec's `port`; the static-site server reads it too. Node images keep devDependencies, so they are larger than a hand-tuned multi-stage build.
 
 **Check before deploying.** `hangar build detect -f hangar.yaml` (or the `hangar_build_detect` MCP tool) checks out the commit and explains every choice without building anything:
 
 ```txt
-Commit 1d8062bed3e9 builds with node 20 · npm · npm start.
+Commit 1d8062bed3e9 builds with node 20 · npm.
   - language node: found package.json
   - version 20, from engines.node in package.json
   - package manager npm, chosen from the lockfile
@@ -134,7 +134,7 @@ Commit 1d8062bed3e9 builds with node 20 · npm · npm start.
   - start: npm start
 ```
 
-Add `--dockerfile` to print the generated Dockerfile. Every build also writes it to the deploy log, and the deployment records a summary.
+Add `--dockerfile` to print the generated Dockerfile. Every build also writes it and the notes to the deploy log, and the deployment records a short summary (language, version, package manager). If the repository has Dockerfiles in subdirectories, as monorepos often do, a note points them out, in case you meant to build with one of them.
 
 **Correct it in the spec** when detection guesses wrong:
 

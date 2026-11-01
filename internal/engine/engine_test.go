@@ -518,7 +518,7 @@ func TestAutoBuildInjectsPortAndRecordsDetection(t *testing.T) {
 	bd.Refs["https://github.com/acme/web.git@main"] = strings.Repeat("a", 40)
 	app := &spec.App{Name: "web", Port: 8080, Build: &spec.Build{Git: "https://github.com/acme/web.git", Ref: "main", Builder: spec.BuilderAuto}}
 	res := deploy(t, e, app)
-	if rt.Containers["web"].Env["PORT"] != "8080" || res.Deployment.Detected != "node 22 · npm · npm start" {
+	if rt.Containers["web"].Env["PORT"] != "8080" || res.Deployment.Detected != "node 22 · npm" {
 		t.Fatalf("auto builds must get PORT and record what was detected: env=%v detected=%q", rt.Containers["web"].Env, res.Deployment.Detected)
 	}
 	// An explicit PORT wins.

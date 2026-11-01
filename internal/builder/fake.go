@@ -48,7 +48,7 @@ func (f *Fake) Build(_ context.Context, app string, b spec.Build, log io.Writer)
 	}
 	// Builder "auto" stands in for a project without a Dockerfile.
 	if b.Builder == spec.BuilderAuto {
-		return &Result{Image: ImageTag(app, b), Auto: true, Summary: "node 22 · npm · npm start"}, nil
+		return &Result{Image: ImageTag(app, b), Auto: true, Summary: "node 22 · npm"}, nil
 	}
 	return &Result{Image: ImageTag(app, b), Summary: "the repository's Dockerfile"}, nil
 }
