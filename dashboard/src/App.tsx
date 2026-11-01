@@ -7,6 +7,7 @@ import Apps from './pages/Apps'
 import AppDetail from './pages/AppDetail'
 import Approvals from './pages/Approvals'
 import Audit from './pages/Audit'
+import UpdateBanner from './components/UpdateBanner'
 
 const SessionContext = createContext<WhoAmI | null>(null)
 export const useSession = () => useContext(SessionContext)!
@@ -49,6 +50,7 @@ export default function App() {
           }}
         />
         <main className="main">
+          <UpdateBanner />
           <Routes>
             <Route path="/" element={<Navigate to="/apps" replace />} />
             <Route path="/apps" element={<Apps />} />

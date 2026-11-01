@@ -161,6 +161,23 @@ export interface WhoAmI {
   scope: Scope
 }
 
+export interface SystemStatus {
+  version: string
+  enabled: boolean
+  disabled_reason?: string
+  latest?: string
+  update_available: boolean
+  notes?: string
+  notes_url?: string
+  published_at?: string
+  auto_upgrade: boolean
+  auto_blocked?: string
+  last_checked?: string
+  check_error?: string
+  upgrade_state: 'idle' | 'waiting' | 'downloading' | 'installing' | 'restarting'
+  upgrade_error?: string
+}
+
 export class ApiError extends Error {
   status: number
   code: string
@@ -217,5 +234,7 @@ export const api = {
   plans: (status?: string, limit = 100) =>
     req<Plan[]>('GET', `/v1/plans?limit=${limit}${status ? `&status=${enc(status)}` : ''}`),
   approve: (id: string) => req<Plan>('POST', `/v1/plans/${enc(id)}/approve`),
+  system: () => req<SystemStatus>('GET', '/v1/system'),
+  upgrade: () => req<SystemStatus>('POST', '/v1/system/upgrade'),
   audit: (limit = 200) => req<AuditEntry[]>('GET', `/v1/audit?limit=${limit}`),
 }

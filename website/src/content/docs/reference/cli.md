@@ -36,6 +36,13 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--build-timeout` | | `20m` | Maximum time for one Git build |
 | `--git-credentials` | `HANGAR_GIT_CREDENTIALS` | | git-credential-store file for private HTTPS repositories |
 | `--build-dir` | `HANGAR_BUILD_DIR` | system temp dir | Where temporary build checkouts go |
+| `--proxy` | | `true` | Run the Caddy proxy for app domains |
+| `--proxy-http-port` / `--proxy-https-port` | | `80` / `443` | Host ports for the proxy |
+| `--acme-email` | `HANGAR_ACME_EMAIL` | | Email for Let's Encrypt notices |
+| `--update-url` | `HANGAR_UPDATE_URL` | built in | Signed release manifest to check |
+| `--update-public-key` | `HANGAR_UPDATE_PUBLIC_KEY` | built in | Key release manifests must be signed with |
+| `--auto-upgrade` | | `true` | Install new minor/patch versions automatically when no deployment is running |
+| `--update-interval` | | `6h` | How often to check for updates |
 
 On first start, with no tokens in the database, it creates an `admin` token and prints it once.
 
@@ -63,7 +70,19 @@ Runs an MCP server on stdio. Uses `HANGAR_URL` and `HANGAR_TOKEN`. See [MCP tool
 | `hangar deployments <app> [--limit 20]` | Deployment history, newest first |
 | `hangar logs <app> [--tail 100] [--since 10m]` | Container logs |
 | `hangar diagnose <app>` | Findings and suggested fixes |
-| `hangar build-log <deployment-id>` | Build log of a Git deployment (untrusted output) |
+| `hangar deploy-log <deployment-id>` | What happened during a deployment: build, start, health checks (untrusted output) |
+| `hangar version` | CLI and server versions, and whether an update is available |
+
+## Upgrades
+
+| Command | Description |
+|---|---|
+| `hangar upgrade` | Upgrade the server to the latest signed release (admin). Waits for the restart. `--check` checks now; `--no-wait` returns at once. |
+| `hangar self-update` | Update this hangar binary (for CLIs on other machines). Verifies the release with the built-in key. |
+| `hangar release keygen` | Create the Ed25519 key pair that signs releases (maintainers) |
+| `hangar release manifest --version X os/arch=path ...` | Write a signed release manifest (maintainers; `make release` runs it) |
+
+After other commands, the CLI prints a one-line note on stderr when a new version is available or the CLI is older than the server. It checks at most once an hour, and never prints with `--json`, when stderr isn't a terminal, or with `HANGAR_NO_UPDATE_NOTICE=1`.
 | `hangar audit [--limit 50]` | Audit log |
 
 ## Tokens

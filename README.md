@@ -17,6 +17,9 @@ and a web dashboard embedded in the binary.
 | Guardrails | Tokens have scopes (`read` < `deploy` < `admin`). A destructive change to a `production` app needs a human `approve`, and agents get no approve tool. |
 | One-call debugging | `diagnose` returns container state, latest deploy, logs, and likely causes such as crash loops, OOM, port mismatches, or missing env. |
 | Rollback | `rollback` redeploys the last good deployment. A failed deploy never replaces the "current" spec. |
+| Domains + HTTPS | `domains: [...]` routes through a managed Caddy proxy with automatic certificates. |
+| Zero-downtime deploys | New version starts next to the old, must pass its health check, then traffic switches. If it fails, the old one keeps serving. |
+| Self-upgrades | Signed releases (Ed25519 + SHA-256), installed automatically when idle; "new version available" in the dashboard and CLI. |
 | Build from Git | `build: {git, ref}` instead of `image`. Plans pin the commit, failed builds never touch the running app, built images are reused on rollback. |
 | No secret leaks | Env values are redacted in all output. The runtime gets them through a 0600 env file, never argv. |
 | Prompt-injection hygiene | Logs are labeled untrusted data in every response and tool description. |
@@ -119,8 +122,9 @@ Private repos: `hangar server --git-credentials <git-credential-store file>`, or
 - [x] Build from a Git repo with a Dockerfile
 - [ ] Builds without a Dockerfile (Nixpacks/Buildpacks-style detection)
 - [ ] Git webhooks: plan automatically on push
-- [ ] Reverse proxy + automatic TLS (embedded Caddy) with domains in the spec
-- [ ] Zero-downtime deploys (start new container, health check, then swap)
+- [x] Reverse proxy + automatic TLS (managed Caddy) with domains in the spec
+- [x] Zero-downtime deploys (start new container, health check, then swap)
+- [x] Signed self-upgrades
 - [ ] Ephemeral preview environments with a TTL (`stage: preview`, `ttl: 2h`)
 - [ ] Managed databases (Postgres/Redis) with snapshots taken before destructive ops
 - [ ] Policies: spend/instance caps per token, per-app permissions
@@ -135,6 +139,7 @@ Private repos: `hangar server --git-credentials <git-credential-store file>`, or
 | `make build` | Dashboard + Go binary |
 | `make test` | Go tests |
 | `make website-dev` / `make website` | Docs site dev server / static build (set `SITE_URL` for the sitemap) |
+| `make release VERSION=x.y.z UPDATE_PUBLIC_KEY=... UPDATE_URL=...` | Signed release in `dist/` (see the Upgrading guide) |
 | `make screenshots` | Regenerate docs screenshots (Docker; uses the Playwright image) |
 
 Use `bun add` to add JS dependencies rather than editing `package.json` by hand.

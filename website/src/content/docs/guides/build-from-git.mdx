@@ -62,18 +62,18 @@ A build runs **before** the running container is touched. If it fails, the previ
 
    ```txt
    error [build_failed]: docker build failed for commit 658fcbaa43f6
-     hint: read the build log for the failing step, fix the repository, then plan again. The previous version is still running
-     suggested fix: {"deployment":"dep_c5c1de1f0ba5","tool":"build_log"}
+     hint: read the build log for the failing step, fix the repository, then plan again. The previous version is still running and serving traffic
+     suggested fix: {"deployment":"dep_c5c1de1f0ba5","tool":"deploy_log"}
      failed_in: build
    ```
 
 2. `hangar diagnose` reports the app as still healthy, with a `build_failed` warning and the end of the build log.
 
-3. Read the full log with `hangar build-log <deployment>` (or the `hangar_build_log` MCP tool), fix the repository, push, and plan again.
+3. Read the full log with `hangar deploy-log <deployment>` (or the `hangar_deploy_log` MCP tool), fix the repository, push, and plan again.
 
 </Steps>
 
-In the dashboard, failed builds are marked **failed in build**, and each built deployment has a **Build log** button. The log opens scrolled to the end, where the failing step is.
+In the dashboard, failed builds are marked **failed in build**, and each deployment has a **Log** button. The log opens scrolled to the end, where the failing step is.
 
 ![Deployments of a Git-built app, with the failed build's log expanded](../../../assets/screenshots/app-git-deployments.png)
 

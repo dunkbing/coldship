@@ -755,3 +755,46 @@ select:focus,
   margin-top: 4px;
   padding-left: 0;
 }
+
+/* Update banner */
+.update-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.update-text {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.update-text > strong {
+  display: inline;
+}
+.update-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-right-color: transparent;
+  animation: spin 0.8s linear infinite;
+  flex: none;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -17,6 +17,7 @@ import (
 	"hangar/internal/apierr"
 	"hangar/internal/engine"
 	"hangar/internal/store"
+	"hangar/internal/update"
 )
 
 type Client struct {
@@ -136,6 +137,28 @@ func (c *Client) Deployments(ctx context.Context, app string, limit int) ([]stor
 func (c *Client) DeployLog(ctx context.Context, deployment string) (*engine.DeployLog, error) {
 	var out engine.DeployLog
 	return &out, c.do(ctx, "GET", "/v1/deployments/"+esc(deployment)+"/log", nil, &out)
+}
+
+func (c *Client) System(ctx context.Context) (*update.Status, error) {
+	var out update.Status
+	return &out, c.do(ctx, "GET", "/v1/system", nil, &out)
+}
+
+func (c *Client) SystemCheck(ctx context.Context) (*update.Status, error) {
+	var out update.Status
+	return &out, c.do(ctx, "POST", "/v1/system/check", nil, &out)
+}
+
+func (c *Client) SystemUpgrade(ctx context.Context) (*update.Status, error) {
+	var out update.Status
+	return &out, c.do(ctx, "POST", "/v1/system/upgrade", nil, &out)
+}
+
+// SystemManifest returns the server's latest signed release manifest and its
+// URL. Callers must verify the signature themselves.
+func (c *Client) SystemManifest(ctx context.Context) (*update.Published, error) {
+	var out update.Published
+	return &out, c.do(ctx, "GET", "/v1/system/manifest", nil, &out)
 }
 
 func (c *Client) WhoAmI(ctx context.Context) (*api.WhoAmI, error) {

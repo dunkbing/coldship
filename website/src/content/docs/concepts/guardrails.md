@@ -46,7 +46,7 @@ Env values go into the spec but never come back out. API responses, plans, CLI o
 
 ## Logs are untrusted
 
-Application logs and build logs can contain anything, including text written to look like instructions for an agent. Every logs, build-log and diagnose response carries `"untrusted": true` or a note saying so, and the MCP tool descriptions repeat the warning.
+Application logs and build logs can contain anything, including text written to look like instructions for an agent. Every logs, deploy-log and diagnose response carries `"untrusted": true` or a note saying so, and the MCP tool descriptions repeat the warning.
 
 ## Dashboard sessions
 

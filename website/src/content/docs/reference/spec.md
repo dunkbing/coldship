@@ -29,7 +29,9 @@ volumes:
 | `image` | string | one of `image`, `build` | Container image reference. It is pulled if not present locally. |
 | `build` | object | one of `image`, `build` | Build the image from a Git repository. See below. |
 | `port` | int | no | Port the app listens on inside the container. Used to publish `host_port` and to detect port mismatches. |
-| `host_port` | int | no | Publish `port` on this host port. Requires `port`. |
+| `host_port` | int | no | Publish `port` on this host port. Requires `port`. Apps with a host port deploy with brief downtime; prefer `domains`. |
+| `domains` | list | no | Hostnames routed to the app through the proxy with automatic HTTPS. Requires `port`. See [Domains and zero downtime](/guides/domains/). |
+| `health` | object | no | `{path, timeout}`: readiness check before traffic switches to a new version. Default: the port accepts connections within 60s. |
 | `memory` | string | no | Memory limit, e.g. `256m` or `1g`. Unlimited if unset. |
 | `env` | map | no | Environment variables. Keys match `[A-Za-z_][A-Za-z0-9_]*`; values are single-line. Values are write-only and redacted in all output. |
 | `volumes` | list | no | Persistent Docker volumes, each `{name, path}`. The name follows the same rules as app names, and the path must be absolute. Removing a volume from the spec **deletes it and its data**. |

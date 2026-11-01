@@ -10,7 +10,7 @@ description: Use diagnose to find out why an app is broken, then fix forward or 
 - the container's state, exit code, restart count and whether it was killed for running out of memory
 - the latest deployment and its error, if it failed
 - the last 50 log lines (marked untrusted)
-- the end of the build log, if the latest Git build failed
+- the end of the deploy log (build output, health checks, the failed container's output), if the latest deployment failed
 - **findings**: likely causes, each with a severity, a code and often a suggested fix
 
 ```sh
@@ -35,7 +35,9 @@ App demo-worker: healthy=false state=restarting restarts=5
 | Code | Severity | Detected when |
 |---|---|---|
 | `last_deploy_failed` | error | The newest deployment failed after its container was replaced |
-| `build_failed` | warning | The newest deployment failed to build. The previous version is still running; the diagnosis includes the end of the build log |
+| `build_failed` | warning | The newest deployment failed to build. The previous version is still running |
+| `new_version_unhealthy` | warning | The newest deployment never passed its health check, so traffic stayed on the previous version. Log checks (port mismatch, missing env) run against the failed container's captured output |
+| `proxy_down` | error | The app has domains but the `hangar-proxy` container isn't running |
 | `not_running` | error | No container exists for the app |
 | `oom_killed` | error | The container was killed for running out of memory. The fix doubles `memory` |
 | `crash_loop` | error | More than 2 restarts |

@@ -21,6 +21,7 @@ import (
 	"hangar/internal/proxy"
 	"hangar/internal/runtime"
 	"hangar/internal/store"
+	"hangar/internal/update"
 	"hangar/internal/web"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,7 +30,9 @@ import (
 func serverCmd() *cobra.Command {
 	var addr, data, gitCreds, buildDir, acmeEmail string
 	var grace, buildTimeout time.Duration
-	var proxyOn bool
+	var proxyOn, autoUpgrade bool
+	var updURL, updKey string
+	var updInterval time.Duration
 	var httpPort, httpsPort int
 	cmd := &cobra.Command{
 		Use:   "server",
@@ -75,16 +78,48 @@ func serverCmd() *cobra.Command {
 				}
 			}
 
-			srv := &http.Server{Addr: addr, Handler: api.New(eng, st, log, web.Handler()), ReadHeaderTimeout: 10 * time.Second}
+			apiSrv := api.New(eng, st, log, web.Handler())
+			srv := &http.Server{Addr: addr, Handler: apiSrv, ReadHeaderTimeout: 10 * time.Second}
+
+			// Self-upgrade: the checker installs a new binary, then calls
+			// restart, which drains in-flight requests (deployments run
+			// inside them) and re-executes the new binary in this process.
+			var restartTo string
+			drained := make(chan struct{})
+			restart := func(path string) {
+				restartTo = path
+				shCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				defer cancel()
+				srv.Shutdown(shCtx)
+				close(drained)
+			}
+			checker := &update.Checker{URL: updURL, Current: version, Interval: updInterval, Auto: autoUpgrade,
+				Busy: eng.Busy, Restart: restart, Log: log}
+			if updKey != "" {
+				pub, err := update.ParsePublicKey(updKey)
+				if err != nil {
+					return err
+				}
+				checker.PublicKey = pub
+			}
+			apiSrv.SetUpdater(checker)
+			go checker.Run(ctx)
+
 			go func() {
 				<-ctx.Done()
 				shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 				srv.Shutdown(shCtx)
 			}()
-			log.Info("hangar listening", "addr", addr, "data", data)
+			log.Info("hangar listening", "addr", addr, "data", data, "version", version)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				return err
+			}
+			if restartTo != "" {
+				<-drained
+				st.Close()
+				log.Info("restarting into the new version", "binary", restartTo)
+				return syscall.Exec(restartTo, os.Args, os.Environ())
 			}
 			return nil
 		},
@@ -92,6 +127,10 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", envOr("HANGAR_ADDR", "127.0.0.1:7070"), "listen address")
 	cmd.Flags().StringVar(&data, "data", envOr("HANGAR_DATA", "hangar.db"), "SQLite state file")
 	cmd.Flags().DurationVar(&grace, "startup-grace", 3*time.Second, "how long a new container must stay up to count as deployed")
+	cmd.Flags().StringVar(&updURL, "update-url", envOr("HANGAR_UPDATE_URL", defaultUpdateURL), "signed release manifest to check for new versions")
+	cmd.Flags().StringVar(&updKey, "update-public-key", envOr("HANGAR_UPDATE_PUBLIC_KEY", updatePublicKey), "Ed25519 public key (base64) that release manifests must be signed with")
+	cmd.Flags().BoolVar(&autoUpgrade, "auto-upgrade", true, "install new minor and patch versions automatically when no deployment is running")
+	cmd.Flags().DurationVar(&updInterval, "update-interval", 6*time.Hour, "how often to check for new versions")
 	cmd.Flags().BoolVar(&proxyOn, "proxy", true, "run the Caddy proxy that serves app domains with automatic HTTPS")
 	cmd.Flags().IntVar(&httpPort, "proxy-http-port", 80, "host port for the proxy's HTTP listener")
 	cmd.Flags().IntVar(&httpsPort, "proxy-https-port", 443, "host port for the proxy's HTTPS listener")

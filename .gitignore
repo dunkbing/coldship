@@ -8,3 +8,6 @@ node_modules/
 /website/dist/
 /website/.astro/
 /dashboard/test-results/
+/dist/
+hangar-release.key
+*.key

@@ -23,7 +23,7 @@ A plan contains:
 | `action` | `create`, `update`, `delete`, `redeploy` or `noop` |
 | `changes` | One entry per changed field, e.g. `{"path": "image", "op": "update", "from": "nginx:1.27", "to": "nginx:1.28"}` |
 | `destructive` | True if any change destroys data or the app |
-| `downtime` | True if the container is recreated |
+| `downtime` | True if the app will be briefly unreachable: deletes, and updates of apps with a `host_port` or volumes, which can't run two versions side by side. Other updates are zero-downtime. |
 | `requires_approval` | True if a human must approve before apply (see [guardrails](/concepts/guardrails/)) |
 | `next_step` | A plain-language instruction for the agent |
 | `expires_at` | Plans expire 30 minutes after creation |

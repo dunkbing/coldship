@@ -21,7 +21,11 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `GET` | `/v1/apps/{name}/logs?tail=100&since=10m` | read | `{lines, untrusted: true, note}` (tail max 5000) |
 | `GET` | `/v1/apps/{name}/diagnose` | read | Findings, runtime status, recent logs |
 | `POST` | `/v1/apps/{name}/rollback` | deploy | Body `{reason, to_deployment?}` |
-| `GET` | `/v1/deployments/{id}/build-log` | read | `{lines, commit, untrusted: true, note}` |
+| `GET` | `/v1/deployments/{id}/log` | read | Deploy log: `{lines, commit, untrusted: true, note}` |
+| `GET` | `/v1/system` | read | Version and update status: `{version, latest, update_available, auto_upgrade, upgrade_state, ...}` |
+| `POST` | `/v1/system/check` | admin | Check for a new version now |
+| `POST` | `/v1/system/upgrade` | admin | Start an upgrade: waits for deployments, installs, restarts |
+| `GET` | `/v1/system/manifest` | read | The latest signed release manifest and its URL, for `hangar self-update` |
 | `POST` | `/v1/plans` | deploy | Body `{spec}`, `{delete: "<app>"}`, optionally `redeploy: true` |
 | `GET` | `/v1/plans?status=pending&limit=50` | read | List plans. `status` is `pending`, `applied` or `expired` |
 | `GET` | `/v1/plans/{id}` | read | One plan |

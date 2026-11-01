@@ -50,6 +50,12 @@ Every error from every interface has the same shape:
 | `dockerfile_not_found` | 422 | No Dockerfile at `context/dockerfile`. The suggested fix names one found elsewhere in the repository. |
 | `build_failed` | 422 | `docker build` failed. Read the build log. The running app is untouched (`failed_in: build`). |
 | `build_timeout` | 504 | The build exceeded the server's `--build-timeout` |
+| `health_check_failed` | 502 | The new container never became healthy. With zero-downtime deploys the previous version keeps serving (`details.previous_version_running`). |
+| `domain_in_use` | 409 | Another app already has this domain (`details.app`) |
+| `proxy_disabled` | 400 | The app has domains but the server runs with `--proxy=false` |
+| `proxy_unavailable`, `proxy_reload_failed` | 502 | The proxy container couldn't start or reload its config |
+| `updates_disabled`, `no_update_available`, `upgrade_in_progress` | 409 | From `/v1/system/upgrade` |
+| `update_check_failed` | 502 | The release manifest couldn't be fetched, or its signature is invalid |
 | `container_exited` | 502 | The new container didn't stay up. Call `diagnose`, then fix or roll back. |
 | `container_start_failed` | 502 | Docker refused to start the container |
 | `host_port_in_use` | 502 | Another process uses `host_port`. Pick another. |

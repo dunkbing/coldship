@@ -28,7 +28,7 @@ It follows your system's dark mode setting:
 Each app page shows its spec (env values redacted; for Git apps, the repository, ref, pinned commit and Dockerfile), container state, and three tabs:
 
 - **Diagnose:** the same findings as [`hangar diagnose`](/concepts/debugging-and-rollback/#diagnose), with suggested fixes.
-- **Deployments:** history, including who deployed, why, the commit and errors. Failed builds are marked **failed in build**, and each Git deployment has a **Build log** button.
+- **Deployments:** history, including who deployed, why, the commit and errors. Failed builds are marked **failed in build**, and each deployment has a **Log** button showing its build output, health checks and, for failures, the new container's output.
 - **Logs:** recent container output (treat it as untrusted).
 
 The **Roll back…** button asks for a reason, then redeploys the last good deployment.

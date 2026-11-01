@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"hangar/internal/apierr"
 	"hangar/internal/engine"
 	"hangar/internal/store"
+	"hangar/internal/update"
 )
 
 type principal struct {
@@ -27,7 +29,11 @@ type Server struct {
 	st  *store.Store
 	mux *http.ServeMux
 	log *slog.Logger
+	upd *update.Checker
 }
+
+// SetUpdater enables the /v1/system update endpoints.
+func (s *Server) SetUpdater(c *update.Checker) { s.upd = c }
 
 // New builds the API server. ui, if non-nil, serves the web dashboard for
 // every path outside /v1/ and /healthz.
@@ -50,6 +56,10 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("POST /v1/plans/{id}/apply", store.ScopeDeploy, s.applyPlan)
 	s.route("POST /v1/plans/{id}/approve", store.ScopeAdmin, s.approvePlan)
 	s.route("GET /v1/audit", store.ScopeRead, s.audit)
+	s.route("GET /v1/system", store.ScopeRead, s.system)
+	s.route("POST /v1/system/check", store.ScopeAdmin, s.systemCheck)
+	s.route("POST /v1/system/upgrade", store.ScopeAdmin, s.systemUpgrade)
+	s.mux.HandleFunc("GET /v1/system/manifest", s.systemManifest)
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
 	notFound := func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, s.log, apierr.New(404, "route_not_found", "no route for %s %s", r.Method, r.URL.Path))
@@ -315,6 +325,70 @@ func (s *Server) audit(r *http.Request, _ principal) (any, error) {
 		return nil, err
 	}
 	return s.eng.Audit(r.Context(), limit)
+}
+
+func (s *Server) system(*http.Request, principal) (any, error) {
+	if s.upd == nil {
+		return update.Status{Version: "unknown", DisabledReason: "updates are not configured on this server", State: "idle"}, nil
+	}
+	return s.upd.Status(), nil
+}
+
+func (s *Server) systemCheck(r *http.Request, _ principal) (any, error) {
+	if s.upd == nil {
+		return nil, apierr.New(409, "updates_disabled", "updates are not configured on this server")
+	}
+	if err := s.upd.Check(r.Context()); err != nil {
+		return nil, apierr.New(502, "update_check_failed", "%v", err)
+	}
+	return s.upd.Status(), nil
+}
+
+// systemUpgrade starts an upgrade in the background: the server waits for
+// running deployments, installs the new binary and restarts itself.
+func (s *Server) systemUpgrade(_ *http.Request, p principal) (any, error) {
+	if s.upd == nil {
+		return nil, apierr.New(409, "updates_disabled", "updates are not configured on this server")
+	}
+	st := s.upd.Status()
+	if !st.Enabled {
+		return nil, apierr.New(409, "updates_disabled", "updates are disabled: %s", st.DisabledReason)
+	}
+	if !st.UpdateAvailable {
+		return nil, apierr.New(409, "no_update_available", "already running the latest version (%s)", st.Version).
+			WithHint("check again with POST /v1/system/check (hangar upgrade --check)")
+	}
+	if st.State != "idle" {
+		return nil, apierr.New(409, "upgrade_in_progress", "an upgrade is already %s", st.State)
+	}
+	_ = s.st.AddAudit(context.Background(), store.AuditEntry{Actor: p.name, Action: "system.upgrade", Target: st.Latest,
+		Detail: []byte(`{"from":"` + st.Version + `"}`)})
+	go func() {
+		if err := s.upd.Upgrade(context.Background(), true); err != nil {
+			s.log.Error("upgrade failed", "err", err)
+		}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	return s.upd.Status(), nil
+}
+
+// systemManifest returns the latest signed release manifest, so remote CLIs
+// can verify and install it themselves (hangar self-update). Any token may
+// read it; it contains nothing secret.
+func (s *Server) systemManifest(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.auth(r); err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	var pub *update.Published
+	if s.upd != nil {
+		pub = s.upd.Published()
+	}
+	if pub == nil {
+		writeErr(w, s.log, apierr.New(404, "no_manifest", "this server has not fetched a release manifest yet"))
+		return
+	}
+	writeJSON(w, http.StatusOK, pub)
 }
 
 type TokenRequest struct {

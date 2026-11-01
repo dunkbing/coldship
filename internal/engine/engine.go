@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hangar/internal/apierr"
@@ -28,6 +29,7 @@ type Engine struct {
 	routes  map[string]proxy.Route // live route table, by app
 	locksMu sync.Mutex
 	locks   map[string]*sync.Mutex // one per app: mutations of an app are serialized
+	active  atomic.Int64           // applies in progress
 	PlanTTL time.Duration
 	Now     func() time.Time
 }
@@ -378,7 +380,13 @@ func (e *Engine) Apply(ctx context.Context, actor, planID, reason string) (*Appl
 	return e.apply(ctx, actor, planID, reason)
 }
 
+// Busy reports whether any deployment is in progress. Self-upgrades wait for
+// it to become false.
+func (e *Engine) Busy() bool { return e.active.Load() > 0 }
+
 func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*ApplyResult, error) {
+	e.active.Add(1)
+	defer e.active.Add(-1)
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return nil, apierr.New(400, "reason_required", "applying a plan requires a reason").
