@@ -272,6 +272,15 @@ func TestStageDemotionNeedsApproval(t *testing.T) {
 		t.Fatalf("stage: preview on a new app: want invalid_spec, got %v", err)
 	}
 
+	// An app row without a spec (e.g. a first deploy that never finished)
+	// must not crash the check.
+	if err := e.st.UpsertApp(ctx, &store.App{Name: "ghost", CreatedAt: e.Now(), UpdatedAt: e.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Plan(ctx, "agent", PlanRequest{Spec: &spec.App{Name: "ghost", Stage: spec.StagePreview, Image: "x:1"}}); code(err) != "invalid_spec" {
+		t.Fatalf("stage: preview on a spec-less app: want invalid_spec, got %v", err)
+	}
+
 	// Leaving production, even with no other change, needs approval.
 	p, err = e.Plan(ctx, "agent", PlanRequest{Spec: withDB(spec.StageStaging, pg)})
 	if err != nil {

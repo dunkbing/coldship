@@ -101,7 +101,7 @@ func (h *Health) TimeoutOrDefault() time.Duration {
 
 type App struct {
 	Name      string            `json:"name" yaml:"name" jsonschema:"app name: lowercase letters, digits and dashes, starting with a letter"`
-	Stage     Stage             `json:"stage,omitempty" yaml:"stage,omitempty" jsonschema:"production, staging (default) or preview. Destructive changes to production need human approval"`
+	Stage     Stage             `json:"stage,omitempty" yaml:"stage,omitempty" jsonschema:"production or staging (default). Destructive changes to production, and leaving production, need human approval. preview is reserved for apps made by coldship preview create"`
 	Image     string            `json:"image,omitempty" yaml:"image,omitempty" jsonschema:"container image to run, e.g. nginx:1.27. Set either image or build"`
 	Build     *Build            `json:"build,omitempty" yaml:"build,omitempty" jsonschema:"build the image from a Git repository instead of using image"`
 	OnPush    *OnPush           `json:"on_push,omitempty" yaml:"on_push,omitempty" jsonschema:"what Git webhook pushes do (apps built from Git; enable the webhook with coldship webhook enable)"`

@@ -320,7 +320,7 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 	// stage: preview skips snapshots and approvals, so only real previews
 	// may have it. Apps that already have it may keep it.
 	if desired != nil && desired.Stage == spec.StagePreview && req.previewOf == "" &&
-		(app == nil || (app.PreviewOf == "" && current.Stage != spec.StagePreview)) {
+		(app == nil || (app.PreviewOf == "" && (current == nil || current.Stage != spec.StagePreview))) {
 		return nil, apierr.New(400, "invalid_spec", "stage: preview is only for previews made with coldship preview create").
 			WithField("stage").WithFix(map[string]any{"stage": "staging"})
 	}
