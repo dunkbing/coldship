@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,62 @@ func (e *Engine) routeList() []proxy.Route {
 }
 
 // checkDomains rejects domains already routed to another app.
+// checkNames rejects an app whose Docker names (containers, network aliases,
+// volumes) match another app's, its own, or Coldship's. Without it, a preview
+// for branch db-main of app web would replace web's database container.
+func (e *Engine) checkNames(ctx context.Context, a *spec.App) error {
+	if deployAliasRe.MatchString(a.Name) {
+		return apierr.Invalid("name", "app name %q is reserved: it looks like a deployment's hostname", a.Name)
+	}
+	type owner struct{ app, kind string }
+	hosts, vols := map[string]owner{}, map[string]owner{}
+	for _, h := range runtime.ReservedHosts {
+		hosts[h] = owner{"coldship", "the proxy"}
+	}
+	for _, v := range runtime.ReservedVolumes {
+		vols[v] = owner{"coldship", "the proxy"}
+	}
+	apps, err := e.st.ListApps(ctx)
+	if err != nil {
+		return err
+	}
+	for _, o := range apps {
+		if o.Name == a.Name || o.Spec == nil {
+			continue
+		}
+		h, v := runtime.Names(o.Spec)
+		for _, n := range h {
+			hosts[n] = owner{o.Name, "app " + o.Name}
+		}
+		for _, n := range v {
+			vols[n] = owner{o.Name, "app " + o.Name}
+		}
+	}
+	h, v := runtime.Names(a)
+	clash := func(seen map[string]owner, names []string, what string) error {
+		mine := map[string]bool{}
+		for _, n := range names {
+			if o, ok := seen[n]; ok {
+				return apierr.New(409, "name_in_use", "app %s would use the Docker %s %s, which %s already uses", a.Name, what, n, o.kind).
+					WithField("name").WithDetail("app", o.app).
+					WithHint("rename the app, its volume or its database so the names differ")
+			}
+			if mine[n] {
+				return apierr.New(409, "name_in_use", "two of app %s's resources would share the Docker %s %s", a.Name, what, n).
+					WithField("volumes").WithHint("rename the volume or the database")
+			}
+			mine[n] = true
+		}
+		return nil
+	}
+	if err := clash(hosts, h, "name"); err != nil {
+		return err
+	}
+	return clash(vols, v, "volume")
+}
+
+var deployAliasRe = regexp.MustCompile(`^dep-[0-9a-f]+$`)
+
 func (e *Engine) checkDomains(ctx context.Context, a *spec.App) error {
 	if len(a.Domains) == 0 {
 		return nil
@@ -222,6 +279,9 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 			return nil, err
 		}
 		if err := e.checkDomains(ctx, desired); err != nil {
+			return nil, err
+		}
+		if err := e.checkNames(ctx, desired); err != nil {
 			return nil, err
 		}
 		// Pin the build to a commit now, so the plan shows exactly what will
@@ -511,6 +571,12 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 	if currentBase != p.BaseDeployment || (p.Action == planner.OpDelete && app == nil) {
 		return nil, apierr.New(409, "plan_stale", "app %s changed since plan %s was made", p.App, p.ID).
 			WithHint("create a new plan; the app was deployed or deleted by someone else in the meantime")
+	}
+	// Another app may have taken a name since planning.
+	if p.Desired != nil && p.Action != planner.OpDelete {
+		if err := e.checkNames(ctx, p.Desired); err != nil {
+			return nil, err
+		}
 	}
 
 	// From here on, finish the work even if the caller goes away: a

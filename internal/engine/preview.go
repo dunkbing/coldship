@@ -73,7 +73,10 @@ func previewName(app, suffix string) string {
 		slug = "preview"
 	}
 	name := app + "-" + slug
-	if len(name) <= 40 {
+	// Container names add "-next" and "-db-<name>" to the app name, so
+	// web-next or web-db-main would collide with web's own containers.
+	risky := slug == "next" || strings.HasSuffix(slug, "-next") || strings.HasPrefix(slug, "db-") || strings.Contains(slug, "-db-")
+	if len(name) <= 40 && !risky {
 		return name
 	}
 	h := sha256.Sum256([]byte(name))
@@ -82,7 +85,7 @@ func previewName(app, suffix string) string {
 	if keep < 1 {
 		return app[:40-7] + "-" + short
 	}
-	return app + "-" + strings.Trim(slug[:keep], "-") + "-" + short
+	return app + "-" + strings.Trim(slug[:min(keep, len(slug))], "-") + "-" + short
 }
 
 // CreatePreview creates a preview of an app, or updates it if it exists

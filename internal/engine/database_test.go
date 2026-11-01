@@ -298,3 +298,35 @@ func TestStageDemotionNeedsApproval(t *testing.T) {
 		t.Fatal("deleting a non-preview app must snapshot its databases")
 	}
 }
+
+// Different apps must never map to the same Docker container, alias or volume.
+func TestDockerNameCollisions(t *testing.T) {
+	e, _ := dbSetup(t)
+	ctx := context.Background()
+	p, err := e.Plan(ctx, "agent", PlanRequest{Spec: &spec.App{Name: "web", Image: "web:1", Port: 80, Databases: []spec.Database{pg}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Apply(ctx, "agent", p.ID, "create"); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []*spec.App{
+		{Name: "web-db-main", Image: "x:1"}, // web's database container
+		{Name: "web-next", Image: "x:1"},    // web's zero-downtime container
+		{Name: "proxy", Image: "x:1"},       // the Caddy proxy
+		{Name: "dep-0123456789ab", Image: "x:1"},
+		{Name: "web-db", Image: "x:1", Volumes: []spec.Volume{{Name: "main-data", Path: "/d"}}}, // web's database volume
+		{Name: "solo", Image: "x:1", Volumes: []spec.Volume{{Name: "db-main-data", Path: "/d"}}, Databases: []spec.Database{pg}},
+	} {
+		_, err := e.Plan(ctx, "agent", PlanRequest{Spec: a})
+		if c := code(err); c != "name_in_use" && c != "invalid_spec" {
+			t.Errorf("%s: want a collision error, got %v", a.Name, err)
+		}
+	}
+	if got := previewName("web", "db-main"); got == "web-db-main" || !strings.HasPrefix(got, "web-db-main-") {
+		t.Errorf("preview of branch db-main: got %s", got)
+	}
+	if got := previewName("web", "next"); got == "web-next" {
+		t.Errorf("preview of branch next: got %s", got)
+	}
+}

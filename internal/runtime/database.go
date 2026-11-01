@@ -72,6 +72,11 @@ func (d *Docker) EnsureDatabase(ctx context.Context, db DB, log io.Writer) error
 	if err != nil {
 		return err
 	}
+	if st.Exists {
+		if err := d.checkOwner(ctx, name, db.App, db.Name); err != nil {
+			return err
+		}
+	}
 	switch {
 	case st.Exists && st.Image != image:
 		return apierr.New(409, "database_version_change", "database %s runs %s, not %s", db.Name, st.Image, image).
@@ -161,6 +166,9 @@ func (d *Docker) DatabaseStatus(ctx context.Context, app, name string) (DBStatus
 }
 
 func (d *Docker) RemoveDatabase(ctx context.Context, app, name string) error {
+	if err := d.checkOwner(ctx, dbContainer(app, name), app, name); err != nil {
+		return err
+	}
 	if _, se, err := d.run(ctx, "rm", "-f", dbContainer(app, name)); err != nil && !strings.Contains(se, "No such container") {
 		return apierr.New(502, "database_remove_failed", "could not remove database %s: %s", name, se)
 	}

@@ -38,6 +38,29 @@ func ContainerName(app string) string      { return "coldship-" + app }
 func nextName(app string) string           { return "coldship-" + app + "-next" }
 func VolumeName(app, volume string) string { return "coldship-" + app + "-" + volume }
 
+// Names lists the Docker names an app's resources use: hostnames on the
+// Coldship network (container names and network aliases) and volume names.
+// Names are joined with single dashes, so different apps can map to the same
+// name (app web-db-main vs database main of app web); callers check Names
+// against other apps before creating anything.
+func Names(a *spec.App) (hosts, volumes []string) {
+	hosts = []string{ContainerName(a.Name), nextName(a.Name), a.Name}
+	for _, v := range a.Volumes {
+		volumes = append(volumes, VolumeName(a.Name, v.Name))
+	}
+	for _, db := range a.Databases {
+		hosts = append(hosts, dbContainer(a.Name, db.Name), DBHost(a.Name, db.Name))
+		volumes = append(volumes, dbVolume(a.Name, db.Name))
+	}
+	return hosts, volumes
+}
+
+// ReservedHosts and ReservedVolumes are Docker names Coldship itself uses.
+var (
+	ReservedHosts   = []string{"coldship-proxy"}
+	ReservedVolumes = []string{"coldship-proxy-data", "coldship-proxy-config"}
+)
+
 func (d *Docker) run(ctx context.Context, args ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, d.Bin, args...)
 	var out, errb bytes.Buffer
@@ -85,7 +108,7 @@ func (d *Docker) Deploy(ctx context.Context, deploymentID string, app spec.App, 
 func (d *Docker) deployRecreate(ctx context.Context, depID string, app spec.App, opts DeployOptions, log io.Writer) error {
 	fmt.Fprintln(log, "coldship: strategy recreate (host_port or volumes prevent running two versions side by side)")
 	for _, n := range []string{nextName(app.Name), ContainerName(app.Name)} {
-		if err := d.removeContainer(ctx, n); err != nil {
+		if err := d.removeContainer(ctx, n, app.Name); err != nil {
 			return err
 		}
 	}
@@ -115,7 +138,7 @@ func (d *Docker) deployAlongside(ctx context.Context, depID string, app spec.App
 	}
 	prevRunning := old.Exists && old.Running
 	fail := func(err error) error {
-		d.removeContainer(context.WithoutCancel(ctx), nextName(app.Name))
+		d.removeContainer(context.WithoutCancel(ctx), nextName(app.Name), app.Name)
 		if ae, ok := apierr.As(err); ok && prevRunning {
 			fmt.Fprintln(log, "coldship: the previous version is still running and serving traffic")
 			return ae.WithDetail(DetailPreviousRunning, true)
@@ -123,7 +146,7 @@ func (d *Docker) deployAlongside(ctx context.Context, depID string, app spec.App
 		return err
 	}
 
-	if err := d.removeContainer(ctx, nextName(app.Name)); err != nil {
+	if err := d.removeContainer(ctx, nextName(app.Name), app.Name); err != nil {
 		return err
 	}
 	if err := d.start(ctx, nextName(app.Name), depID, app, log); err != nil {
@@ -140,11 +163,14 @@ func (d *Docker) deployAlongside(ctx context.Context, depID string, app spec.App
 	}
 	// The new version is live. Problems from here on are logged, not fatal.
 	if old.Exists {
+		if err := d.checkOwner(ctx, ContainerName(app.Name), app.Name, ""); err != nil {
+			return fail(err)
+		}
 		fmt.Fprintf(log, "coldship: stopping the previous version (up to %s for graceful shutdown)\n", d.StopTimeout)
 		if _, se, err := d.run(ctx, "stop", "-t", strconv.Itoa(int(d.StopTimeout.Seconds())), ContainerName(app.Name)); err != nil && !strings.Contains(se, "No such container") {
 			fmt.Fprintf(log, "coldship: warning: stopping the previous version failed: %s\n", se)
 		}
-		if err := d.removeContainer(ctx, ContainerName(app.Name)); err != nil {
+		if err := d.removeContainer(ctx, ContainerName(app.Name), app.Name); err != nil {
 			fmt.Fprintf(log, "coldship: warning: %v\n", err)
 		}
 	}
@@ -220,7 +246,7 @@ func (d *Docker) waitHealthy(ctx context.Context, name string, app spec.App, log
 	deadline := started.Add(timeout)
 	last := "not checked yet"
 	for {
-		st, err := d.Status(ctx, name)
+		st, err := d.inspect(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -304,16 +330,39 @@ func (d *Docker) dumpLogs(ctx context.Context, name string, log io.Writer) {
 	}
 }
 
-func (d *Docker) removeContainer(ctx context.Context, name string) error {
+// removeContainer removes a container of app, refusing one that belongs to
+// something else (another app, a database, or nothing Coldship made).
+func (d *Docker) removeContainer(ctx context.Context, name, app string) error {
+	if err := d.checkOwner(ctx, name, app, ""); err != nil {
+		return err
+	}
 	if _, se, err := d.run(ctx, "rm", "-f", name); err != nil && !strings.Contains(se, "No such container") {
 		return apierr.New(502, "container_remove_failed", "could not remove container %s: %s", name, se)
 	}
 	return nil
 }
 
+// checkOwner returns an error if container name exists and isn't app's (or,
+// with db set, app's database db).
+func (d *Docker) checkOwner(ctx context.Context, name, app, db string) error {
+	out, se, err := d.run(ctx, "inspect", "--type", "container", "-f",
+		`{{index .Config.Labels "coldship.app"}}|{{index .Config.Labels "coldship.db"}}`, name)
+	if err != nil {
+		if strings.Contains(se, "No such") {
+			return nil
+		}
+		return apierr.New(502, "runtime_unavailable", "docker inspect failed: %s", se)
+	}
+	if got := strings.TrimSpace(out); got != app+"|"+db {
+		return apierr.New(409, "name_in_use", "container %s doesn't belong to %s (labels %q); Coldship won't touch it", name, app, got).
+			WithHint("rename or remove that container yourself, or rename the app")
+	}
+	return nil
+}
+
 func (d *Docker) Remove(ctx context.Context, app string, volumes []string) error {
 	for _, n := range []string{nextName(app), ContainerName(app)} {
-		if err := d.removeContainer(ctx, n); err != nil {
+		if err := d.removeContainer(ctx, n, app); err != nil {
 			return err
 		}
 	}
@@ -330,10 +379,10 @@ func (d *Docker) RemoveVolumes(ctx context.Context, app string, volumes []string
 }
 
 func (d *Docker) Status(ctx context.Context, app string) (Status, error) {
-	name := app
-	if !strings.HasPrefix(app, "coldship-") {
-		name = ContainerName(app)
-	}
+	return d.inspect(ctx, ContainerName(app))
+}
+
+func (d *Docker) inspect(ctx context.Context, name string) (Status, error) {
 	out, se, err := d.run(ctx, "inspect", "--type", "container", name)
 	if err != nil {
 		if strings.Contains(se, "No such") {
