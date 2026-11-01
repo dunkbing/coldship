@@ -128,6 +128,11 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 | `coldship release manifest --version X os/arch=path ...` | Write the release manifest, `latest.json` (maintainers; `make release` runs it) |
 
 After other commands, the CLI prints a one-line note on stderr when a new version is available or the CLI is older than the server. It checks at most once an hour, and never prints with `--json`, when stderr isn't a terminal, or with `COLDSHIP_NO_UPDATE_NOTICE=1`.
+
+## Audit
+
+| Command | Description |
+|---|---|
 | `coldship audit [--limit 50]` | Audit log |
 
 ## Tokens
@@ -135,3 +140,5 @@ After other commands, the CLI prints a one-line note on stderr when a new versio
 | Command | Description |
 |---|---|
 | `coldship token create --name <name> [--scope deploy]` | Create a token (admin). Scopes: `read`, `deploy`, `admin`. The token is shown once. |
+| `coldship token list` | Token names, scopes and creation times, never their values (admin) |
+| `coldship token revoke <name> [--reason "..."]` | Revoke a token and sign out its dashboard sessions (admin). The last admin token can't be revoked. |

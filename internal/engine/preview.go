@@ -49,6 +49,9 @@ type PreviewRequest struct {
 	// production apps, whose env (database URLs, API keys) a throwaway
 	// preview must not get by accident.
 	InheritEnv *bool  `json:"inherit_env,omitempty"`
+	// AdminCaller is set by the API, never from JSON: only admins may copy a
+	// production app's env (its secrets) into a preview.
+	AdminCaller bool `json:"-"`
 	Reason     string `json:"reason,omitempty"`
 }
 
@@ -124,6 +127,11 @@ func (e *Engine) CreatePreview(ctx context.Context, actor string, req PreviewReq
 			WithField("ttl").WithFix(map[string]any{"ttl": e.Previews.MaxTTL.String()})
 	}
 
+	if parent.Spec.Stage == spec.StageProduction && inheritEnv(parent, req) && !req.AdminCaller {
+		return nil, apierr.New(403, "insufficient_scope", "copying %s's production env into a preview needs an admin token", parent.Name).
+			WithField("inherit_env").WithFix(map[string]any{"inherit_env": false}).
+			WithHint("pass the env the preview needs with env instead, or ask an admin to create the preview")
+	}
 	desired, err := e.previewSpec(parent, name, req)
 	if err != nil {
 		return nil, err

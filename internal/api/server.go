@@ -463,6 +463,7 @@ func (s *Server) createPreview(r *http.Request, p principal) (any, error) {
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	req.AdminCaller = p.scope.Allows(store.ScopeAdmin)
 	return s.eng.CreatePreview(r.Context(), p.name, req)
 }
 

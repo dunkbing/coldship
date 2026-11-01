@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -77,7 +78,11 @@ func (c *Checker) Status() Status {
 		st.LastChecked = &t
 	}
 	if m := c.latest; m != nil {
-		st.Latest, st.Notes, st.NotesURL = m.Version, m.Notes, m.NotesURL
+		st.Latest, st.Notes, st.NotesURL = m.Version, m.Notes, ""
+		// The dashboard links to it, so only https links are passed on.
+		if strings.HasPrefix(m.NotesURL, "https://") {
+			st.NotesURL = m.NotesURL
+		}
 		if !m.PublishedAt.IsZero() {
 			t := m.PublishedAt
 			st.PublishedAt = &t

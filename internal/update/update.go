@@ -154,7 +154,7 @@ func Download(ctx context.Context, m *Manifest, dir string) (string, error) {
 		return fail(err)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, a.SHA256) {
-		return fail(fmt.Errorf("downloaded binary has SHA-256 %s, but the signed manifest says %s: refusing to install", got, a.SHA256))
+		return fail(fmt.Errorf("downloaded binary has SHA-256 %s, but the release manifest says %s: refusing to install", got, a.SHA256))
 	}
 	if a.Size > 0 && n != a.Size {
 		return fail(fmt.Errorf("downloaded binary is %d bytes, manifest says %d", n, a.Size))

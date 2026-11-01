@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1057,7 +1058,11 @@ func (e *Engine) audit(ctx context.Context, actor, action, target, reason string
 	if detail != nil {
 		raw, _ = json.Marshal(detail)
 	}
-	_ = e.st.AddAudit(ctx, store.AuditEntry{Time: e.Now(), Actor: actor, Action: action, Target: target, Reason: reason, Detail: raw})
+	entry := store.AuditEntry{Time: e.Now(), Actor: actor, Action: action, Target: target, Reason: reason, Detail: raw}
+	// Write even if the caller went away; never drop an entry silently.
+	if err := e.st.AddAudit(context.WithoutCancel(ctx), entry); err != nil {
+		slog.Error("audit log write failed", "err", err, "actor", actor, "action", action, "target", target, "reason", reason)
+	}
 }
 
 func publicPlan(p *store.Plan) *store.Plan {

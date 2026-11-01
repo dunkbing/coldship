@@ -29,13 +29,14 @@ Every error from every interface has the same shape:
 | `invalid_request` | 400 | Malformed body or query parameter |
 | `reason_required` | 400 | Apply and rollback need a non-empty `reason` |
 | `invalid_scope` | 400 | Token scope must be `read`, `deploy` or `admin` |
-| `invalid_token_name` | 400 | Token names are lowercase letters, digits and dashes |
+| `invalid_token_name` | 400 | Token names are lowercase letters, digits and dashes. `coldship`, `webhook`, `system` and `hangar` are reserved. |
+| `last_admin_token` | 409 | The only admin token can't be revoked. Create another admin token first. |
 | `invalid_rollback_target` | 400 | `to_deployment` isn't a successful deployment of this app |
 | `unauthenticated` | 401 | Missing or unknown token, or an expired session |
-| `csrf_check_failed` | 403 | Cookie-authenticated request that changes state, without the `X-Coldship-Request` header |
+| `csrf_check_failed` | 403 | Sign-in, or a cookie-authenticated request that changes state, without the `X-Coldship-Request` header |
 | `insufficient_scope` | 403 | The token's scope is too low for this action |
 | `approval_required` | 403 | Destructive production change. A human must run `coldship approve <plan>`. CLI exit code 3. |
-| `app_not_found` / `plan_not_found` / `deployment_not_found` | 404 | Check the name or id |
+| `app_not_found` / `plan_not_found` / `deployment_not_found` / `token_not_found` | 404 | Check the name or id |
 | `route_not_found` | 404 | Unknown API path |
 | `plan_stale` | 409 | The app changed since planning. Plan again. CLI exit code 4. |
 | `plan_expired` | 409 | Plans live 30 minutes. Plan again. CLI exit code 4. |
@@ -64,7 +65,7 @@ Every error from every interface has the same shape:
 | `payload_too_large` | 413 | Webhook payloads are limited to 5 MB |
 | `preview_limit` | 409 | All preview slots are used. `details.previews` lists them, soonest-expiring first. |
 | `not_a_preview` | 400 | Preview commands only delete previews; delete regular apps with a plan |
-| `name_in_use` | 409 | A regular app already has the preview's name; pass another `--name` |
+| `name_in_use` | 409 | The app's Docker names (container, network alias or volume) would collide with another app's, the proxy's, or each other, for example app `web-db-main` and database `main` of app `web`. `details.app` names the other app. Also: a regular app already has the preview's name. |
 | `domain_in_use` | 409 | Another app already has this domain (`details.app`) |
 | `proxy_disabled` | 400 | The app has domains but the server runs with `--proxy=false` |
 | `proxy_unavailable`, `proxy_reload_failed` | 502 | The proxy container couldn't start or reload its config |

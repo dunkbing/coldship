@@ -443,7 +443,7 @@ func (d *Detection) golang(p project, o *spec.AutoBuild) error {
 		d.note("building the main package at the repository root")
 	default:
 		var mains []string
-		if entries, err := os.ReadDir(filepath.Join(p.root, "cmd")); err == nil {
+		if entries, err := readDirInside(p.root, "cmd"); err == nil {
 			for _, e := range entries {
 				if e.IsDir() && hasMainPackage(p.root, filepath.Join("cmd", e.Name())) {
 					mains = append(mains, "./cmd/"+e.Name())
@@ -494,14 +494,28 @@ func (d *Detection) golang(p project, o *spec.AutoBuild) error {
 	return nil
 }
 
+// readDirInside lists a directory of the repository, refusing one that is a
+// symlink out of it: the repository is untrusted.
+func readDirInside(root, dir string) ([]os.DirEntry, error) {
+	path, err := inside(root, dir)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadDir(path)
+}
+
 func hasMainPackage(root, dir string) bool {
-	entries, err := os.ReadDir(filepath.Join(root, dir))
+	path, err := inside(root, dir)
+	if err != nil {
+		return false
+	}
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return false
 	}
 	for _, e := range entries {
 		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
-			if b, err := os.ReadFile(filepath.Join(root, dir, e.Name())); err == nil && len(b) < 1<<20 && pkgMainRe.Match(b) {
+			if b, err := os.ReadFile(filepath.Join(path, e.Name())); err == nil && len(b) < 1<<20 && pkgMainRe.Match(b) {
 				return true
 			}
 		}

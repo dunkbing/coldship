@@ -84,9 +84,12 @@ func TestCreatePreview(t *testing.T) {
 		t.Fatalf("re-create should extend without redeploying: %+v %v", res2, err)
 	}
 
-	// Opting in copies the env.
+	// Opting in copies the env, but for a production app only an admin may.
 	in := true
-	if _, err := e.CreatePreview(ctx, "agent", PreviewRequest{App: "shop", Ref: "main", Name: "with-env", InheritEnv: &in}); err != nil {
+	if _, err := e.CreatePreview(ctx, "agent", PreviewRequest{App: "shop", Ref: "main", Name: "with-env", InheritEnv: &in}); code(err) != "insufficient_scope" {
+		t.Fatalf("deploy scope copying production env: want insufficient_scope, got %v", err)
+	}
+	if _, err := e.CreatePreview(ctx, "alice", PreviewRequest{App: "shop", Ref: "main", Name: "with-env", InheritEnv: &in, AdminCaller: true}); err != nil {
 		t.Fatal(err)
 	}
 	if rt.Containers["shop-with-env"].Env["DATABASE_URL"] != "postgres://prod" {

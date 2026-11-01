@@ -34,7 +34,7 @@ It's deployed through the normal plan and apply path, so it gets the same audit 
 
 ### Previews of production apps don't get production secrets
 
-A production app's env typically holds things like `DATABASE_URL` and payment API keys. A throwaway preview built from an unreviewed branch shouldn't silently get them, and it certainly shouldn't write to the production database. So previews of **production** apps start with **no inherited env**. Pass what the preview needs with `--env`, or opt in with `--inherit-env` (recorded in the audit log). Previews of staging apps inherit env by default.
+A production app's env typically holds things like `DATABASE_URL` and payment API keys. A throwaway preview built from an unreviewed branch shouldn't silently get them, and it certainly shouldn't write to the production database. So previews of **production** apps start with **no inherited env**. Pass what the preview needs with `--env`, or opt in with `--inherit-env`, which needs an admin token and is recorded in the audit log. Previews of staging apps inherit env by default.
 
 ## Updating and extending
 

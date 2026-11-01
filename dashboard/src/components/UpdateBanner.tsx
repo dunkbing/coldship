@@ -89,7 +89,7 @@ export default function UpdateBanner() {
           <strong>Coldship {st.latest} is available</strong> <span className="muted">(you are on {st.version}).</span> {how}
         </div>
         {st.notes && <div className="small">{st.notes}</div>}
-        {st.notes_url && (
+        {st.notes_url?.startsWith('https://') && (
           <a className="small" href={st.notes_url} target="_blank" rel="noreferrer">
             Release notes ↗
           </a>

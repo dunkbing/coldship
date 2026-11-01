@@ -12,7 +12,7 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | Method | Path | Scope | Description |
 |---|---|---|---|
 | `GET` | `/healthz` | none | Liveness: returns `ok` |
-| `POST` | `/v1/sessions` | none | Body `{token}`. Sets the `coldship_session` cookie and returns `{name, scope}`. |
+| `POST` | `/v1/sessions` | none | Body `{token}`, with the `X-Coldship-Request: 1` header. Sets the `coldship_session` cookie and returns `{name, scope}`. |
 | `DELETE` | `/v1/sessions` | session | Sign out: deletes the session and clears the cookie |
 | `GET` | `/v1/whoami` | read | `{name, scope}` of the calling token |
 | `GET` | `/v1/apps` | read | List apps |
@@ -45,8 +45,10 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/plans/{id}/approve` | admin | Approve a plan |
 | `GET` | `/v1/audit?limit=50` | read | Audit entries, newest first (max 1000) |
 | `POST` | `/v1/tokens` | admin | Body `{name, scope}`. Returns `{name, scope, token}`. |
+| `GET` | `/v1/tokens` | admin | Token names, scopes and creation times; never their values |
+| `DELETE` | `/v1/tokens/{name}?reason=...` | admin | Revoke a token and end its dashboard sessions |
 
-Request bodies reject unknown fields and are limited to 1 MiB.
+Request bodies reject unknown fields and trailing data, are limited to 1 MiB, and must arrive within 30 seconds.
 
 ## Example
 
