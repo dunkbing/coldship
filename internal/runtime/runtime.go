@@ -4,6 +4,9 @@ package runtime
 
 import (
 	"context"
+	"io"
+	"strconv"
+	"strings"
 
 	"hangar/internal/spec"
 )
@@ -20,13 +23,42 @@ type Status struct {
 	Error        string `json:"error,omitempty"`
 }
 
+type DeployOptions struct {
+	// ZeroDowntime starts the new container next to the old one, and stops
+	// the old one only after the new one is healthy and traffic has been
+	// switched. If anything fails before that, the old one keeps running.
+	ZeroDowntime bool
+	// Switch routes traffic to the new container at upstream ("host:port" on
+	// the Hangar network). It runs after the health check passes. May be nil.
+	Switch func(ctx context.Context, upstream string) error
+	// Log receives progress and, on failure, the new container's output.
+	Log io.Writer
+}
+
+// DetailPreviousRunning is set on Deploy errors when the previous container
+// was left running and serving.
+const DetailPreviousRunning = "previous_version_running"
+
 type Runtime interface {
-	// Deploy replaces the app's container with one built from the spec and
-	// returns an error if it does not stay up through the startup grace period.
-	Deploy(ctx context.Context, deploymentID string, app spec.App) error
-	// Remove deletes the app's container and the named volumes.
+	// Deploy starts a container for the spec and returns once it is healthy
+	// and receiving traffic, or with an error.
+	Deploy(ctx context.Context, deploymentID string, app spec.App, opts DeployOptions) error
+	// Remove deletes the app's containers and the named volumes.
 	Remove(ctx context.Context, app string, volumes []string) error
 	RemoveVolumes(ctx context.Context, app string, volumes []string) error
 	Status(ctx context.Context, app string) (Status, error)
 	Logs(ctx context.Context, app string, tail int, since string) ([]string, error)
+}
+
+// Network is the Docker network shared by apps and the proxy. Apps can reach
+// each other by app name on it.
+const Network = "hangar"
+
+// Alias is a deployment's stable hostname on the Hangar network. It survives
+// the container being renamed, so the proxy can keep pointing at it.
+func Alias(deploymentID string) string { return strings.ReplaceAll(deploymentID, "_", "-") }
+
+// Upstream is the address the proxy dials for a deployment.
+func Upstream(deploymentID string, port int) string {
+	return Alias(deploymentID) + ":" + strconv.Itoa(port)
 }

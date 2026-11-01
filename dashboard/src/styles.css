@@ -742,3 +742,16 @@ select:focus,
 .table tr.expanded td {
   background: var(--surface-2);
 }
+
+.urls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+  font-weight: 500;
+}
+.log-btn {
+  display: block;
+  margin-top: 4px;
+  padding-left: 0;
+}

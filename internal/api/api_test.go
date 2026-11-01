@@ -28,7 +28,7 @@ func TestAPIEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	eng := engine.New(st, runtime.NewFake(), builder.NewFake())
+	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 
@@ -105,7 +105,7 @@ func TestDashboardSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	eng := engine.New(st, runtime.NewFake(), builder.NewFake())
+	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 	admin, _ := eng.EnsureAdminToken(ctx)

@@ -238,10 +238,10 @@ func diagnoseCmd() *cobra.Command {
 						fmt.Printf("      suggested fix: %s\n", b)
 					}
 				}
-				if len(d.BuildLog) > 0 {
-					n := min(len(d.BuildLog), 20)
-					fmt.Printf("\nLast %d build log lines:\n", n)
-					for _, l := range d.BuildLog[len(d.BuildLog)-n:] {
+				if len(d.DeployLog) > 0 {
+					n := min(len(d.DeployLog), 20)
+					fmt.Printf("\nLast %d deploy log lines:\n", n)
+					for _, l := range d.DeployLog[len(d.DeployLog)-n:] {
 						fmt.Println("  " + l)
 					}
 				}
@@ -290,13 +290,14 @@ func deploymentsCmd() *cobra.Command {
 	return cmd
 }
 
-func buildLogCmd() *cobra.Command {
+func deployLogCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "build-log <deployment-id>",
-		Short: "Show the build log of a deployment built from Git",
-		Args:  cobra.ExactArgs(1),
+		Use:     "deploy-log <deployment-id>",
+		Aliases: []string{"build-log"},
+		Short:   "Show what happened during a deployment: build, start, health checks",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			l, err := newClient().BuildLog(cmd.Context(), args[0])
+			l, err := newClient().DeployLog(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}

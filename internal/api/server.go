@@ -43,7 +43,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/apps/{name}/diagnose", store.ScopeRead, s.diagnose)
 	s.route("GET /v1/apps/{name}/deployments", store.ScopeRead, s.deployments)
 	s.route("POST /v1/apps/{name}/rollback", store.ScopeDeploy, s.rollback)
-	s.route("GET /v1/deployments/{id}/build-log", store.ScopeRead, s.buildLog)
+	s.route("GET /v1/deployments/{id}/log", store.ScopeRead, s.deployLog)
 	s.route("POST /v1/plans", store.ScopeDeploy, s.createPlan)
 	s.route("GET /v1/plans", store.ScopeRead, s.listPlans)
 	s.route("GET /v1/plans/{id}", store.ScopeRead, s.getPlan)
@@ -236,8 +236,8 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"signed_out": true})
 }
 
-func (s *Server) buildLog(r *http.Request, _ principal) (any, error) {
-	return s.eng.BuildLog(r.Context(), r.PathValue("id"))
+func (s *Server) deployLog(r *http.Request, _ principal) (any, error) {
+	return s.eng.DeployLog(r.Context(), r.PathValue("id"))
 }
 
 func (s *Server) listApps(r *http.Request, _ principal) (any, error) {

@@ -101,3 +101,37 @@ func TestBuildValidation(t *testing.T) {
 		t.Error("image and build together must be rejected")
 	}
 }
+
+func TestDomainsAndHealthValidation(t *testing.T) {
+	cases := []struct {
+		app   App
+		field string
+	}{
+		{App{Name: "w", Image: "x", Port: 80, Domains: []string{"https://shop.example.com/"}}, "domains[0]"},
+		{App{Name: "w", Image: "x", Port: 80, Domains: []string{"Shop.Example.com"}}, "domains[0]"},
+		{App{Name: "w", Image: "x", Port: 80, Domains: []string{"*.example.com"}}, "domains[0]"},
+		{App{Name: "w", Image: "x", Port: 80, Domains: []string{"localhost"}}, "domains[0]"},
+		{App{Name: "w", Image: "x", Port: 80, Domains: []string{"a.example.com", "a.example.com"}}, "domains[1]"},
+		{App{Name: "w", Image: "x", Domains: []string{"a.example.com"}}, "port"},
+		{App{Name: "w", Image: "x", Port: 80, Health: &Health{Path: "healthz"}}, "health.path"},
+		{App{Name: "w", Image: "x", Port: 80, Health: &Health{Timeout: "1h"}}, "health.timeout"},
+	}
+	for _, c := range cases {
+		c.app.Normalize()
+		ae, ok := apierr.As(c.app.Validate())
+		if !ok || ae.Field != c.field {
+			t.Errorf("%+v: want error on %s, got %v", c.app, c.field, ae)
+		}
+	}
+	ok := App{Name: "w", Image: "x", Port: 80, Domains: []string{"shop.example.com", "app.localhost"}, Health: &Health{Path: "/healthz", Timeout: "90s"}}
+	ok.Normalize()
+	if err := ok.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	withScheme := App{Name: "w", Image: "x", Port: 80, Domains: []string{"https://shop.example.com/"}}
+	withScheme.Normalize()
+	fix, _ := apierr.As(withScheme.Validate())
+	if fix.SuggestedFix.(map[string]any)["domains"].([]string)[0] != "shop.example.com" {
+		t.Errorf("fix = %v", fix.SuggestedFix)
+	}
+}

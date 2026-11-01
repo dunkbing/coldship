@@ -9,6 +9,7 @@ import (
 
 	"hangar/internal/apierr"
 	"hangar/internal/builder"
+	"hangar/internal/proxy"
 	"hangar/internal/runtime"
 	"hangar/internal/spec"
 	"hangar/internal/store"
@@ -22,7 +23,7 @@ func setup(t *testing.T) (*Engine, *runtime.Fake) {
 	}
 	t.Cleanup(func() { st.Close() })
 	rt := runtime.NewFake()
-	return New(st, rt, builder.NewFake()), rt
+	return New(st, rt, builder.NewFake(), &proxy.Fake{}), rt
 }
 
 func web(stage spec.Stage, image string, vols ...string) *spec.App {
@@ -148,15 +149,23 @@ func TestProductionDestructiveNeedsApproval(t *testing.T) {
 	}
 }
 
+// recreated is an app with a host port, so it deploys by stop-and-replace and
+// a failed deploy takes the old container down with it.
+func recreated(image string) *spec.App {
+	a := web(spec.StageStaging, image)
+	a.HostPort = 8080
+	return a
+}
+
 func TestFailedDeployAndRollback(t *testing.T) {
 	e, rt := setup(t)
 	ctx := context.Background()
-	first := deploy(t, e, web(spec.StageStaging, "app:1"))
-	deploy(t, e, web(spec.StageStaging, "app:2"))
+	first := deploy(t, e, recreated("app:1"))
+	deploy(t, e, recreated("app:2"))
 
 	// A failed deploy keeps the last good spec as current.
 	rt.FailNext = apierr.New(502, "container_exited", "boom")
-	p, _ := e.Plan(ctx, "agent", PlanRequest{Spec: web(spec.StageStaging, "app:3")})
+	p, _ := e.Plan(ctx, "agent", PlanRequest{Spec: recreated("app:3")})
 	_, err := e.Apply(ctx, "agent", p.ID, "upgrade")
 	if code(err) != "container_exited" {
 		t.Fatalf("want container_exited, got %v", err)
@@ -272,7 +281,7 @@ func TestGitBuildFlow(t *testing.T) {
 	}
 	defer st.Close()
 	rt, bd := runtime.NewFake(), builder.NewFake()
-	e := New(st, rt, bd)
+	e := New(st, rt, bd, &proxy.Fake{})
 	ctx := context.Background()
 	shaA, shaB := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	bd.Refs["https://github.com/acme/api.git@main"] = shaA
@@ -295,7 +304,7 @@ func TestGitBuildFlow(t *testing.T) {
 	if rt.Containers["api"].Image != res.Deployment.Image || rt.Containers["api"].Build != nil {
 		t.Fatalf("runtime should get the built image, got %+v", rt.Containers["api"])
 	}
-	logRes, err := e.BuildLog(ctx, res.Deployment.ID)
+	logRes, err := e.DeployLog(ctx, res.Deployment.ID)
 	if err != nil || len(logRes.Lines) == 0 || !logRes.Untrusted {
 		t.Fatalf("build log should be stored and marked untrusted: %+v %v", logRes, err)
 	}
@@ -318,14 +327,14 @@ func TestGitBuildFlow(t *testing.T) {
 	bd.FailNext = apierr.New(422, "build_failed", "docker build failed for commit bbbbbbbbbbbb")
 	_, err = e.Apply(ctx, "agent", p.ID, "upgrade")
 	ae, _ := apierr.As(err)
-	if code(err) != "build_failed" || ae.Details["failed_in"] != store.PhaseBuild || ae.SuggestedFix.(map[string]any)["tool"] != "build_log" {
+	if code(err) != "build_failed" || ae.Details["failed_in"] != store.PhaseBuild || ae.SuggestedFix.(map[string]any)["tool"] != "deploy_log" {
 		t.Fatalf("want build_failed pointing at the build log, got %+v", err)
 	}
 	if rt.Containers["api"].Image != before.Image {
 		t.Fatal("a failed build must not touch the running container")
 	}
 	diag, _ := e.Diagnose(ctx, "api")
-	if !diag.Healthy || !hasFinding(diag, "build_failed") || len(diag.BuildLog) == 0 {
+	if !diag.Healthy || !hasFinding(diag, "build_failed") || len(diag.DeployLog) == 0 {
 		t.Fatalf("diagnose: app still healthy, with a build_failed warning and the build log; got %+v", diag)
 	}
 	if hasFinding(diag, "last_deploy_failed") {
@@ -367,4 +376,137 @@ func TestPerAppLocking(t *testing.T) {
 		t.Fatal("a lock on one app must not block another app")
 	}
 	unlock()
+}
+
+func webDomains(image string, domains ...string) *spec.App {
+	return &spec.App{Name: "web", Image: image, Port: 8080, Domains: domains,
+		Health: &spec.Health{Path: "/healthz"}}
+}
+
+func setupProxy(t *testing.T) (*Engine, *runtime.Fake, *proxy.Fake) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	rt, px := runtime.NewFake(), &proxy.Fake{}
+	return New(st, rt, builder.NewFake(), px), rt, px
+}
+
+func TestDomainsRoutingAndZeroDowntime(t *testing.T) {
+	e, rt, px := setupProxy(t)
+	ctx := context.Background()
+
+	first := deploy(t, e, webDomains("app:1", "web.example.com"))
+	if got := px.Upstream("web"); got != runtime.Upstream(first.Deployment.ID, 8080) {
+		t.Fatalf("route should point at the first deployment, got %q", got)
+	}
+	if !rt.LastOpts.ZeroDowntime || first.Deployment.Strategy != "zero-downtime" {
+		t.Fatal("an app without host_port or volumes deploys with zero downtime")
+	}
+	v, _ := e.GetApp(ctx, "web")
+	if len(v.URLs) != 1 || v.URLs[0] != "https://web.example.com" {
+		t.Fatalf("urls = %v", v.URLs)
+	}
+
+	p, _ := e.Plan(ctx, "agent", PlanRequest{Spec: webDomains("app:2", "web.example.com")})
+	if p.Downtime {
+		t.Fatal("a zero-downtime update must not be flagged as downtime")
+	}
+	second, err := e.Apply(ctx, "agent", p.ID, "v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := px.Upstream("web"); got != runtime.Upstream(second.Deployment.ID, 8080) {
+		t.Fatalf("route should switch to the new deployment, got %q", got)
+	}
+
+	// The new version fails its health check: traffic stays on v2.
+	rt.FailNext = apierr.New(502, "health_check_failed", "the new container did not become healthy within 60s")
+	rt.FailOutput = []string{"Server listening on port 3000"}
+	p, _ = e.Plan(ctx, "agent", PlanRequest{Spec: webDomains("app:3", "web.example.com")})
+	_, err = e.Apply(ctx, "agent", p.ID, "v3")
+	ae, _ := apierr.As(err)
+	if code(err) != "health_check_failed" || ae.Details[runtime.DetailPreviousRunning] != true || ae.SuggestedFix.(map[string]any)["tool"] != "deploy_log" {
+		t.Fatalf("want health_check_failed keeping the previous version, got %+v", err)
+	}
+	if got := px.Upstream("web"); got != runtime.Upstream(second.Deployment.ID, 8080) {
+		t.Fatalf("traffic must stay on v2, route is %q", got)
+	}
+	diag, _ := e.Diagnose(ctx, "web")
+	if !diag.Healthy || !hasFinding(diag, "new_version_unhealthy") || !hasFinding(diag, "port_mismatch") {
+		t.Fatalf("diagnose should explain the failed version from its captured output: %+v", diag.Findings)
+	}
+	app, _ := e.GetApp(ctx, "web")
+	if app.CurrentDeployment != second.Deployment.ID {
+		t.Fatal("the current deployment must still be v2")
+	}
+
+	// Removing the domains removes the route; deleting the app too.
+	deploy(t, e, webDomains("app:2"))
+	if px.Upstream("web") != "" {
+		t.Fatal("route should be removed when domains are removed")
+	}
+	deploy(t, e, webDomains("app:2", "web.example.com"))
+	p, _ = e.Plan(ctx, "agent", PlanRequest{Delete: "web"})
+	if _, err := e.Apply(ctx, "agent", p.ID, "remove"); err != nil {
+		t.Fatal(err)
+	}
+	if px.Upstream("web") != "" {
+		t.Fatal("deleting the app must remove its route")
+	}
+}
+
+func TestDowntimeFlagFollowsStrategy(t *testing.T) {
+	e, rt, _ := setupProxy(t)
+	ctx := context.Background()
+	withVol := &spec.App{Name: "db", Image: "postgres:16", Port: 5432, Volumes: []spec.Volume{{Name: "data", Path: "/data"}}}
+	deploy(t, e, withVol)
+	if rt.LastOpts.ZeroDowntime {
+		t.Fatal("apps with volumes must be recreated, never run twice on the same data")
+	}
+	upd := withVol.Clone()
+	upd.Image = "postgres:16.1"
+	p, _ := e.Plan(ctx, "agent", PlanRequest{Spec: upd})
+	if !p.Downtime {
+		t.Fatal("recreate updates must be flagged as downtime")
+	}
+}
+
+func TestDomainConflictsAndProxyDisabled(t *testing.T) {
+	e, _, _ := setupProxy(t)
+	ctx := context.Background()
+	deploy(t, e, webDomains("app:1", "shop.example.com"))
+	other := &spec.App{Name: "other", Image: "x", Port: 80, Domains: []string{"shop.example.com"}}
+	_, err := e.Plan(ctx, "agent", PlanRequest{Spec: other})
+	if ae, _ := apierr.As(err); code(err) != "domain_in_use" || ae.Details["app"] != "web" {
+		t.Fatalf("want domain_in_use naming web, got %v", err)
+	}
+
+	st, _ := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	defer st.Close()
+	noProxy := New(st, runtime.NewFake(), builder.NewFake(), nil)
+	if _, err := noProxy.Plan(ctx, "agent", PlanRequest{Spec: webDomains("app:1", "a.example.com")}); code(err) != "proxy_disabled" {
+		t.Fatalf("want proxy_disabled, got %v", err)
+	}
+}
+
+func TestStartProxyRestoresRoutes(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := store.Open(filepath.Join(dir, "h.db"))
+	e := New(st, runtime.NewFake(), builder.NewFake(), &proxy.Fake{})
+	res := deploy(t, e, webDomains("app:1", "web.example.com"))
+	st.Close()
+
+	st2, _ := store.Open(filepath.Join(dir, "h.db"))
+	defer st2.Close()
+	px := &proxy.Fake{}
+	e2 := New(st2, runtime.NewFake(), builder.NewFake(), px)
+	if err := e2.StartProxy(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if px.Upstream("web") != runtime.Upstream(res.Deployment.ID, 8080) {
+		t.Fatalf("routes must be rebuilt from state on start, got %+v", px.Routes)
+	}
 }

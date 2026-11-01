@@ -31,9 +31,9 @@ type Diagnosis struct {
 	LatestDeployment *store.Deployment `json:"latest_deployment,omitempty"`
 	RecentLogs       []string          `json:"recent_logs"`
 	LogsNote         string            `json:"logs_note"`
-	// BuildLog is the tail of the latest deployment's build log when that
-	// build failed.
-	BuildLog []string `json:"build_log,omitempty"`
+	// DeployLog is the end of the latest deployment's log when it failed:
+	// build output, health checks and the failed container's output.
+	DeployLog []string `json:"deploy_log,omitempty"`
 }
 
 var (
@@ -66,12 +66,29 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 		d.LatestDeployment = publicDeployment(&deps[0])
 	}
 
-	// The container that produced the logs runs the latest deployment's spec,
-	// which differs from the last good spec when the latest deploy failed.
-	running := app.Spec
-	if ld := d.LatestDeployment; ld != nil && ld.Status == store.DeployFailed && ld.FailedIn != store.PhaseBuild {
-		if deps, err := e.st.ListDeployments(ctx, name, 1); err == nil && len(deps) > 0 && deps[0].Spec != nil {
-			running = deps[0].Spec
+	// Work out which spec and which output explain the current state:
+	//  - healthy or failed build: the running container, current spec
+	//  - failed deploy that replaced the container: its logs, the failed spec
+	//  - failed deploy that kept the previous version: the new container's
+	//    output (captured in the deploy log) and the failed spec
+	running, evidence := app.Spec, logs
+	var failed *store.Deployment
+	if ld := d.LatestDeployment; ld != nil && ld.Status == store.DeployFailed {
+		if deps, err := e.st.ListDeployments(ctx, name, 1); err == nil && len(deps) > 0 {
+			failed = &deps[0]
+		}
+		if lines, err := e.st.GetDeployLog(ctx, ld.ID); err == nil && len(lines) > 0 {
+			if len(lines) > 40 {
+				lines = lines[len(lines)-40:]
+			}
+			d.DeployLog = lines
+			d.LogsNote += " " + deployLogNote
+		}
+	}
+	if failed != nil && failed.FailedIn == store.PhaseDeploy && failed.Spec != nil {
+		running = failed.Spec
+		if failed.KeptPrevious {
+			evidence = d.DeployLog
 		}
 	}
 
@@ -81,20 +98,23 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 	rollbackFix := map[string]any{"tool": "rollback", "app": name}
 
 	if ld := d.LatestDeployment; ld != nil && ld.Status == store.DeployFailed {
-		if ld.FailedIn == store.PhaseBuild {
-			// A failed build never touched the container: the previous
-			// version keeps running, so this is not an outage.
+		logFix := map[string]any{"tool": "deploy_log", "deployment": ld.ID}
+		switch {
+		case ld.KeptPrevious && ld.FailedIn == store.PhaseBuild:
+			// Not an outage: the previous version keeps serving.
 			add("warning", "build_failed", fmt.Sprintf("latest deployment %s failed to build, so the previous version is still running: %s",
-				ld.ID, ld.Error), map[string]any{"tool": "build_log", "deployment": ld.ID})
-			if lines, err := e.st.GetBuildLog(ctx, ld.ID); err == nil && len(lines) > 0 {
-				if len(lines) > 40 {
-					lines = lines[len(lines)-40:]
-				}
-				d.BuildLog = lines
-				d.LogsNote += " " + buildLogNote
-			}
-		} else {
+				ld.ID, ld.Error), logFix)
+		case ld.KeptPrevious:
+			add("warning", "new_version_unhealthy", fmt.Sprintf("latest deployment %s never became healthy (%s), so traffic stayed on the previous version: %s",
+				ld.ID, ld.ErrorCode, ld.Error), logFix)
+		default:
 			add("error", "last_deploy_failed", fmt.Sprintf("latest deployment %s failed (%s): %s", ld.ID, ld.ErrorCode, ld.Error), rollbackFix)
+		}
+	}
+	if app.Spec != nil && len(app.Spec.Domains) > 0 && e.px != nil {
+		if ps := e.px.Status(ctx); !ps.Running {
+			add("error", "proxy_down", "the proxy container (hangar-proxy) is not running, so the app's domains are unreachable",
+				map[string]any{"action": "restart hangar server, which starts the proxy"})
 		}
 	}
 	switch {
@@ -113,8 +133,8 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 	}
 
 	if running != nil && running.Port > 0 {
-		for i := len(logs) - 1; i >= 0; i-- {
-			if m := listenRe.FindStringSubmatch(logs[i]); m != nil {
+		for i := len(evidence) - 1; i >= 0; i-- {
+			if m := listenRe.FindStringSubmatch(evidence[i]); m != nil {
 				if p, _ := strconv.Atoi(m[1]); p > 0 && p != running.Port {
 					add("warning", "port_mismatch", fmt.Sprintf("the app seems to listen on port %d but the spec says port %d", p, running.Port),
 						map[string]any{"port": p})
@@ -123,14 +143,14 @@ func (e *Engine) Diagnose(ctx context.Context, name string) (*Diagnosis, error) 
 			}
 		}
 	}
-	joined := strings.Join(logs, "\n")
+	joined := strings.Join(evidence, "\n")
 	if addrInUseRe.MatchString(joined) {
 		add("error", "address_in_use", "the app reports its address is already in use inside the container", nil)
 	}
 	if permissionRe.MatchString(joined) {
 		add("warning", "permission_denied", "the logs mention permission errors; check volume paths and the image's user", nil)
 	}
-	if name := missingEnvVar(logs, running); name != "" {
+	if name := missingEnvVar(evidence, running); name != "" {
 		add("warning", "missing_env", fmt.Sprintf("the logs say %s is missing, and it is not set in the spec's env", name),
 			map[string]any{"env": map[string]string{name: "<value>"}})
 	}

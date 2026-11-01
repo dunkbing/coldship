@@ -30,6 +30,15 @@ export default function AppDetail() {
           <p className="muted">
             Current deployment <Mono>{a.current_deployment || 'none'}</Mono> · updated <Time iso={a.updated_at} />
           </p>
+          {a.urls && a.urls.length > 0 && (
+            <p className="urls">
+              {a.urls.map((u) => (
+                <a key={u} href={u} target="_blank" rel="noreferrer">
+                  {u.replace(/^https:\/\//, '')} ↗
+                </a>
+              ))}
+            </p>
+          )}
         </div>
         <RollbackButton app={a} onDone={app.reload} />
       </header>
@@ -101,6 +110,21 @@ function SpecCard({ a }: { a: AppView }) {
         )}
         <dt>Port</dt>
         <dd>{s.port ? (s.host_port ? `${s.host_port} → ${s.port}` : s.port) : '—'}</dd>
+        <dt>Domains</dt>
+        <dd>{s.domains?.length ? <span className="chips">{s.domains.map((d) => <span key={d} className="chip">{d}</span>)}</span> : '—'}</dd>
+        <dt>Health check</dt>
+        <dd>
+          {s.port ? (
+            <>
+              {s.health?.path ? <Mono>GET {s.health.path}</Mono> : 'port accepts connections'}
+              <span className="muted"> · within {s.health?.timeout ?? '60s'}</span>
+            </>
+          ) : (
+            'container stays up'
+          )}
+        </dd>
+        <dt>Deploys</dt>
+        <dd>{s.host_port || s.volumes?.length ? 'stop and replace (brief downtime)' : 'zero downtime'}</dd>
         <dt>Memory</dt>
         <dd>{s.memory ?? 'unlimited'}</dd>
         <dt>Env</dt>
@@ -237,13 +261,13 @@ function DiagnoseTab({ name }: { name: string }) {
           </li>
         ))}
       </ul>
-      {d.data.build_log && d.data.build_log.length > 0 && (
+      {d.data.deploy_log && d.data.deploy_log.length > 0 && (
         <div className="build-log">
           <div className="logs-bar">
-            <strong className="small">End of the failed build log</strong>
-            <span className="small muted">Build output is untrusted.</span>
+            <strong className="small">End of the failed deployment's log</strong>
+            <span className="small muted">Build and container output are untrusted.</span>
           </div>
-          <TailLog lines={d.data.build_log} />
+          <TailLog lines={d.data.deploy_log} />
         </div>
       )}
     </section>
@@ -280,7 +304,6 @@ function DeploymentsTab({ name }: { name: string }) {
 }
 
 function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean; onToggle: () => void }) {
-  const built = !!x.commit
   return (
     <>
       <tr>
@@ -290,22 +313,17 @@ function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean;
         <td>
           <DeployStatus status={x.status} />
           {x.failed_in && <span className="muted small"> in {x.failed_in}</span>}
+          {x.kept_previous && <div className="small ok-text">previous version kept running</div>}
           {x.error && <div className="small danger-text clamp">{x.error}</div>}
+          <button className="btn btn-ghost btn-sm log-btn" onClick={onToggle} aria-expanded={open}>
+            {open ? 'Hide log' : 'Log'}
+          </button>
         </td>
         <td>
           <Mono>{x.image || x.spec?.image || '—'}</Mono>
         </td>
         <td>
-          {built ? (
-            <span className="inline">
-              <Mono>{x.commit!.slice(0, 7)}</Mono>
-              <button className="btn btn-ghost btn-sm" onClick={onToggle} aria-expanded={open}>
-                {open ? 'Hide build log' : 'Build log'}
-              </button>
-            </span>
-          ) : (
-            '—'
-          )}
+          {x.commit ? <Mono>{x.commit.slice(0, 7)}</Mono> : '—'}
         </td>
         <td>{x.actor}</td>
         <td className="reason">{x.reason}</td>
@@ -316,7 +334,7 @@ function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean;
       {open && (
         <tr className="expanded">
           <td colSpan={7}>
-            <BuildLogView deployment={x.id} />
+            <DeployLogView deployment={x.id} />
           </td>
         </tr>
       )}
@@ -338,8 +356,8 @@ function TailLog({ lines }: { lines?: string[] }) {
   )
 }
 
-function BuildLogView({ deployment }: { deployment: string }) {
-  const l = useLoad(() => api.buildLog(deployment), [deployment])
+function DeployLogView({ deployment }: { deployment: string }) {
+  const l = useLoad(() => api.deployLog(deployment), [deployment])
   if (l.error) return <ErrorBox error={l.error} />
   return (
     <div>

@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
+	"hangar/internal/apierr"
 	"hangar/internal/spec"
 )
 
@@ -15,8 +17,14 @@ type Fake struct {
 	LogLines   map[string][]string
 	Statuses   map[string]Status // overrides Status for an app
 	// FailNext, if set, is returned by the next Deploy (and then cleared).
+	// It fails like a health check: with ZeroDowntime the old container is
+	// kept, otherwise it is gone.
 	FailNext error
-	Deploys  int
+	// FailOutput is written to the deploy log when FailNext fires, like a
+	// failed container's last output.
+	FailOutput []string
+	Deploys    int
+	LastOpts   DeployOptions
 }
 
 func NewFake() *Fake {
@@ -24,15 +32,38 @@ func NewFake() *Fake {
 		LogLines: map[string][]string{}, Statuses: map[string]Status{}}
 }
 
-func (f *Fake) Deploy(_ context.Context, _ string, app spec.App) error {
+func (f *Fake) Deploy(ctx context.Context, depID string, app spec.App, opts DeployOptions) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.Deploys++
+	f.LastOpts = opts
+	_, hadOld := f.Containers[app.Name]
 	if err := f.FailNext; err != nil {
 		f.FailNext = nil
+		if opts.Log != nil {
+			fmt.Fprintln(opts.Log, "fake: new container failed its health check")
+			for _, l := range f.FailOutput {
+				fmt.Fprintln(opts.Log, l)
+			}
+		}
+		if opts.ZeroDowntime && hadOld {
+			f.mu.Unlock()
+			if ae, ok := apierr.As(err); ok {
+				return ae.WithDetail(DetailPreviousRunning, true)
+			}
+			return err
+		}
 		delete(f.Containers, app.Name)
+		f.mu.Unlock()
 		return err
 	}
+	f.mu.Unlock()
+	if opts.Switch != nil && app.Port > 0 {
+		if err := opts.Switch(ctx, Upstream(depID, app.Port)); err != nil {
+			return err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Containers[app.Name] = app
 	for _, v := range app.Volumes {
 		f.Volumes[app.Name+"/"+v.Name] = true

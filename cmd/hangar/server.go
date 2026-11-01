@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"hangar/internal/builder"
 	"hangar/internal/engine"
 	"hangar/internal/mcpserver"
+	"hangar/internal/proxy"
 	"hangar/internal/runtime"
 	"hangar/internal/store"
 	"hangar/internal/web"
@@ -25,8 +27,10 @@ import (
 )
 
 func serverCmd() *cobra.Command {
-	var addr, data, gitCreds, buildDir string
+	var addr, data, gitCreds, buildDir, acmeEmail string
 	var grace, buildTimeout time.Duration
+	var proxyOn bool
+	var httpPort, httpsPort int
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run the Hangar control plane (API server + Docker runtime)",
@@ -41,7 +45,15 @@ func serverCmd() *cobra.Command {
 			rt.StartupGrace = grace
 			bd := builder.NewGit()
 			bd.CredentialsFile, bd.WorkDir, bd.Timeout = gitCreds, buildDir, buildTimeout
-			eng := engine.New(st, rt, bd)
+			var px proxy.Proxy
+			if proxyOn {
+				dataAbs, err := filepath.Abs(data)
+				if err != nil {
+					return err
+				}
+				px = proxy.NewCaddy(filepath.Join(filepath.Dir(dataAbs), "hangar-proxy"), httpPort, httpsPort, acmeEmail)
+			}
+			eng := engine.New(st, rt, bd, px)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -51,6 +63,16 @@ func serverCmd() *cobra.Command {
 			} else if tok != "" {
 				fmt.Fprintf(os.Stderr, "\nCreated admin token (shown once, store it safely):\n\n  %s\n\n"+
 					"Give agents their own deploy-scoped token instead:\n  HANGAR_TOKEN=%s hangar token create --name my-agent --scope deploy\n\n", tok, tok)
+			}
+
+			if proxyOn {
+				if err := eng.StartProxy(ctx); err != nil {
+					// Keep serving: apps without domains still work, and
+					// diagnose reports proxy_down for apps that need it.
+					log.Error("proxy not started; apps with domains are unreachable", "err", err)
+				} else {
+					log.Info("proxy running", "http_port", httpPort, "https_port", httpsPort)
+				}
 			}
 
 			srv := &http.Server{Addr: addr, Handler: api.New(eng, st, log, web.Handler()), ReadHeaderTimeout: 10 * time.Second}
@@ -70,6 +92,10 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", envOr("HANGAR_ADDR", "127.0.0.1:7070"), "listen address")
 	cmd.Flags().StringVar(&data, "data", envOr("HANGAR_DATA", "hangar.db"), "SQLite state file")
 	cmd.Flags().DurationVar(&grace, "startup-grace", 3*time.Second, "how long a new container must stay up to count as deployed")
+	cmd.Flags().BoolVar(&proxyOn, "proxy", true, "run the Caddy proxy that serves app domains with automatic HTTPS")
+	cmd.Flags().IntVar(&httpPort, "proxy-http-port", 80, "host port for the proxy's HTTP listener")
+	cmd.Flags().IntVar(&httpsPort, "proxy-https-port", 443, "host port for the proxy's HTTPS listener")
+	cmd.Flags().StringVar(&acmeEmail, "acme-email", envOr("HANGAR_ACME_EMAIL", ""), "email for Let's Encrypt certificate notices (optional)")
 	cmd.Flags().DurationVar(&buildTimeout, "build-timeout", 20*time.Minute, "maximum time for one Git build")
 	cmd.Flags().StringVar(&gitCreds, "git-credentials", envOr("HANGAR_GIT_CREDENTIALS", ""), "git-credential-store file for private https repositories")
 	cmd.Flags().StringVar(&buildDir, "build-dir", envOr("HANGAR_BUILD_DIR", ""), "directory for temporary build checkouts (default: system temp dir)")

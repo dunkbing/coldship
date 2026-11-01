@@ -71,6 +71,13 @@ export default function Apps() {
                     <Link className="row-link" to={`/apps/${a.name}`}>
                       {a.name}
                     </Link>
+                    {a.urls?.[0] && (
+                      <div className="small">
+                        <a href={a.urls[0]} target="_blank" rel="noreferrer" className="muted">
+                          {a.urls[0].replace(/^https:\/\//, '')}
+                        </a>
+                      </div>
+                    )}
                   </td>
                   <td>
                     <HealthPill health={healthOf(a)} />

@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -38,13 +39,31 @@ type Build struct {
 	Args       map[string]string `json:"args,omitempty" yaml:"args,omitempty" jsonschema:"docker build args. Visible in plans and image history: never put secrets here"`
 }
 
+// Health tells Hangar when a newly started container is ready for traffic.
+type Health struct {
+	Path    string `json:"path,omitempty" yaml:"path,omitempty" jsonschema:"HTTP path that returns 2xx or 3xx when the app is ready, e.g. /healthz. Without it, Hangar waits for the port to accept connections"`
+	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty" jsonschema:"how long a new container may take to become healthy, e.g. 60s (default 60s, max 10m)"`
+}
+
+// TimeoutOrDefault parses Timeout (already validated) or returns the default.
+func (h *Health) TimeoutOrDefault() time.Duration {
+	if h != nil && h.Timeout != "" {
+		if d, err := time.ParseDuration(h.Timeout); err == nil {
+			return d
+		}
+	}
+	return 60 * time.Second
+}
+
 type App struct {
 	Name     string            `json:"name" yaml:"name" jsonschema:"app name: lowercase letters, digits and dashes, starting with a letter"`
 	Stage    Stage             `json:"stage,omitempty" yaml:"stage,omitempty" jsonschema:"production, staging (default) or preview. Destructive changes to production need human approval"`
 	Image    string            `json:"image,omitempty" yaml:"image,omitempty" jsonschema:"container image to run, e.g. nginx:1.27. Set either image or build"`
 	Build    *Build            `json:"build,omitempty" yaml:"build,omitempty" jsonschema:"build the image from a Git repository instead of using image"`
 	Port     int               `json:"port,omitempty" yaml:"port,omitempty" jsonschema:"port the app listens on inside the container"`
-	HostPort int               `json:"host_port,omitempty" yaml:"host_port,omitempty" jsonschema:"host port to publish the container port on (requires port)"`
+	HostPort int               `json:"host_port,omitempty" yaml:"host_port,omitempty" jsonschema:"host port to publish the container port on (requires port). Apps with a host_port cannot be deployed without downtime; prefer domains"`
+	Domains  []string          `json:"domains,omitempty" yaml:"domains,omitempty" jsonschema:"hostnames routed to this app through Hangar's proxy with automatic HTTPS, e.g. app.example.com (requires port)"`
+	Health   *Health           `json:"health,omitempty" yaml:"health,omitempty" jsonschema:"readiness check used before switching traffic to a new version"`
 	Memory   string            `json:"memory,omitempty" yaml:"memory,omitempty" jsonschema:"memory limit such as 256m or 1g"`
 	Env      map[string]string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"environment variables; values are write-only and redacted in all output"`
 	Volumes  []Volume          `json:"volumes,omitempty" yaml:"volumes,omitempty" jsonschema:"persistent volumes. Removing one from the spec deletes its data"`
@@ -58,6 +77,8 @@ var (
 	shaRe    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	refRe    = regexp.MustCompile(`^[A-Za-z0-9._/+-]{1,200}$`)
 	// https://host/..., http://host/..., ssh://[user@]host/..., or scp-like user@host:path.
+	// Lowercase DNS hostname with at least two labels; no wildcards.
+	domainRe = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 	gitURLRe = regexp.MustCompile(`^(?:(?:https?|ssh)://[A-Za-z0-9._~%!$&'()*+,;=:@-]+(?:/\S*)?|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:\S+)$`)
 )
 
@@ -80,7 +101,7 @@ func Parse(b []byte) (*App, error) {
 	var a App
 	if err := dec.Decode(&a); err != nil {
 		return nil, apierr.New(400, "invalid_spec", "cannot parse spec: %v", err).
-			WithHint("allowed fields: name, stage, image, build (git, ref, commit, context, dockerfile, args), port, host_port, memory, env, volumes")
+			WithHint("allowed fields: name, stage, image, build (git, ref, commit, context, dockerfile, args), port, host_port, domains, health (path, timeout), memory, env, volumes")
 	}
 	a.Normalize()
 	return &a, a.Validate()
@@ -137,6 +158,45 @@ func (a *App) Validate() error {
 	if a.HostPort > 0 && a.Port == 0 {
 		return apierr.Invalid("port", "host_port is set but port is not; Hangar needs to know which container port to publish").
 			WithFix(map[string]any{"port": a.HostPort})
+	}
+	seen := map[string]bool{}
+	for i, d := range a.Domains {
+		f := fmt.Sprintf("domains[%d]", i)
+		low := strings.ToLower(strings.TrimSuffix(d, "."))
+		switch {
+		case strings.Contains(d, "*"):
+			return apierr.Invalid(f, "wildcard domain %q is not supported; list each hostname", d)
+		case strings.Contains(d, "://") || strings.Contains(d, "/"):
+			return apierr.Invalid(f, "domain %q must be a bare hostname, without scheme or path", d).
+				WithFix(map[string]any{"domains": []string{bareHost(d)}})
+		case low != d:
+			return apierr.Invalid(f, "domain %q must be lowercase, without a trailing dot", d).WithFix(map[string]any{"domains": []string{low}})
+		case len(d) > 253 || !domainRe.MatchString(d):
+			return apierr.Invalid(f, "domain %q is not a valid hostname", d)
+		case seen[d]:
+			return apierr.Invalid(f, "domain %q is listed twice", d)
+		}
+		seen[d] = true
+	}
+	if len(a.Domains) > 0 && a.Port == 0 {
+		return apierr.Invalid("port", "domains are set but port is not; Hangar needs to know which container port to route traffic to").
+			WithFix(map[string]any{"port": 8080})
+	}
+	if h := a.Health; h != nil {
+		if h.Path != "" && (!strings.HasPrefix(h.Path, "/") || strings.ContainsAny(h.Path, " \t\r\n")) {
+			return apierr.Invalid("health.path", "health.path %q must start with / and contain no spaces", h.Path).
+				WithFix(map[string]any{"health": map[string]any{"path": "/" + strings.TrimLeft(strings.TrimSpace(h.Path), "/")}})
+		}
+		if h.Timeout != "" {
+			d, err := time.ParseDuration(h.Timeout)
+			if err != nil || d < time.Second || d > 10*time.Minute {
+				return apierr.Invalid("health.timeout", "health.timeout %q must be a duration between 1s and 10m, e.g. 60s", h.Timeout).
+					WithFix(map[string]any{"health": map[string]any{"timeout": "60s"}})
+			}
+		}
+		if a.Port == 0 {
+			return apierr.Invalid("port", "health is set but port is not; health checks connect to the app's port")
+		}
 	}
 	if a.Memory != "" && !memoryRe.MatchString(a.Memory) {
 		return apierr.Invalid("memory", "memory %q must look like 256m or 1g", a.Memory).WithFix(map[string]any{"memory": "512m"})
@@ -200,6 +260,23 @@ func (b *Build) validate() error {
 		}
 	}
 	return nil
+}
+
+func bareHost(s string) string {
+	if _, rest, ok := strings.Cut(s, "://"); ok {
+		s = rest
+	}
+	s, _, _ = strings.Cut(s, "/")
+	s, _, _ = strings.Cut(s, ":")
+	return strings.ToLower(strings.TrimSuffix(s, "."))
+}
+
+// ZeroDowntime reports whether the app can be redeployed by starting the new
+// container next to the old one: impossible with a host port (two containers
+// can't bind it) or volumes (two copies of e.g. a database must never share
+// a data directory).
+func (a *App) ZeroDowntime() bool {
+	return a.HostPort == 0 && len(a.Volumes) == 0
 }
 
 // hasPassword reports whether an http(s) URL carries userinfo, which would
@@ -274,6 +351,11 @@ func (a *App) Redacted() *App {
 		}
 	}
 	c.Volumes = append([]Volume(nil), a.Volumes...)
+	c.Domains = append([]string(nil), a.Domains...)
+	if a.Health != nil {
+		h := *a.Health
+		c.Health = &h
+	}
 	c.Build = a.Build.Clone()
 	return &c
 }
@@ -291,6 +373,11 @@ func (a *App) Clone() *App {
 		}
 	}
 	c.Volumes = append([]Volume(nil), a.Volumes...)
+	c.Domains = append([]string(nil), a.Domains...)
+	if a.Health != nil {
+		h := *a.Health
+		c.Health = &h
+	}
 	c.Build = a.Build.Clone()
 	return &c
 }

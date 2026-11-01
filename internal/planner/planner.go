@@ -53,6 +53,16 @@ func Diff(cur, des *spec.App) Result {
 		cs = scalar(cs, "port", cur.Port, des.Port)
 		cs = scalar(cs, "host_port", cur.HostPort, des.HostPort)
 		cs = scalar(cs, "memory", cur.Memory, des.Memory)
+		cs = setDiff(cs, "domains.", cur.Domains, des.Domains)
+		var ch, dh spec.Health
+		if cur.Health != nil {
+			ch = *cur.Health
+		}
+		if des.Health != nil {
+			dh = *des.Health
+		}
+		cs = scalar(cs, "health.path", ch.Path, dh.Path)
+		cs = scalar(cs, "health.timeout", ch.Timeout, dh.Timeout)
 		cs = envDiff(cs, cur.Env, des.Env)
 		cs = volDiff(cs, cur.Volumes, des.Volumes)
 	}
@@ -75,6 +85,33 @@ func scalar[T comparable](cs []Change, path string, from, to T) []Change {
 	default:
 		return append(cs, Change{Path: path, Op: OpUpdate, From: from, To: to})
 	}
+}
+
+func setDiff(cs []Change, prefix string, cur, des []string) []Change {
+	in := func(xs []string, x string) bool {
+		for _, y := range xs {
+			if y == x {
+				return true
+			}
+		}
+		return false
+	}
+	keys := map[string]bool{}
+	for _, x := range cur {
+		keys[x] = true
+	}
+	for _, x := range des {
+		keys[x] = true
+	}
+	for _, k := range sortedKeys(keys) {
+		switch {
+		case in(cur, k) && !in(des, k):
+			cs = append(cs, Change{Path: prefix + k, Op: OpDelete, Reason: "stops routing this hostname to the app"})
+		case !in(cur, k) && in(des, k):
+			cs = append(cs, Change{Path: prefix + k, Op: OpCreate})
+		}
+	}
+	return cs
 }
 
 func buildDiff(cs []Change, cur, des *spec.Build) []Change {

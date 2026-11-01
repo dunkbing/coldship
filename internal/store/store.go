@@ -100,20 +100,24 @@ const (
 )
 
 type Deployment struct {
-	ID         string     `json:"id"`
-	App        string     `json:"app"`
-	PlanID     string     `json:"plan_id"`
-	Spec       *spec.App  `json:"spec,omitempty"`
-	Status     string     `json:"status"`
-	Image      string     `json:"image,omitempty"`  // image that ran (built tag for git builds)
-	Commit     string     `json:"commit,omitempty"` // git commit, for builds
-	Error      string     `json:"error,omitempty"`
-	ErrorCode  string     `json:"error_code,omitempty"`
-	FailedIn   string     `json:"failed_in,omitempty"` // build | deploy`
-	Actor      string     `json:"actor"`
-	Reason     string     `json:"reason"`
-	CreatedAt  time.Time  `json:"created_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ID        string    `json:"id"`
+	App       string    `json:"app"`
+	PlanID    string    `json:"plan_id"`
+	Spec      *spec.App `json:"spec,omitempty"`
+	Status    string    `json:"status"`
+	Image     string    `json:"image,omitempty"`  // image that ran (built tag for git builds)
+	Commit    string    `json:"commit,omitempty"` // git commit, for builds
+	Error     string    `json:"error,omitempty"`
+	ErrorCode string    `json:"error_code,omitempty"`
+	FailedIn  string    `json:"failed_in,omitempty"` // build | deploy
+	// KeptPrevious is true when the deployment failed without touching the
+	// previous version, which kept running and serving traffic.
+	KeptPrevious bool       `json:"kept_previous,omitempty"`
+	Strategy     string     `json:"strategy,omitempty"` // zero-downtime | recreate`
+	Actor        string     `json:"actor"`
+	Reason       string     `json:"reason"`
+	CreatedAt    time.Time  `json:"created_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 }
 
 type AuditEntry struct {
@@ -139,7 +143,7 @@ CREATE TABLE IF NOT EXISTS plans (
 CREATE TABLE IF NOT EXISTS deployments (
   id TEXT PRIMARY KEY, app TEXT NOT NULL, status TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS deployments_by_app ON deployments(app, created_at);
-CREATE TABLE IF NOT EXISTS build_logs (
+CREATE TABLE IF NOT EXISTS deploy_logs (
   deployment TEXT PRIMARY KEY, lines TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY, token_name TEXT NOT NULL, scope TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
@@ -265,22 +269,22 @@ func (s *Store) DeleteSession(ctx context.Context, plain string) error {
 	return err
 }
 
-// --- build logs ---
+// --- deployment logs (build output, startup, health checks) ---
 
-func (s *Store) SaveBuildLog(ctx context.Context, deployment string, lines []string) error {
+func (s *Store) SaveDeployLog(ctx context.Context, deployment string, lines []string) error {
 	b, err := json.Marshal(lines)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO build_logs(deployment, lines) VALUES(?,?)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO deploy_logs(deployment, lines) VALUES(?,?)
 		ON CONFLICT(deployment) DO UPDATE SET lines=excluded.lines`, deployment, string(b))
 	return err
 }
 
-// GetBuildLog returns a deployment's build log, or nil if it has none.
-func (s *Store) GetBuildLog(ctx context.Context, deployment string) ([]string, error) {
+// GetDeployLog returns a deployment's log, or nil if it has none.
+func (s *Store) GetDeployLog(ctx context.Context, deployment string) ([]string, error) {
 	var body string
-	err := s.db.QueryRowContext(ctx, `SELECT lines FROM build_logs WHERE deployment = ?`, deployment).Scan(&body)
+	err := s.db.QueryRowContext(ctx, `SELECT lines FROM deploy_logs WHERE deployment = ?`, deployment).Scan(&body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

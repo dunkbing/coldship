@@ -24,6 +24,8 @@ export interface Spec {
   build?: Build
   port?: number
   host_port?: number
+  domains?: string[]
+  health?: { path?: string; timeout?: string }
   memory?: string
   env?: Record<string, string>
   volumes?: Volume[]
@@ -60,6 +62,8 @@ export interface Deployment {
   error?: string
   error_code?: string
   failed_in?: 'build' | 'deploy'
+  kept_previous?: boolean
+  strategy?: 'zero-downtime' | 'recreate'
   actor: string
   reason: string
   created_at: string
@@ -69,6 +73,7 @@ export interface Deployment {
 export interface AppView extends App {
   runtime?: RuntimeStatus
   latest_deployment?: Deployment
+  urls?: string[]
 }
 
 export interface Change {
@@ -116,10 +121,10 @@ export interface Diagnosis {
   latest_deployment?: Deployment
   recent_logs: string[]
   logs_note: string
-  build_log?: string[]
+  deploy_log?: string[]
 }
 
-export interface BuildLog {
+export interface DeployLog {
   deployment: string
   app: string
   commit?: string
@@ -204,7 +209,7 @@ export const api = {
   apps: () => req<App[]>('GET', '/v1/apps'),
   app: (name: string) => req<AppView>('GET', `/v1/apps/${enc(name)}`),
   deployments: (name: string, limit = 50) => req<Deployment[]>('GET', `/v1/apps/${enc(name)}/deployments?limit=${limit}`),
-  buildLog: (deployment: string) => req<BuildLog>('GET', `/v1/deployments/${enc(deployment)}/build-log`),
+  deployLog: (deployment: string) => req<DeployLog>('GET', `/v1/deployments/${enc(deployment)}/log`),
   diagnose: (name: string) => req<Diagnosis>('GET', `/v1/apps/${enc(name)}/diagnose`),
   logs: (name: string, tail = 200) => req<LogsResult>('GET', `/v1/apps/${enc(name)}/logs?tail=${tail}`),
   rollback: (name: string, reason: string, toDeployment?: string) =>

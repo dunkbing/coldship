@@ -133,9 +133,9 @@ func (c *Client) Deployments(ctx context.Context, app string, limit int) ([]stor
 	return out, c.do(ctx, "GET", fmt.Sprintf("/v1/apps/%s/deployments?limit=%d", esc(app), limit), nil, &out)
 }
 
-func (c *Client) BuildLog(ctx context.Context, deployment string) (*engine.BuildLog, error) {
-	var out engine.BuildLog
-	return &out, c.do(ctx, "GET", "/v1/deployments/"+esc(deployment)+"/build-log", nil, &out)
+func (c *Client) DeployLog(ctx context.Context, deployment string) (*engine.DeployLog, error) {
+	var out engine.DeployLog
+	return &out, c.do(ctx, "GET", "/v1/deployments/"+esc(deployment)+"/log", nil, &out)
 }
 
 func (c *Client) WhoAmI(ctx context.Context) (*api.WhoAmI, error) {

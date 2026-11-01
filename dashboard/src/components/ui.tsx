@@ -16,8 +16,9 @@ export function healthOf(v: AppView | undefined): Health {
   const rt = v.runtime
   if (!rt) return 'unknown'
   if (!rt.exists) return 'stopped'
-  // A failed build never touches the running container, so it is not an outage.
-  const deployFailed = ld?.status === 'failed' && ld.failed_in !== 'build'
+  // A failed deployment that kept the previous version running (failed
+  // build, or a new version that never got healthy) is not an outage.
+  const deployFailed = ld?.status === 'failed' && !ld.kept_previous
   if (rt.running && rt.restart_count === 0 && !deployFailed) return 'healthy'
   return 'failing'
 }
