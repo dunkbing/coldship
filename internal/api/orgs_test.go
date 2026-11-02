@@ -220,6 +220,9 @@ func TestOrganizations(t *testing.T) {
 	if list, _ := acme.ListData(ctx); len(list) != 0 {
 		t.Fatalf("acme sees data: %v", list)
 	}
+	if _, err := acme.Plan(ctx, engine.PlanRequest{Spec: &spec.App{Name: "web", Image: "nginx", Port: 80}}); errCode(err) != "name_in_use" {
+		t.Fatalf("taken name: %v", err)
+	}
 	// Using another org's data service would inject its password.
 	_, err = acme.Plan(ctx, engine.PlanRequest{Spec: &spec.App{Name: "thief", Image: "nginx", Port: 80, Uses: []string{"maindb"}}})
 	notFound("uses", err)
@@ -251,7 +254,7 @@ func TestOrganizations(t *testing.T) {
 		t.Fatalf("move with uses: %d %v", code, out)
 	}
 	p, _ = admin.Plan(ctx, engine.PlanRequest{Spec: &spec.App{Name: "site", Image: "nginx", Port: 80}})
-	admin.Apply(ctx, p.ID, "create")
+	siteDep, _ := admin.Apply(ctx, p.ID, "create")
 	stale, _ := admin.Plan(ctx, engine.PlanRequest{Patch: &spec.Patch{Name: "site", Env: map[string]string{"A": "1"}}})
 	if code, out := bob.call("POST", "/v1/apps/site/move", map[string]any{"org": "acme-inc"}); code != 404 && code != 403 {
 		t.Fatalf("bob moved: %d %v", code, out)
@@ -262,6 +265,12 @@ func TestOrganizations(t *testing.T) {
 	}
 	_, err = admin.GetApp(ctx, "site")
 	notFound("moved app from old org", err)
+	// Its history moves with it.
+	if _, err := acme.DeployLog(ctx, siteDep.Deployment.ID); err != nil {
+		t.Fatalf("deploy log after the move: %v", err)
+	}
+	_, err = admin.DeployLog(ctx, siteDep.Deployment.ID)
+	notFound("deploy log from old org", err)
 	if _, err := acme.Apply(ctx, stale.ID, "x"); err == nil {
 		t.Fatal("a plan from before the move still applies")
 	}
@@ -272,7 +281,21 @@ func TestOrganizations(t *testing.T) {
 	if code, _ := bob.call("GET", "/v1/whoami", nil); code != 401 {
 		t.Fatalf("bob still signed in to acme: %d", code)
 	}
+	// Removed from his only org, Bob can't sign in, but rejoins through a
+	// new invite with his existing account. A wrong password doesn't use
+	// the link up.
+	if code, out := newBrowser(t, srv.URL).call("POST", "/v1/sessions", map[string]any{"email": "bob@example.com", "password": "bobs password"}); code != 403 || errOf(out) != "no_organization" {
+		t.Fatalf("bob without org: %d %v", code, out)
+	}
 	alice.must("POST", "/v1/session/org", map[string]any{"org": "acme-inc"})
+	again := secretOf(t, alice.must("POST", "/v1/org/invites", map[string]any{"role": "read"})["url"].(string))
+	bob = newBrowser(t, srv.URL)
+	if code, out := bob.call("POST", "/v1/links/accept", map[string]any{"secret": again, "email": "bob@example.com", "password": "not it at all"}); code != 401 {
+		t.Fatalf("rejoin with wrong password: %d %v", code, out)
+	}
+	if w := bob.must("POST", "/v1/links/accept", map[string]any{"secret": again, "email": "bob@example.com", "password": "bobs password"}); w["scope"] != "read" {
+		t.Fatalf("rejoined: %v", w)
+	}
 	acme.RevokeToken(ctx, "acme-ci", "done")
 	aliceID := who["user"].(map[string]any)["id"].(string)
 	if code, out := alice.call("PATCH", "/v1/org/members/"+aliceID, map[string]any{"role": "read"}); code != 409 || errOf(out) != "last_admin" {

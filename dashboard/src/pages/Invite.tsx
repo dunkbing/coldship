@@ -105,11 +105,11 @@ export default function Invite({ me, onDone }: { me: WhoAmI | null; onDone: (w: 
           </>
         )}
         {error && <ErrorBox error={error} />}
-        <Submit busy={busy} disabled={!joining && (password.length < 8 || (!reset && (!email.trim() || !name.trim())))} busyText="One moment…">
-          {reset ? 'Set password' : joining ? `Join ${info.org_name}` : 'Create account'}
+        <Submit busy={busy} disabled={!joining && (password.length < 8 || (!reset && !email.trim()))} busyText="One moment…">
+          {reset ? 'Set password' : joining ? `Join ${info.org_name}` : 'Join'}
         </Submit>
         {!reset && !joining && (
-          <p className="text-xs text-muted-foreground">Already have an account? Sign in first, then open the link again.</p>
+          <p className="text-xs text-muted-foreground">Already have an account? Enter its email and password; the name is only for new accounts.</p>
         )}
       </form>
     </AuthCard>

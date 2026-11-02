@@ -153,7 +153,7 @@ export default function App() {
             <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-10 md:py-8">
               <UpdateBanner />
               <AccountPrompt me={me} onCreated={setMe} />
-              <Routes>
+              <Routes key={me.org?.id}>
                 <Route path="/" element={<Navigate to="/apps" replace />} />
                 <Route path="/apps" element={<Apps />} />
                 <Route path="/apps/new" element={<Launch />} />

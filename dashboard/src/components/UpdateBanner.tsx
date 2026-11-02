@@ -101,7 +101,7 @@ export default function UpdateBanner() {
         {error && <ErrorBox error={error} />}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        {me.scope === 'admin' ? (
+        {me.server_admin ? (
           <Button size="sm" onClick={upgrade}>
             Upgrade now
           </Button>

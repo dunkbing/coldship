@@ -507,7 +507,7 @@ func (e *Engine) Plan(ctx context.Context, actor string, req PlanRequest) (*stor
 		name = req.Restore.App
 	}
 	defer e.lockApp(name)()
-	ctx, err := e.appOrg(ctx, name, req.previewOf)
+	ctx, err := e.appOrg(ctx, name, req.previewOf, req.Spec != nil)
 	if err != nil {
 		return nil, err
 	}

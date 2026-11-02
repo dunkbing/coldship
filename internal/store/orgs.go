@@ -161,6 +161,13 @@ func (s *Store) Authenticate(ctx context.Context, email, password string) (*User
 	return &u, nil
 }
 
+// EmailTaken reports whether an account uses email.
+func (s *Store) EmailTaken(ctx context.Context, email string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE email = ?`, strings.TrimSpace(email)).Scan(&n)
+	return n > 0, err
+}
+
 func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {
 	var u User
 	var created string

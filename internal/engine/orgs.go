@@ -12,8 +12,10 @@ import (
 
 // appOrg returns ctx acting in the org of app: the app's own if it exists,
 // its parent's for a new preview, else the caller's (or the default org).
-// An app in another org than the caller's is reported as not found.
-func (e *Engine) appOrg(ctx context.Context, name, previewOf string) (context.Context, error) {
+// An app in another org than the caller's is reported as not found, or,
+// when creating one with a full spec, as a name already in use (names are
+// unique across the server).
+func (e *Engine) appOrg(ctx context.Context, name, previewOf string, creating bool) (context.Context, error) {
 	caller := store.OrgFrom(ctx)
 	a, err := e.st.GetApp(ctx, name)
 	if err != nil {
@@ -26,6 +28,10 @@ func (e *Engine) appOrg(ctx context.Context, name, previewOf string) (context.Co
 	}
 	if a != nil {
 		if caller != "" && a.Org != caller {
+			if creating && a.Name == name {
+				return nil, apierr.New(409, "name_in_use", "the name %s is taken: app names are unique on this server", name).
+					WithField("name").WithHint("pick another name")
+			}
 			return nil, apierr.NotFound("app", name)
 		}
 		return store.WithOrg(ctx, a.Org), nil

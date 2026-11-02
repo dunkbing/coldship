@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/mail"
 	"regexp"
@@ -116,17 +117,24 @@ func needUser(p principal) error {
 
 // --- sign-in rate limit ---
 
-// loginLimiter slows password guessing: after 5 failures for an email or
-// an address in 15 minutes, sign-in is refused for the rest of the window.
+// loginLimiter slows password guessing: after 5 failures for an email (or
+// 30 from one address) in 15 minutes, sign-in is refused for the rest of
+// the window. Loopback addresses aren't counted: behind an SSH tunnel or a
+// local proxy everyone shares one, and one person's typos would lock
+// everyone out.
 type loginLimiter struct {
 	mu    sync.Mutex
 	fails map[string][]time.Time
 }
 
-const (
-	loginWindow   = 15 * time.Minute
-	loginMaxFails = 5
-)
+const loginWindow = 15 * time.Minute
+
+func maxFails(key string) int {
+	if strings.HasPrefix(key, "email:") {
+		return 5
+	}
+	return 30
+}
 
 func (l *loginLimiter) recent(key string, now time.Time) []time.Time {
 	var keep []time.Time
@@ -143,7 +151,7 @@ func (l *loginLimiter) blocked(keys ...string) bool {
 	defer l.mu.Unlock()
 	now := time.Now()
 	for _, k := range keys {
-		if len(l.recent(k, now)) >= loginMaxFails {
+		if k != "" && len(l.recent(k, now)) >= maxFails(k) {
 			return true
 		}
 	}
@@ -161,7 +169,9 @@ func (l *loginLimiter) fail(keys ...string) {
 		l.fails = map[string][]time.Time{} // bound memory under a flood
 	}
 	for _, k := range keys {
-		l.fails[k] = append(l.recent(k, now), now)
+		if k != "" {
+			l.fails[k] = append(l.recent(k, now), now)
+		}
 	}
 }
 
@@ -171,17 +181,21 @@ func (l *loginLimiter) clear(key string) {
 	delete(l.fails, key)
 }
 
-func clientIP(r *http.Request) string {
-	host := r.RemoteAddr
-	if i := strings.LastIndex(host, ":"); i > 0 {
-		host = host[:i]
+// ipKey is the rate-limit key for the caller's address, or "" for loopback.
+func ipKey(prefix string, r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
 	}
-	return host
+	if ip := net.ParseIP(host); ip == nil || ip.IsLoopback() {
+		return ""
+	}
+	return prefix + host
 }
 
 func (s *Server) passwordSignIn(w http.ResponseWriter, r *http.Request, req SessionRequest) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
-	keys := []string{"email:" + email, "ip:" + clientIP(r)}
+	keys := []string{"email:" + email, ipKey("ip:", r)}
 	if s.logins.blocked(keys...) {
 		writeErr(w, s.log, apierr.New(429, "too_many_attempts", "too many failed sign-ins; wait 15 minutes and try again"))
 		return
@@ -755,7 +769,7 @@ func (s *Server) readLink(w http.ResponseWriter, r *http.Request) (*LinkRequest,
 		writeErr(w, s.log, apierr.New(403, "csrf_check_failed", "requests need the %s header", CSRFHeader))
 		return nil, nil, false
 	}
-	if s.logins.blocked("ip:" + clientIP(r)) {
+	if s.logins.blocked(ipKey("link:", r)) {
 		writeErr(w, s.log, apierr.New(429, "too_many_attempts", "too many failed attempts; wait 15 minutes and try again"))
 		return nil, nil, false
 	}
@@ -771,7 +785,7 @@ func (s *Server) readLink(w http.ResponseWriter, r *http.Request) (*LinkRequest,
 		return nil, nil, false
 	}
 	if l == nil {
-		s.logins.fail("ip:" + clientIP(r))
+		s.logins.fail(ipKey("link:", r))
 		writeErr(w, s.log, apierr.New(404, "link_invalid", "this link is invalid, was already used, or has expired").
 			WithHint("ask an admin for a new one"))
 		return nil, nil, false
@@ -827,21 +841,47 @@ func (s *Server) acceptLink(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else {
+			// Someone with an account (say, removed from their last org)
+			// joins with it; anyone else gets a new one. Everything is
+			// checked before the link is used up.
 			email, err := checkEmail(req.Email)
 			if err != nil {
 				fail(err)
 				return
 			}
-			name, err := checkName("name", req.Name)
+			keys := []string{"email:" + strings.ToLower(email), ipKey("ip:", r)}
+			taken, err := s.st.EmailTaken(ctx, email)
 			if err != nil {
 				fail(err)
 				return
 			}
-			if err := checkPassword(req.Password); err != nil {
-				fail(err)
-				return
+			if taken {
+				if s.logins.blocked(keys...) {
+					fail(apierr.New(429, "too_many_attempts", "too many failed sign-ins; wait 15 minutes and try again"))
+					return
+				}
+				if u, err = s.st.Authenticate(ctx, email, req.Password); err != nil {
+					fail(err)
+					return
+				}
+				if u == nil {
+					s.logins.fail(keys...)
+					fail(apierr.New(401, "unauthenticated", "%s already has an account, and that's not its password", email).
+						WithField("password").WithHint("enter that account's password to join with it"))
+					return
+				}
+			} else {
+				name, err := checkName("name", req.Name)
+				if err != nil {
+					fail(err)
+					return
+				}
+				if err := checkPassword(req.Password); err != nil {
+					fail(err)
+					return
+				}
+				req.Email, req.Name = email, name
 			}
-			req.Email, req.Name = email, name
 		}
 	default:
 		fail(apierr.New(404, "link_invalid", "unknown link"))

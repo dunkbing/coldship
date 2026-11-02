@@ -295,7 +295,18 @@ func (s *Server) deploymentInOrg(ctx context.Context, p principal, id string) er
 	if err != nil {
 		return err
 	}
-	if d != nil && store.OrgOr(d.Org) != p.org {
+	if d == nil {
+		return nil
+	}
+	// A deployment belongs to its app's org, which changes when the app
+	// moves; once the app is gone, to the org it was made in.
+	org := store.OrgOr(d.Org)
+	if a, err := s.st.GetApp(ctx, d.App); err != nil {
+		return err
+	} else if a != nil {
+		org = a.Org
+	}
+	if org != p.org {
 		return apierr.NotFound("deployment", id)
 	}
 	return nil
