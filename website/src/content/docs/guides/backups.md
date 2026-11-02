@@ -9,9 +9,9 @@ Coldship [snapshots every database](/guides/databases/#snapshots) daily and befo
 
 ## Setting a bucket
 
-Any S3-compatible storage works: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, or your own MinIO or SeaweedFS. Create a bucket with encryption turned on, and keys that can list, read, write and delete objects in it.
+Any S3-compatible storage works: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, or your own MinIO, RustFS or SeaweedFS (on another server). Create a bucket with encryption turned on, and keys that can list, read, write and delete objects in it.
 
-In the dashboard, open **Backups** (under Deploy, or from Data & Storage), click **Set a bucket**, and fill in the endpoint, bucket, keys and, if the provider needs it, the region. Turn on **Path-style URLs** for MinIO, SeaweedFS and other self-hosted S3. Coldship writes, lists and deletes a test file before saving, so a typo fails right away instead of at 3 a.m.
+In the dashboard, open **Backups** (under Deploy, or from Data & Storage), click **Set a bucket**, and fill in the endpoint, bucket, keys and, if the provider needs it, the region. Turn on **Path-style URLs** for MinIO, RustFS, SeaweedFS and other self-hosted S3. Coldship writes, lists and deletes a test file before saving, so a typo fails right away instead of at 3 a.m.
 
 From the CLI (an admin token), with the secret key in the environment so it never lands in your shell history:
 

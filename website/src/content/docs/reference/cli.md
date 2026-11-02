@@ -123,6 +123,18 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 | `coldship db snapshots <app> [--database D]` | Snapshots, newest first |
 | `coldship db restore <app> <database> <snapshot> --reason "..."` | Plan and apply a restore. Stops with exit 3 if approval is needed. |
 
+## Data services
+
+| Command | Description |
+|---|---|
+| `coldship data create <postgres\|mysql\|redis\|s3\|rustfs> <name> [--version V]` | Create a data service and wait until it's ready |
+| `coldship data list` | Data services, and the databases apps own |
+| `coldship data show <name>` | Status, connected apps and what it gives them |
+| `coldship data connection <name>` | Connection details (admin, audited) |
+| `coldship data snapshot <name>` / `coldship data snapshots <name>` | Snapshot now / list snapshots (not object storage) |
+| `coldship data restore <name> <snapshot> --reason "..."` | Restore a snapshot (admin) |
+| `coldship data delete <name>` | Delete it and its data, after a snapshot (admin) |
+
 ## Backups
 
 | Command | Description |

@@ -26,6 +26,26 @@ On apply, Coldship starts each database and waits until it accepts connections, 
 
 Set `env:` on a database to use another variable name. Two databases of the same engine need different names; validation suggests one, e.g. `REPORTS_URL`.
 
+## Data services
+
+A database can also stand on its own, as a data service that several apps share. Create one in the dashboard (**Data & Storage → Add**) or the CLI, then connect apps with `--use`:
+
+```sh
+coldship data create postgres maindb      # also mysql, redis
+coldship data create s3 uploads           # object storage on SeaweedFS
+coldship data create rustfs media         # object storage on RustFS
+coldship deploy --name web --use maindb --use uploads
+```
+
+Postgres, MySQL and Redis give the app `DATABASE_URL` or `REDIS_URL`. Object storage comes with a bucket named after the service and gives the variables S3 libraries read on their own: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `AWS_REGION`, plus `S3_ENDPOINT`, `S3_BUCKET` and friends. Use path-style addressing (`S3_FORCE_PATH_STYLE=true` is set for you).
+
+| Storage | Engine | Notes |
+|---|---|---|
+| SeaweedFS | `s3` | The default. Small and fast for many small files. |
+| RustFS | `rustfs` | A newer S3-compatible server, written in Rust. |
+
+Snapshots of object storage aren't supported yet; copy buckets with an S3 tool such as rclone. MinIO isn't offered: its community edition no longer publishes images and is no longer maintained.
+
 ## Credentials stay on the server
 
 Coldship generates a random password for each database when it's created and stores it on the server. The password only ever goes to the database container and into the app's env. It isn't in the spec, plans, API responses, the CLI, MCP results, deploy logs or the dashboard. Credentials stay the same across deploys.
