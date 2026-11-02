@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
-import { AlertCircle, GitBranch } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { AlertCircle, Check, Copy, GitBranch } from 'lucide-react'
 import { ApiError, type AppView, type Change, type Deployment, type Plan, type Spec, type Stage } from '@/api'
 import { fmtTime, timeAgo, timeUntil } from '@/hooks'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Soft status colors (defined in index.css), for badges and pills.
@@ -282,4 +283,28 @@ export function PlanMeta({ plan }: { plan: Plan }) {
 
 export function GitIcon() {
   return <GitBranch className="size-3.5" aria-hidden />
+}
+
+// CopyBlock shows text with a copy button.
+export function CopyBlock({ text, label }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false)
+  return (
+    <div className="relative min-w-0">
+      <pre className="overflow-x-auto rounded-lg border bg-muted p-3 pr-24 font-mono text-[0.8125rem] wrap-anywhere whitespace-pre-wrap">{text}</pre>
+      <Button
+        size="sm"
+        variant="outline"
+        className="absolute top-2 right-2"
+        aria-label={label ? `Copy ${label}` : 'Copy'}
+        onClick={() => {
+          navigator.clipboard?.writeText(text)
+          setDone(true)
+          setTimeout(() => setDone(false), 1500)
+        }}
+      >
+        {done ? <Check /> : <Copy />}
+        {done ? 'Copied' : 'Copy'}
+      </Button>
+    </div>
+  )
 }

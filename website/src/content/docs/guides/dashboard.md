@@ -9,9 +9,9 @@ It's designed for the human side of the loop: seeing what agents did, approving 
 
 ## Signing in
 
-Sign in with an API token. What you can do depends on its [scope](/concepts/guardrails/#scoped-tokens): `read` tokens can only view, `deploy` tokens can also roll back, and `admin` tokens can approve plans.
+People sign in with their email and password; see [Teams and organizations](/guides/organizations/) for the first account and invites. What you can do depends on your role: viewers only look, deployers change apps, and admins also approve plans and manage the team.
 
-The token is exchanged for a 12-hour [session cookie](/concepts/guardrails/#dashboard-sessions) and isn't stored in the browser. When the session expires you're returned to the sign-in screen.
+You can also sign in with an API token (the **API token** tab). It's exchanged for a 12-hour [session cookie](/concepts/guardrails/#dashboard-sessions) and isn't stored in the browser. Account sessions last 7 days.
 
 ## Apps
 

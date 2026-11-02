@@ -20,13 +20,13 @@ import { Steps, Aside } from '@astrojs/starlight/components'
    curl -fsSL https://raw.githubusercontent.com/dunkbing/coldship/main/install.sh | sh
    ```
 
-   It asks for sudo, installs Docker if it's missing, runs Coldship as a service that starts on boot, and logs your CLI in, so `coldship` commands work right away. At the end it prints your **admin token** once: keep it in a password manager for the dashboard and other machines.
+   It asks for sudo, installs Docker if it's missing, runs Coldship as a service that starts on boot, and logs your CLI in, so `coldship` commands work right away. At the end it prints a link to create your dashboard account, and your **admin token** once: keep that in a password manager for other machines.
 
    Check on it any time with `coldship status`.
 
    On macOS, or with `COLDSHIP_CLI_ONLY=1`, it installs only the CLI. Connect that to a server with `coldship login https://your-server`.
 
-2. **Open the dashboard** (optional). It listens on `127.0.0.1:7070` on the server. From your laptop, open a tunnel with `ssh -L 7070:127.0.0.1:7070 your-server`, browse to [http://localhost:7070](http://localhost:7070), and sign in with the admin token.
+2. **Open the dashboard** (optional). It listens on `127.0.0.1:7070` on the server. From your laptop, open a tunnel with `ssh -L 7070:127.0.0.1:7070 your-server`, and open the account link the installer printed (or run `coldship invite` on the server for a new one). Then [invite your team](/guides/organizations/).
 
 3. **Deploy an app.** No config file needed:
 
@@ -52,7 +52,7 @@ import { Steps, Aside } from '@astrojs/starlight/components'
 
 </Steps>
 
-![The dashboard sign-in screen asking for an API token](../../../assets/screenshots/login.png)
+![The dashboard sign-in screen, with email and API token tabs](../../../assets/screenshots/login.png)
 
 ## Next steps
 

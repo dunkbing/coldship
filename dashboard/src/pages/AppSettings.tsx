@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { GitBranch, Package, Plus, Trash2, Unplug, X } from 'lucide-react'
+import { ArrowRightLeft, GitBranch, Package, Plus, Trash2, Unplug, X } from 'lucide-react'
 import { api, type AppView, type Patch, type Plan } from '@/api'
 import { useLoad } from '@/hooks'
 import { useSession } from '@/App'
@@ -409,6 +409,8 @@ export function SettingsTab({ app, onChange }: { app: AppView; onChange: () => v
         </div>
       </Section>
 
+      <MoveSection app={app} />
+
       <Card className="border-destructive/40">
         <CardHeader>
           <CardTitle>
@@ -456,4 +458,70 @@ function DeletedRedirect({ name, onGone }: { name: string; onGone: () => void })
     1500,
   )
   return null
+}
+
+// MoveSection moves the app to another organization the user is an admin of.
+function MoveSection({ app }: { app: AppView }) {
+  const me = useSession()
+  const nav = useNavigate()
+  const targets = (me.orgs ?? []).filter((o) => o.id !== me.org?.id && o.role === 'admin')
+  const [to, setTo] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<Error>()
+  if (!me.user || me.scope !== 'admin' || app.preview_of) return null
+  const uses = app.spec?.uses ?? []
+
+  async function move() {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await api.moveApp(app.name, to)
+      await api.switchOrg(to)
+      nav(`/apps/${encodeURIComponent(app.name)}`)
+      window.location.reload()
+    } catch (e) {
+      setError(e as Error)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Section
+      title="Organization"
+      description={
+        <>
+          {app.name} belongs to <strong>{me.org?.name}</strong>. Moving it takes its previews and own databases along; the containers keep running.
+        </>
+      }
+    >
+      {error && <ErrorBox error={error} />}
+      {targets.length === 0 ? (
+        <p className="text-sm text-muted-foreground">You aren't an admin of any other organization.</p>
+      ) : uses.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          It uses data services from this organization ({uses.map((u) => u.split('=')[0]).join(', ')}): disconnect them above before moving it.
+        </p>
+      ) : (
+        <Row>
+          <Field id="moveto" label="Move to" grow>
+            <Select value={to} onValueChange={setTo}>
+              <SelectTrigger id="moveto" className="w-full">
+                <SelectValue placeholder="Choose an organization" />
+              </SelectTrigger>
+              <SelectContent>
+                {targets.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Button variant="outline" disabled={busy || !to} onClick={move}>
+            <ArrowRightLeft /> Move app
+          </Button>
+        </Row>
+      )}
+    </Section>
+  )
 }

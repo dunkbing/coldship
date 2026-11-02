@@ -12,9 +12,9 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | Method | Path | Scope | Description |
 |---|---|---|---|
 | `GET` | `/healthz` | none | Liveness: returns `ok` |
-| `POST` | `/v1/sessions` | none | Body `{token}`, with the `X-Coldship-Request: 1` header. Sets the `coldship_session` cookie and returns `{name, scope}`. |
+| `POST` | `/v1/sessions` | none | Body `{token}` or `{email, password}`, with the `X-Coldship-Request: 1` header. Sets the `coldship_session` cookie and returns the same as `whoami`. Five wrong passwords in 15 minutes block an email or address for the rest of the window. |
 | `DELETE` | `/v1/sessions` | session | Sign out: deletes the session and clears the cookie |
-| `GET` | `/v1/whoami` | read | `{name, scope, apps}` of the calling token; `apps` is absent for tokens that may use every app |
+| `GET` | `/v1/whoami` | read | `{name, scope, apps, org, user, orgs, server_admin}`: the caller, the organization it acts in and, for a signed-in person, their account and organizations |
 | `GET` | `/v1/apps` | read | List apps |
 | `GET` | `/v1/apps/{name}` | read | App with `runtime` status and `latest_deployment` |
 | `GET` | `/v1/apps/{name}/deployments?limit=20` | read | Deployments, newest first (max 200) |
@@ -47,6 +47,24 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/tokens` | admin | Body `{name, scope, apps?}`. `apps` limits the token to those apps (names or `*` patterns) and their previews. Returns `{name, scope, apps, token}`. |
 | `GET` | `/v1/tokens` | admin | Token names, scopes and creation times; never their values |
 | `DELETE` | `/v1/tokens/{name}?reason=...` | admin | Revoke a token and end its dashboard sessions |
+| `GET` | `/v1/org` | read | The caller's organization, with counts of apps, data services, members and tokens |
+| `PATCH` | `/v1/org` | admin | Rename: `{name}` |
+| `DELETE` | `/v1/org` | admin (person) | Delete an organization with no apps or data services |
+| `GET` | `/v1/orgs` | read | Your organizations, with your role in each |
+| `POST` | `/v1/orgs` | default-org admin (person) | Create an organization: `{name}`. You become its admin and switch to it |
+| `POST` | `/v1/session/org` | person | Switch your session to another organization: `{org}` |
+| `GET` | `/v1/org/members` | read | Members and their roles |
+| `PATCH` | `/v1/org/members/{id}` | admin | Change a role: `{role}` |
+| `DELETE` | `/v1/org/members/{id}` | admin, or yourself | Remove a member, or leave |
+| `POST` | `/v1/org/members/{id}/reset` | default-org admin | A single-use password reset link (24 hours) |
+| `GET` / `POST` | `/v1/org/invites` | admin | List pending invites; create one with `{role}`, which returns its `url` once |
+| `DELETE` | `/v1/org/invites/{id}` | admin | Revoke an invite |
+| `POST` | `/v1/links/lookup`, `/v1/links/accept` | none | Read and use an invite or reset link: `{secret, email?, name?, password?}` |
+| `POST` | `/v1/account` | admin token | Create a person's account (an admin) from a token session |
+| `PATCH` | `/v1/account`, `POST` `/v1/account/password` | person | Change your name; change your password (`{current, new}`) |
+| `POST` | `/v1/apps/{name}/move` | admin of both | Move an app to another organization: `{org}` |
+
+Everything acts in the caller's organization: apps, data services, plans, deployments, tokens and audit entries of other organizations are reported as not found. Server-wide endpoints (`/v1/system/*` other than `GET /v1/system`) need an admin of the default organization.
 
 Request bodies reject unknown fields and trailing data, are limited to 1 MiB, and must arrive within 30 seconds.
 

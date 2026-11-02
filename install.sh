@@ -248,12 +248,18 @@ if [ "$fresh" = yes ] && as_root test -f "$token_file"; then
     "$dir/coldship" login "$url" --token "$token" >/dev/null
   fi
   ok "logged in: coldship commands work right away"
+  # A link to create the first dashboard account (an admin).
+  invite=$(COLDSHIP_URL="$url" COLDSHIP_TOKEN="$token" "$dir/coldship" invite --role admin --json 2>/dev/null |
+    sed -n 's/.*"url":"\([^"]*\)".*/\1/p' || true)
 fi
 
 printf '\n%s%sColdship is ready.%s\n\n' "$bold" "$green" "$reset"
 printf '  Check on it:       %scoldship status%s\n' "$bold" "$reset"
 printf '  Deploy something:  %scoldship deploy --name hello --image nginx:1.27-alpine --port 80 --host-port 8090%s\n' "$bold" "$reset"
 printf '  Dashboard:         %s%s%s %s(on your laptop: ssh -L 7070:127.0.0.1:7070 <this server>)%s\n' "$bold" "$url" "$reset" "$dim" "$reset"
+if [ -n "${invite:-}" ]; then
+  printf '  Your account:      %s%s%s %s(create it within 7 days; the link works once)%s\n' "$bold" "$invite" "$reset" "$dim" "$reset"
+fi
 if [ -n "$token" ]; then
   printf '\n  Admin token (shown once; for the dashboard and other machines, keep it in a password manager):\n\n    %s%s%s\n' "$bold" "$token" "$reset"
 else

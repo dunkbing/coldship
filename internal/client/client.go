@@ -255,6 +255,13 @@ func (c *Client) CreateToken(ctx context.Context, name, scope string, apps ...st
 	return &out, c.do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: name, Scope: scope, Apps: apps}, &out)
 }
 
+// CreateInvite makes a single-use link that adds someone to the token's
+// organization with role.
+func (c *Client) CreateInvite(ctx context.Context, role string) (*api.LinkView, error) {
+	var out api.LinkView
+	return &out, c.do(ctx, "POST", "/v1/org/invites", api.RoleRequest{Role: role}, &out)
+}
+
 // --- data services ---
 
 func (c *Client) ListData(ctx context.Context) ([]engine.DataView, error) {

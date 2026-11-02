@@ -38,6 +38,7 @@ export interface Spec {
 
 export interface App {
   name: string
+  org: string
   spec?: Spec
   current_deployment?: string
   preview_of?: string
@@ -299,7 +300,6 @@ export interface AuditEntry {
 
 // Patch changes only the fields it names; the server keeps the rest of the
 // app, secrets included.
-// Patch changes only the fields it names; the server keeps the rest.
 export interface Patch {
   name: string
   image?: string
@@ -325,11 +325,71 @@ export interface ApplyResult {
   message: string
 }
 
+export interface User {
+  id: string
+  email: string
+  name: string
+  created_at: string
+}
+
+export interface Org {
+  id: string
+  name: string
+  created_at: string
+  // The caller's role in it.
+  role?: Scope
+}
+
+export interface OrgView extends Org {
+  counts: { apps: number; data: number; members: number; tokens: number }
+}
+
+export interface Member extends User {
+  role: Scope
+  joined_at: string
+}
+
+export interface Invite {
+  id: string
+  kind: 'invite' | 'reset'
+  role?: Scope
+  created_by: string
+  created_at: string
+  expires_at: string
+  // Only when just created: the link to share.
+  url?: string
+}
+
+export interface LinkInfo {
+  kind: 'invite' | 'reset'
+  org?: string
+  org_name?: string
+  role?: Scope
+  created_by?: string
+  email?: string
+  expires_at: string
+}
+
+export interface Token {
+  name: string
+  scope: Scope
+  apps?: string[]
+  org: string
+  created_at: string
+}
+
 export interface WhoAmI {
+  // Token name, or the signed-in person's email.
   name: string
   scope: Scope
   // The apps this token is limited to; absent means every app.
   apps?: string[]
+  org?: Org
+  // Set when a person (not a token) is signed in.
+  user?: User
+  orgs?: Org[]
+  server_admin: boolean
+  can_create_orgs: boolean
 }
 
 export interface SystemStatus {
@@ -383,7 +443,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   })
   const text = await res.text()
   const data = text ? JSON.parse(text) : null
-  if (res.status === 401 && path !== '/v1/sessions') window.dispatchEvent(new Event('coldship:signed-out'))
+  if (res.status === 401 && path !== '/v1/sessions' && !path.startsWith('/v1/links/')) window.dispatchEvent(new Event('coldship:signed-out'))
   if (!res.ok) throw new ApiError(res.status, data?.error ?? {})
   return data as T
 }
@@ -392,6 +452,30 @@ const enc = encodeURIComponent
 
 export const api = {
   login: (token: string) => req<WhoAmI>('POST', '/v1/sessions', { token }),
+  signIn: (email: string, password: string) => req<WhoAmI>('POST', '/v1/sessions', { email, password }),
+  authInfo: () => req<{ has_users: boolean }>('GET', '/v1/auth'),
+  createAccount: (email: string, name: string, password: string) => req<User>('POST', '/v1/account', { email, name, password }),
+  updateAccount: (name: string) => req<User>('PATCH', '/v1/account', { name }),
+  changePassword: (current: string, next: string) => req<{ changed: boolean }>('POST', '/v1/account/password', { current, new: next }),
+  createOrg: (name: string) => req<Org>('POST', '/v1/orgs', { name }),
+  switchOrg: (org: string) => req<WhoAmI>('POST', '/v1/session/org', { org }),
+  org: () => req<OrgView>('GET', '/v1/org'),
+  renameOrg: (name: string) => req<OrgView>('PATCH', '/v1/org', { name }),
+  deleteOrg: () => req<{ deleted: string; switched_to: string }>('DELETE', '/v1/org'),
+  members: () => req<Member[]>('GET', '/v1/org/members'),
+  setRole: (id: string, role: Scope) => req<Member>('PATCH', `/v1/org/members/${enc(id)}`, { role }),
+  removeMember: (id: string) => req<{ removed: string }>('DELETE', `/v1/org/members/${enc(id)}`),
+  resetLink: (id: string) => req<Invite>('POST', `/v1/org/members/${enc(id)}/reset`),
+  invites: () => req<Invite[]>('GET', '/v1/org/invites'),
+  invite: (role: Scope) => req<Invite>('POST', '/v1/org/invites', { role }),
+  revokeInvite: (id: string) => req<{ revoked: string }>('DELETE', `/v1/org/invites/${enc(id)}`),
+  lookupLink: (secret: string) => req<LinkInfo>('POST', '/v1/links/lookup', { secret }),
+  acceptLink: (secret: string, body: { email?: string; name?: string; password?: string }) =>
+    req<WhoAmI>('POST', '/v1/links/accept', { secret, ...body }),
+  moveApp: (name: string, org: string) => req<App>('POST', `/v1/apps/${enc(name)}/move`, { org }),
+  tokens: () => req<Token[]>('GET', '/v1/tokens'),
+  revokeToken: (name: string, reason = 'revoked from the dashboard') =>
+    req<{ revoked: boolean }>('DELETE', `/v1/tokens/${enc(name)}?reason=${enc(reason)}`),
   logout: () => req<{ signed_out: boolean }>('DELETE', '/v1/sessions'),
   whoami: () => req<WhoAmI>('GET', '/v1/whoami'),
   apps: () => req<App[]>('GET', '/v1/apps'),

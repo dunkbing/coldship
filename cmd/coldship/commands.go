@@ -653,3 +653,31 @@ func serverStatus(cmd *cobra.Command) error {
 		}
 	})
 }
+
+func inviteCmd() *cobra.Command {
+	var role string
+	cmd := &cobra.Command{
+		Use:   "invite",
+		Short: "Make a link that adds a person to the organization (admin)",
+		Long: `Make a single-use link that lets a person create an account (or join with
+the one they have) in this token's organization. It works for 7 days.
+
+Right after installing, run it to create your own account for the
+dashboard:
+
+  coldship invite --role admin`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			l, err := newClient().CreateInvite(cmd.Context(), role)
+			if err != nil {
+				return err
+			}
+			return emit(l, func() {
+				fmt.Printf("Open this link in a browser to join as %s (works once, for 7 days):\n\n  %s\n\n", l.Role, l.URL)
+				fmt.Println("If you reach the dashboard at another address, keep everything from /invite on.")
+			})
+		},
+	}
+	cmd.Flags().StringVar(&role, "role", string(store.ScopeAdmin), "admin | deploy | read")
+	return cmd
+}

@@ -30,7 +30,7 @@ export default defineConfig({
       },
       {
         label: 'Guides',
-        items: ['guides/ai-agents', 'guides/build-from-git', 'guides/webhooks', 'guides/domains', 'guides/previews', 'guides/databases', 'guides/dashboard', 'guides/production', 'guides/secrets', 'guides/upgrades'],
+        items: ['guides/ai-agents', 'guides/build-from-git', 'guides/webhooks', 'guides/domains', 'guides/previews', 'guides/databases', 'guides/dashboard', 'guides/organizations', 'guides/production', 'guides/secrets', 'guides/upgrades'],
       },
       {
         label: 'Reference',

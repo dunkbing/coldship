@@ -60,7 +60,8 @@ export function timeUntil(iso: string, now = Date.now()): string {
   if (s <= 0) return 'expired'
   if (s < 60) return `in ${s}s`
   if (s < 3600) return `in ${Math.floor(s / 60)}m`
-  return `in ${Math.floor(s / 3600)}h`
+  if (s < 2 * 86400) return `in ${Math.floor(s / 3600)}h`
+  return `in ${Math.floor(s / 86400)}d`
 }
 
 export function fmtTime(iso: string | undefined): string {

@@ -1,11 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Bot, Check, Copy, ExternalLink, GitBranch, Lock, Search, SlidersHorizontal, Terminal } from 'lucide-react'
+import { Bot, ExternalLink, GitBranch, Lock, Search, SlidersHorizontal, Terminal } from 'lucide-react'
 import { siGithub } from 'simple-icons'
 import { api, type GitHubRepo } from '@/api'
 import { useLoad } from '@/hooks'
 import { useSession } from '@/App'
-import { Empty, ErrorBox, PageHeader, Time, ToneBadge } from '@/components/common'
+import { CopyBlock, Empty, ErrorBox, PageHeader, Time, ToneBadge } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -25,29 +25,6 @@ function GitHubMark({ className = 'size-4' }: { className?: string }) {
 }
 
 // CopyBlock shows text to paste, with a copy button.
-function CopyBlock({ text, label }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false)
-  return (
-    <div className="relative">
-      <pre className="overflow-x-auto rounded-lg border bg-muted p-3 pr-24 font-mono text-[0.8125rem] whitespace-pre-wrap break-words">{text}</pre>
-      <Button
-        size="sm"
-        variant="outline"
-        className="absolute top-2 right-2"
-        aria-label={label ? `Copy ${label}` : 'Copy'}
-        onClick={() => {
-          navigator.clipboard?.writeText(text)
-          setDone(true)
-          setTimeout(() => setDone(false), 1500)
-        }}
-      >
-        {done ? <Check /> : <Copy />}
-        {done ? 'Copied' : 'Copy'}
-      </Button>
-    </div>
-  )
-}
-
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
     <li className="flex gap-3">
