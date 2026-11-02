@@ -175,7 +175,7 @@ func (m *Manager) view(a store.AgentConfig) AgentView {
 	sort.Strings(v.Keys)
 	m.mu.Lock()
 	for _, s := range m.sessions {
-		if s.Org == a.Org && s.Agent == a.Name && s.live() {
+		if s.Org == a.Org && s.Agent == a.Name && s.isLive() {
 			v.Running++
 		}
 	}
@@ -402,7 +402,14 @@ type Session struct {
 	cancel     context.CancelFunc
 }
 
+// live reports whether the session runs; hold s.mu (or use isLive).
 func (s *Session) live() bool { return s.Status != StatusEnded && s.Status != StatusFailed }
+
+func (s *Session) isLive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.live()
+}
 
 func newID() string {
 	b := make([]byte, 8)
@@ -438,7 +445,7 @@ func (m *Manager) StartSession(ctx context.Context, r StartRequest) (*SessionVie
 	m.mu.Lock()
 	running := 0
 	for _, s := range m.sessions {
-		if s.live() {
+		if s.isLive() {
 			running++
 		}
 	}
@@ -512,6 +519,11 @@ func (m *Manager) Sessions(org string) []*SessionView {
 func (s *Session) View(items bool) *SessionView {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.view(items)
+}
+
+// view is View with s.mu held.
+func (s *Session) view(items bool) *SessionView {
 	v := &SessionView{ID: s.ID, Agent: s.Agent, Kind: s.Kind, Scope: string(s.Scope), StartedBy: s.StartedBy, CreatedAt: s.CreatedAt,
 		Status: s.Status, Error: s.Error, AgentInfo: s.agentInfo}
 	if items {
@@ -528,8 +540,9 @@ func (s *Session) View(items bool) *SessionView {
 // returned func to stop.
 func (s *Session) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, 512)
-	ch <- Event{Type: "snapshot", View: s.View(true)}
+	// Snapshot and register together, so no change falls in between.
 	s.mu.Lock()
+	ch <- Event{Type: "snapshot", View: s.view(true)}
 	s.subs[ch] = struct{}{}
 	s.mu.Unlock()
 	return ch, func() {

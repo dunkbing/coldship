@@ -26,13 +26,13 @@ Give the agent a **role**, deployer or viewer, and optionally limit it to some a
 
 **New session** starts the agent; the first start downloads it, which takes a minute. Then write to it. As it works you see its messages, its plan, and each tool call with input and output.
 
-When the agent wants to run a tool, a card asks you to **Allow** or **Reject** it. Anyone in the organization who can deploy may answer. **Stop** interrupts the current turn; **End session** stops the agent.
+When the agent wants to run a tool, a card asks you to **Allow** or **Reject** it. Anyone in the organization who can deploy may answer. Choices like "Always allow" are remembered by the agent in its home volume, so they carry over to later sessions, whoever starts them. **Stop** interrupts the current turn; **End session** stops the agent.
 
-Sessions end after 30 minutes without a message, and at most 4 run at once on a server. Transcripts are kept in memory, so they're gone after a restart.
+Sessions end after 30 minutes without a message, and at most 4 run at once on the server (across all organizations). Transcripts are kept in memory, so they're gone after a restart.
 
 ## How it's contained
 
-- Each session runs the agent in its own container (`node:22-bookworm-slim`, 2 GB memory limit), on Docker's default network: it reaches the AI provider, but not your apps' network or their databases.
+- Each session runs the agent in its own container (`node:22-bookworm-slim`, 2 GB memory limit), on Docker's default network: it reaches the AI provider, but not Coldship's network, where apps and databases talk to each other. Ports published on the server are reachable from it, as from anywhere else.
 - It reaches Coldship only through a Unix socket in a directory of its own, the only host path mounted in. Nothing else of the server's file system is visible, and Coldship offers it no file or terminal access.
 - It acts with a token made for the session, with the agent's role and app limits, which is revoked when the session ends (and any left by a crash are removed at the next start). Everything it does is in the audit log under that token's name.
 - Its home directory (`/root`, with npm's cache) is a volume, `coldship-agent-<org>-<agent>`, so later sessions start faster. `coldship uninstall` removes it (unless `--keep-data`).
