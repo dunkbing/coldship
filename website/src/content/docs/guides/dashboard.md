@@ -42,6 +42,10 @@ It only offers what your role and token can see: a token limited to some apps fi
 
 ![The command palette, searching for web](../../../assets/screenshots/palette.png)
 
+## Notifications in the corner
+
+A short message confirms what an action did: a job started, a snapshot saved, a member's role changed. Close a deploy's dialog, or leave the page, before the deploy ends and it carries on in the corner: **Deploying web…**, then **web is live** or **web failed to deploy**, with a link to the log. Errors you can fix on the page stay on the page, with their hint.
+
 ## Apps
 
 The apps page lists every app with its live health, stage, image and latest deployment, and refreshes every few seconds. The sidebar badge counts plans waiting for your approval.

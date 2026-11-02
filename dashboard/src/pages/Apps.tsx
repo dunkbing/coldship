@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Boxes, Plus } from 'lucide-react'
+import { useSession } from '../App'
+import { AskAgent } from '@/components/AskAgent'
 import { api, type AppView } from '../api'
 import { timeUntil, useLoad } from '../hooks'
 import { cn } from '@/lib/utils'
@@ -56,6 +58,7 @@ function AppName({ app }: { app: AppView }) {
 
 export default function Apps() {
   const { data: all, error, loading } = useLoad(loadApps, [], 5000)
+  const canChange = useSession().scope !== 'read'
   const data = all?.filter((a) => !a.preview_of)
   const previews = all?.filter((a) => a.preview_of) ?? []
 
@@ -72,11 +75,13 @@ export default function Apps() {
         title="Apps"
         description="Everything Coldship runs on this node. This view is live."
         actions={
-          <Button asChild>
-            <Link to="/apps/new">
-              <Plus /> New app
-            </Link>
-          </Button>
+          canChange && (
+            <Button asChild>
+              <Link to="/apps/new">
+                <Plus /> New app
+              </Link>
+            </Button>
+          )
         }
       />
 
@@ -100,11 +105,29 @@ export default function Apps() {
         </div>
       )}
       {data?.length === 0 && previews.length === 0 && (
-        <Empty title="No apps yet">
-          <Link className="text-primary hover:underline" to="/apps/new">
-            Create one here
-          </Link>
-          , run <code className="font-mono">coldship deploy</code> inside a Git repository, or ask your agent to.
+        <Empty
+          title="No apps yet"
+          icon={<Boxes />}
+          action={
+            canChange && (
+              <>
+                <Button asChild>
+                  <Link to="/apps/new">
+                    <Plus /> New app
+                  </Link>
+                </Button>
+                <AskAgent prompt="Deploy an app for me. Ask me which repository or image to use." label="Ask an agent to deploy" size="default" />
+              </>
+            )
+          }
+        >
+          {canChange ? (
+            <>
+              Deploy from a Git repository or an image, or run <code className="font-mono">coldship deploy</code> inside a repository.
+            </>
+          ) : (
+            'Apps show up here once someone deploys one.'
+          )}
         </Empty>
       )}
 

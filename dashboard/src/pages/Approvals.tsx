@@ -7,6 +7,7 @@ import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CardsSkeleton, ChangeList, Empty, ErrorBox, Mono, PageHeader, PlanMeta, ToneBadge } from '@/components/common'
 import { Button } from '@/components/ui/button'
+import { notify } from '@/components/toasts'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 
 export default function Approvals() {
@@ -61,6 +62,7 @@ function PlanCard({ plan, onChange }: { plan: Plan; onChange: () => void }) {
     setError(undefined)
     try {
       await api.approve(plan.id)
+      notify(`Approved: ${plan.app}`, { description: 'Whoever made the plan can apply it now.' })
       onChange()
     } catch (e) {
       setError(e as Error)

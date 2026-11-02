@@ -1,8 +1,9 @@
 import { LiveLog } from '../components/LiveLog'
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, GitBranch, Info, Loader2 } from 'lucide-react'
-import { api, type Patch, type Plan } from '../api'
+import { api, type ApplyResult, type Patch, type Plan } from '../api'
+import { trackDeploy } from '@/components/toasts'
 import { ErrorBox, PageHeader } from '@/components/common'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -85,6 +86,14 @@ export default function NewApp() {
   const [error, setError] = useState<Error>()
   const [waiting, setWaiting] = useState<Plan>()
   const [launched, setLaunched] = useState<{ app: string; deployment?: string; status?: string; error?: Error }>()
+  // Leaving before the deploy ends hands it to a toast.
+  const pending = useRef<{ app: string; applying: Promise<ApplyResult> }>(undefined)
+  useEffect(
+    () => () => {
+      if (pending.current) trackDeploy(pending.current.app, pending.current.applying)
+    },
+    [],
+  )
 
   const appName = nameTouched ? name : nameFrom(kind, source)
 
@@ -122,6 +131,12 @@ export default function NewApp() {
       // Apply runs until the deploy finishes; follow its log meanwhile.
       setLaunched({ app: plan.app })
       const applying = api.apply(plan.id, 'created from the dashboard')
+      pending.current = { app: plan.app, applying }
+      applying
+        .catch(() => undefined)
+        .finally(() => {
+          if (pending.current?.applying === applying) pending.current = undefined
+        })
       applying.catch((err) => setLaunched((l) => (l ? { ...l, error: err as Error } : l)))
       for (let i = 0; i < 100; i++) {
         const p = await api.plan(plan.id)
@@ -225,7 +240,7 @@ export default function NewApp() {
                     setName(e.target.value)
                   }}
                   placeholder="web"
-                  pattern="[a-z][a-z0-9-]{0,39}"
+                  pattern="[a-z][a-z0-9\-]{0,39}"
                   title="lowercase letters, digits and dashes, starting with a letter"
                   required
                 />

@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { notify } from '@/components/toasts'
 import { SessionStatusDot, alertLabels } from './Agents'
 
 // useLiveSession follows a session over server-sent events: a snapshot,
@@ -247,6 +248,7 @@ export default function AgentSession() {
               onClick={() =>
                 act(async () => {
                   await api.forgetSession(id)
+                  notify('Transcript deleted')
                   nav('/agents')
                 }).finally(() => setDeleting(false))
               }

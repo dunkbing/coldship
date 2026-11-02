@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { notify } from '@/components/toasts'
 import { RoleSelect, roleLabel, roles } from './Team'
 
 export default function Tokens() {
@@ -100,7 +101,7 @@ export default function Tokens() {
                 setRevoking(undefined)
                 setError(undefined)
                 api.revokeToken(t.name).then(
-                  () => (t.name === me.name && !me.user ? window.location.assign('/') : tokens.reload()),
+                  () => (t.name === me.name && !me.user ? window.location.assign('/') : (notify(`Revoked ${t.name}`), tokens.reload())),
                   setError,
                 )
               }}

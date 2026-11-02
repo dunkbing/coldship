@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { notify } from '@/components/toasts'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 export const roles: { value: Scope; label: string; description: string }[] = [
@@ -60,10 +61,11 @@ export default function Team() {
   const [link, setLink] = useState<{ title: string; text: string; url: string }>()
   const [removing, setRemoving] = useState<Member>()
 
-  async function act(fn: () => Promise<unknown>, after?: () => void) {
+  async function act(fn: () => Promise<unknown>, after?: () => void, ok?: string) {
     setError(undefined)
     try {
       await fn()
+      if (ok) notify(ok)
       after?.()
     } catch (e) {
       setError(e as Error)
@@ -118,7 +120,7 @@ export default function Team() {
                     </TableCell>
                     <TableCell>
                       {admin ? (
-                        <RoleSelect value={m.role} onChange={(r) => act(() => api.setRole(m.id, r), members.reload)} />
+                        <RoleSelect value={m.role} onChange={(r) => act(() => api.setRole(m.id, r), members.reload, `${m.name || m.email} is now ${roleLabel(r).toLowerCase()}`)} />
                       ) : (
                         <ToneBadge t={m.role === 'admin' ? 'info' : 'muted'}>{roleLabel(m.role)}</ToneBadge>
                       )}
@@ -213,6 +215,7 @@ export default function Team() {
                 act(
                   () => api.removeMember(m.id),
                   () => (m.id === me.user?.id ? window.location.assign('/') : members.reload()),
+                  m.id === me.user?.id ? undefined : `Removed ${m.name || m.email}`,
                 )
               }}
             >
@@ -289,7 +292,7 @@ function Invites({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => api.revokeInvite(i.id).then(reload, onError)}
+                    onClick={() => api.revokeInvite(i.id).then(() => (notify('Invite revoked', { description: 'The link no longer works.' }), reload()), onError)}
                     aria-label="Revoke invite"
                   >
                     <X /> Revoke

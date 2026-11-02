@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { notify } from '@/components/toasts'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 const presets: { label: string; cron: string }[] = [
@@ -61,11 +62,12 @@ export function JobsTab({ app }: { app: AppView }) {
   const [open, setOpen] = useState<string>()
   const isStatic = app.latest_deployment?.static
 
-  async function act(key: string, f: () => Promise<unknown>) {
+  async function act(key: string, f: () => Promise<unknown>, ok?: string) {
     setBusy(key)
     setError(undefined)
     try {
       await f()
+      if (ok) notify(ok)
       jobs.reload()
       runs.reload()
     } catch (e) {
@@ -87,15 +89,18 @@ export function JobsTab({ app }: { app: AppView }) {
       )}
       {error && <ErrorBox error={error} />}
       {list.length === 0 ? (
-        <Empty title="No scheduled jobs" icon={<CalendarClock />}>
-          Run a command on a schedule, like a cleanup every night, in a one-off container from this app's image with its env, databases and volumes.
-          {canRun && (
-            <div className="mt-4">
+        <Empty
+          title="No scheduled jobs"
+          icon={<CalendarClock />}
+          action={
+            canRun && (
               <Button onClick={() => setEditing({})}>
                 <Plus /> Add a job
               </Button>
-            </div>
-          )}
+            )
+          }
+        >
+          Run a command on a schedule, like a cleanup every night, in a one-off container from this app's image with its env, databases and volumes.
         </Empty>
       ) : (
         <>
@@ -142,7 +147,7 @@ export function JobsTab({ app }: { app: AppView }) {
                             variant="outline"
                             size="sm"
                             disabled={!!j.running || !!busy || isStatic}
-                            onClick={() => act('run:' + j.name, () => api.runJob(app.name, j.name))}
+                            onClick={() => act('run:' + j.name, () => api.runJob(app.name, j.name), `Started ${j.name}`)}
                           >
                             <Play /> {busy === 'run:' + j.name ? 'Starting…' : 'Run now'}
                           </Button>
@@ -156,7 +161,7 @@ export function JobsTab({ app }: { app: AppView }) {
                             disabled={!!busy}
                             onClick={() =>
                               confirm(`Remove the job ${j.name}?`) &&
-                              act('rm:' + j.name, () => patchJobs(app.name, { remove_jobs: [j.name] }, `remove job ${j.name}, from the dashboard`))
+                              act('rm:' + j.name, () => patchJobs(app.name, { remove_jobs: [j.name] }, `remove job ${j.name}, from the dashboard`), `Removed ${j.name}`)
                             }
                           >
                             <Trash2 />
@@ -229,6 +234,7 @@ export function JobsTab({ app }: { app: AppView }) {
           taken={list.map((j) => j.name)}
           onClose={() => setEditing(undefined)}
           onSaved={() => {
+            notify(editing.job ? `Saved ${editing.job.name}` : 'Job added', { description: 'The app was not redeployed.' })
             setEditing(undefined)
             jobs.reload()
           }}

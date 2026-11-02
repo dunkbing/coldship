@@ -1,17 +1,17 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { BellRing, MessageSquare, Send, Trash2, Webhook } from 'lucide-react'
+import { BellRing, MessageSquare, Plus, Send, Trash2, Webhook } from 'lucide-react'
 import { siDiscord, siTelegram } from 'simple-icons'
 import { api, type Channel, type ChannelKind, type EventKind } from '../api'
 import { useSession } from '../App'
 import { useLoad } from '../hooks'
 import { CopyBlock, Empty, ErrorBox, Mono, PageHeader, StatusDot, TableSkeleton, Time } from '@/components/common'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { notify } from '@/components/toasts'
 import { cn } from '@/lib/utils'
 
 const kinds: { kind: ChannelKind; label: string; how: ReactNode }[] = [
@@ -82,16 +82,14 @@ export default function Notifications() {
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState<Error>()
-  const [message, setMessage] = useState('')
   const [secret, setSecret] = useState('')
 
-  async function act(key: string, f: () => Promise<unknown>, done?: string) {
+  async function act(key: string, f: () => Promise<unknown>, ok?: string) {
     setBusy(key)
     setError(undefined)
-    setMessage('')
     try {
       await f()
-      if (done) setMessage(done)
+      if (ok) notify(ok)
       chans.reload()
     } catch (err) {
       setError(err as Error)
@@ -120,11 +118,6 @@ export default function Notifications() {
       />
 
       {error && <ErrorBox error={error} />}
-      {message && (
-        <Alert className="my-3 border-transparent bg-info-soft text-info" role="status">
-          <AlertDescription className="text-info">{message}</AlertDescription>
-        </Alert>
-      )}
       {secret && (
         <Card className="mb-4">
           <CardHeader>
@@ -152,7 +145,7 @@ export default function Notifications() {
               const c = await api.createChannel(r)
               setAdding(false)
               if (c.secret) setSecret(c.secret)
-              setMessage(`Added ${c.name}. Send a test message to check it.`)
+              notify(`Added ${c.name}`, { description: 'Send a test message to check it.' })
             })
           }
         />
@@ -162,7 +155,17 @@ export default function Notifications() {
       {chans.loading && !chans.data ? (
         <TableSkeleton cols={4} />
       ) : chans.data?.length === 0 && !adding ? (
-        <Empty title="No channels yet" icon={<BellRing />}>
+        <Empty
+          title="No channels yet"
+          icon={<BellRing />}
+          action={
+            admin && (
+              <Button onClick={() => setAdding(true)}>
+                <Plus /> Add channel
+              </Button>
+            )
+          }
+        >
           Add Slack, Discord, Telegram or a webhook, and Coldship tells you when a deploy fails or an app goes down.
           {!admin && ' An admin can add one.'}
         </Empty>

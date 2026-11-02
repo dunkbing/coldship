@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
-import { DatabaseBackup, Plus } from 'lucide-react'
+import { Database, DatabaseBackup, Plus } from 'lucide-react'
+import { useSession } from '../App'
 import { api, type DataView } from '../api'
 import { useLoad } from '../hooks'
 import { Empty, ErrorBox, Mono, PageHeader, StatusDot, TableSkeleton, Time } from '@/components/common'
@@ -47,6 +48,8 @@ const linkClass = 'text-primary hover:underline'
 
 export default function Data() {
   const { data, error, loading } = useLoad(api.data, [], 5000)
+  const me = useSession()
+  const canChange = me.scope !== 'read'
   const services = data?.filter((d) => !d.app) ?? []
   const owned = data?.filter((d) => d.app) ?? []
 
@@ -57,18 +60,22 @@ export default function Data() {
         description="Databases and object storage your apps connect to. Only reachable from Coldship's network."
         actions={
           <>
-          <Button asChild variant="outline">
-            <Link to="/backups">
-              <DatabaseBackup />
-              Backups
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link to="/data/new">
-              <Plus />
-              Add
-            </Link>
-          </Button>
+          {!me.apps?.length && (
+            <Button asChild variant="outline">
+              <Link to="/backups">
+                <DatabaseBackup />
+                Backups
+              </Link>
+            </Button>
+          )}
+          {canChange && (
+            <Button asChild>
+              <Link to="/data/new">
+                <Plus />
+                Add
+              </Link>
+            </Button>
+          )}
           </>
         }
       />
@@ -76,7 +83,7 @@ export default function Data() {
       {error && <ErrorBox error={error} />}
       {loading && !data && <TableSkeleton cols={5} />}
 
-      {data && services.length === 0 && (
+      {data && services.length === 0 && canChange && (
         <div className="mb-6 grid gap-3 md:grid-cols-2">
           {(Object.keys(dataKinds) as (keyof typeof dataKinds)[]).map((k) => (
             <Link
@@ -188,8 +195,14 @@ export default function Data() {
       )}
 
       {data && data.length === 0 && (
-        <Empty title="No databases or storage yet">
-          Pick a kind above, or run <Mono>coldship data create postgres maindb</Mono>.
+        <Empty title="No databases or storage yet" icon={<Database />}>
+          {canChange ? (
+            <>
+              Pick a kind above, or run <Mono>coldship data create postgres maindb</Mono>. Apps can also bring their own database.
+            </>
+          ) : (
+            'Databases and buckets show up here once someone adds one.'
+          )}
         </Empty>
       )}
     </>

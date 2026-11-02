@@ -5,6 +5,7 @@ import { api, type Agent, type AgentSession, type App, type DataView, type WhoAm
 import { accountPage, navGroups } from '../nav'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { failed, notify } from '@/components/toasts'
 import { Command, CommandDialog, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from '@/components/ui/command'
 
 const PaletteContext = createContext<() => void>(() => {})
@@ -129,8 +130,9 @@ function PaletteBody({ me, close, onSwitch, onSignOut }: { me: WhoAmI; close: ()
     try {
       const s = await api.startSession(agents[0].name, q)
       go(`/agents/sessions/${s.id}`)
-    } catch {
+    } catch (e) {
       setBusy('')
+      failed(e, `Couldn't start ${agents[0].name}`)
       go('/agents')
     }
   }
@@ -138,9 +140,12 @@ function PaletteBody({ me, close, onSwitch, onSignOut }: { me: WhoAmI; close: ()
   async function switchTo(id: string) {
     setBusy(id)
     try {
-      onSwitch(await api.switchOrg(id))
+      const w = await api.switchOrg(id)
+      onSwitch(w)
+      notify(`Switched to ${w.org?.name ?? id}`)
       go('/')
-    } catch {
+    } catch (e) {
+      failed(e, "Couldn't switch organization")
       setBusy('')
     }
   }

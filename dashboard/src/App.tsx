@@ -26,6 +26,7 @@ import Overview from './pages/Overview'
 import UpdateBanner from './components/UpdateBanner'
 import { PaletteProvider, SearchButton, useOpenPalette } from './components/CommandPalette'
 import { navGroups } from './nav'
+import { notify } from './components/toasts'
 
 // The session page brings a Markdown renderer: load it when opened.
 const AgentSession = lazy(() => import('./pages/AgentSession'))
@@ -261,6 +262,7 @@ function OrgSwitcher({ me, onSwitch }: { me: WhoAmI; onSwitch: (w: WhoAmI) => vo
     try {
       const w = await api.switchOrg(id)
       onSwitch(w)
+      notify(`Switched to ${w.org?.name ?? id}`)
       nav('/')
     } catch (e) {
       setError(e as Error)
@@ -314,7 +316,9 @@ function OrgSwitcher({ me, onSwitch }: { me: WhoAmI; onSwitch: (w: WhoAmI) => vo
         onClose={() => setCreating(false)}
         onCreated={async () => {
           setCreating(false)
-          onSwitch(await api.whoami())
+          const w = await api.whoami()
+          onSwitch(w)
+          notify(`Created ${w.org?.name ?? 'the organization'}`, { description: 'Invite people to it from here.' })
           nav('/org/team')
         }}
       />

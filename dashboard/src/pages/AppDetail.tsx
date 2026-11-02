@@ -4,7 +4,7 @@ import { JobsTab } from './JobsTab'
 import { LiveLog } from '../components/LiveLog'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ExternalLink, Info } from 'lucide-react'
+import { Camera, ExternalLink, Info, Webhook } from 'lucide-react'
 import { api, type AppView, type Deployment } from '../api'
 import { useSession } from '../App'
 import { fmtTime, timeUntil, useLoad } from '../hooks'
@@ -36,6 +36,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { notify } from '@/components/toasts'
 
 type Tab = 'diagnose' | 'metrics' | 'deployments' | 'logs' | 'jobs' | 'databases' | 'webhook' | 'settings'
 
@@ -205,6 +206,7 @@ function PreviewBanner({ a }: { a: AppView }) {
   async function del() {
     try {
       await api.deletePreview(a.name)
+      notify(`Deleted preview ${a.name}`)
       nav('/apps')
     } catch (e) {
       setError(e as Error)
@@ -453,7 +455,6 @@ function RollbackButton({ app, onDone }: { app: AppView; onDone: () => void }) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
-  const [msg, setMsg] = useState('')
   if (me.scope === 'read') return null
 
   async function submit(e: FormEvent) {
@@ -462,7 +463,7 @@ function RollbackButton({ app, onDone }: { app: AppView; onDone: () => void }) {
     setError(undefined)
     try {
       const r = await api.rollback(app.name, reason.trim())
-      setMsg(`Rolled back: ${r.deployment?.id ?? ''} is ${r.deployment?.status ?? r.message}`)
+      notify(`Rolled back ${app.name}`, { description: r.deployment ? `${r.deployment.id} is ${r.deployment.status}` : r.message })
       setOpen(false)
       setReason('')
       onDone()
@@ -475,11 +476,6 @@ function RollbackButton({ app, onDone }: { app: AppView; onDone: () => void }) {
 
   return (
     <div className="flex flex-col items-end gap-2">
-      {msg && (
-        <span className="text-sm text-ok" role="status">
-          {msg}
-        </span>
-      )}
       {!open ? (
         <Button variant="outline" onClick={() => setOpen(true)}>
           Roll back…
@@ -801,7 +797,9 @@ function WebhookTab({ name }: { name: string }) {
 
       <SectionTitle>Deliveries</SectionTitle>
       {info.deliveries.length === 0 ? (
-        <Empty title="No pushes received yet." />
+        <Empty title="No pushes received yet" icon={<Webhook />} compact>
+          {info.enabled ? 'Each push GitHub sends shows up here, with what Coldship did about it.' : 'Turn the webhook on, then add it to the repository on GitHub.'}
+        </Empty>
       ) : (
         <TableCard>
           <Table>
@@ -858,6 +856,7 @@ function DatabasesTab({ app, onChange }: { app: AppView; onChange: () => void })
     setError(undefined)
     try {
       await api.snapshot(app.name, db)
+      notify(`Snapshot of ${db} saved`)
       snaps.reload()
       onChange()
     } catch (e) {
@@ -924,7 +923,12 @@ function DatabasesTab({ app, onChange }: { app: AppView; onChange: () => void })
       <SectionTitle>Snapshots</SectionTitle>
       {snaps.error && <ErrorBox error={snaps.error} />}
       {!snaps.data && !snaps.error && <TableSkeleton rows={3} cols={6} />}
-      {snaps.data?.length === 0 && <Empty title="No snapshots yet." />}
+      {snaps.data?.length === 0 && (
+        <Empty title="No snapshots yet" icon={<Camera />} compact>
+          The first one is taken within a day, or before any change that would delete data.
+          {me.scope !== 'read' && ' Use Snapshot now to take one.'}
+        </Empty>
+      )}
       {snaps.data && snaps.data.length > 0 && (
         <TableCard>
           <Table>
@@ -999,7 +1003,7 @@ function LogsTab({ name }: { name: string }) {
         </div>
         {l.error && <ErrorBox error={l.error} />}
         {l.data ? (
-          <pre className={cn(logBox, 'max-h-[32rem]')}>{l.data.lines.join('\n') || '(no output)'}</pre>
+          <pre className={cn(logBox, 'max-h-[32rem]')}>{l.data.lines.join('\n') || 'Nothing logged yet. Lines the app writes to stdout or stderr show up here.'}</pre>
         ) : (
           <Skeleton className="h-64 w-full rounded-lg" />
         )}

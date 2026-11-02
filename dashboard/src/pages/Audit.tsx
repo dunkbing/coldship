@@ -46,7 +46,11 @@ export default function Audit() {
       />
       {audit.error && <ErrorBox error={audit.error} />}
       {audit.loading && !audit.data && <TableSkeleton rows={6} cols={6} />}
-      {audit.data && rows.length === 0 && <Empty title="No entries" icon={<ScrollText />} />}
+      {audit.data && rows.length === 0 && (
+        <Empty title="Nothing recorded yet" icon={<ScrollText />}>
+          Every deploy, approval, sign-in and setting change shows up here: who did it, to what, and the reason they gave.
+        </Empty>
+      )}
       {rows.length > 0 && (
         <Card className="py-0">
           <Table>

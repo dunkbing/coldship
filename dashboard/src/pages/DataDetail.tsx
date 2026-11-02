@@ -4,6 +4,7 @@ import { api } from '../api'
 import { useLoad } from '../hooks'
 import { Check, Copy as CopyIcon } from 'lucide-react'
 import { ErrorBox, Mono, PageHeader, PageSkeleton, Time } from '@/components/common'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DataMark, dataKinds, envSummary, isStorage } from '../components/data'
 import { useSession } from '../App'
+import { notify } from '@/components/toasts'
 import { BackupTable } from './Backups'
 
 function Copy({ text }: { text: string }) {
@@ -65,13 +67,13 @@ export default function DataDetail() {
   const [confirmDelete, setConfirmDelete] = useState('')
   const [deleting, setDeleting] = useState(false)
 
-  async function act(f: () => Promise<unknown>, done?: string) {
+  async function act(f: () => Promise<unknown>, ok?: string) {
     setBusy(true)
     setActionError(undefined)
     setMessage('')
     try {
       await f()
-      if (done) setMessage(done)
+      if (ok) notify(ok)
       reload()
       snaps.reload()
       backup.reload()
@@ -305,7 +307,7 @@ export default function DataDetail() {
               {offsite.error ? (
                 <ErrorBox error={offsite.error} />
               ) : !offsite.data ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
+                <Skeleton className="h-16 w-full rounded-lg" />
               ) : offsite.data.length === 0 ? (
                 <p className="text-sm text-muted-foreground">None yet. New snapshots are copied within a minute.</p>
               ) : (
@@ -358,6 +360,7 @@ export default function DataDetail() {
                     onClick={() =>
                       act(async () => {
                         await api.deleteData(d.name)
+                        notify(`Deleted ${d.name}`)
                         nav('/data')
                       })
                     }

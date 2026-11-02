@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DataMark } from '../components/data'
+import { notify } from '@/components/toasts'
 import { bytes } from './MetricsTab'
 
 // Endpoint examples for common providers.
@@ -54,13 +55,13 @@ export default function Backups() {
   const [error, setError] = useState<Error>()
   const [message, setMessage] = useState('')
 
-  async function act(f: () => Promise<unknown>, done?: string) {
+  async function act(f: () => Promise<unknown>, ok?: string) {
     setBusy(true)
     setError(undefined)
     setMessage('')
     try {
       await f()
-      if (done) setMessage(done)
+      if (ok) notify(ok)
       status.reload()
       list.reload()
     } catch (err) {

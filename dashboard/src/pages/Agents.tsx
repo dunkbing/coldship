@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Bell, Bot, MessageSquarePlus, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Bell, Bot, MessageSquarePlus, MessagesSquare, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
 import { api, type Agent, type AgentPreset, type AgentSession, type Channel, type Scope } from '../api'
 import { useSession } from '../App'
 import { useLoad } from '../hooks'
@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { notify } from '@/components/toasts'
+import { paletteKeys } from '@/components/CommandPalette'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 const kinds = ['claude', 'codex', 'gemini', 'custom']
@@ -158,6 +160,17 @@ export default function Agents() {
         </div>
       )}
 
+      {sessions.data && sessions.data.length === 0 && agents.length > 0 && (
+        <>
+          <h2 className="mt-8 mb-3 text-lg font-semibold">Sessions</h2>
+          <Empty title="No sessions yet" icon={<MessagesSquare />} compact>
+            {canRun
+              ? `Start one with New session above, or press ${paletteKeys} and type a question. Sessions an alert starts show up here too.`
+              : 'Sessions people and alerts start show up here.'}
+          </Empty>
+        </>
+      )}
+
       {sessions.data && sessions.data.length > 0 && (
         <>
           <h2 className="mt-8 mb-3 text-lg font-semibold">Sessions</h2>
@@ -216,7 +229,8 @@ export default function Agents() {
           agent={editing.agent}
           presets={list.data?.presets ?? []}
           onClose={() => setEditing(undefined)}
-          onSaved={() => {
+          onSaved={(n) => {
+            notify(editing.agent ? `Saved ${n}` : `Connected ${n}`)
             setEditing(undefined)
             list.reload()
           }}
@@ -238,7 +252,7 @@ export default function Agents() {
               onClick={() => {
                 const a = removing!
                 setRemoving(undefined)
-                api.deleteAgent(a.name).then(list.reload, setError)
+                api.deleteAgent(a.name).then(() => (notify(`Removed ${a.name}`), list.reload()), setError)
               }}
             >
               Remove
@@ -261,7 +275,7 @@ function AgentDialog({
   agent?: Agent
   presets: AgentPreset[]
   onClose: () => void
-  onSaved: () => void
+  onSaved: (name: string) => void
 }) {
   const [kind, setKind] = useState(initialKind)
   const [name, setName] = useState(agent?.name ?? initialKind)
@@ -310,7 +324,7 @@ function AgentDialog({
         triggers,
         alert_fix: alertFix,
       })
-      onSaved()
+      onSaved(name.trim())
     } catch (err) {
       setError(err as Error)
       setBusy(false)

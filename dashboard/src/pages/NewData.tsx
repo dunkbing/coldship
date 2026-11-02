@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { notify } from '@/components/toasts'
 import { DataMark, dataKinds, isStorage } from '../components/data'
 
 export default function NewData() {
@@ -29,6 +30,7 @@ export default function NewData() {
     setError(undefined)
     try {
       const d = await api.createData(kind, name.trim(), ver)
+      notify(`Created ${d.name}`, { description: 'Connect it to an app from the app’s settings.' })
       nav(`/data/${d.name}`)
     } catch (err) {
       setError(err as Error)
@@ -83,7 +85,7 @@ export default function NewData() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={isStorage(kind) ? 'uploads' : 'maindb'}
-                  pattern="[a-z][a-z0-9-]{0,39}"
+                  pattern="[a-z][a-z0-9\-]{0,39}"
                   title="lowercase letters, digits and dashes, starting with a letter"
                   required
                   autoFocus

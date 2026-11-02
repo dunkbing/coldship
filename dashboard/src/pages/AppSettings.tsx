@@ -1,11 +1,12 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRightLeft, GitBranch, Package, Plus, Trash2, Unplug, X } from 'lucide-react'
-import { api, type AppView, type Patch, type Plan } from '@/api'
+import { api, type AppView, type ApplyResult, type Patch, type Plan } from '@/api'
 import { useLoad } from '@/hooks'
 import { useSession } from '@/App'
 import { ChangeList, ErrorBox, Mono, PlanMeta, ToneBadge } from '@/components/common'
 import { LiveLog } from '@/components/LiveLog'
+import { trackDeploy } from '@/components/toasts'
 import { DataMark } from '@/components/data'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -25,6 +26,13 @@ function useChange(app: AppView, onDone: () => void) {
   const [step, setStep] = useState<Step>()
   const [error, setError] = useState<Error>()
   const [busy, setBusy] = useState(false)
+  // A deploy still running when the dialog closes reports in a toast.
+  const pending = useRef<Promise<ApplyResult>>(undefined)
+  const handOff = () => {
+    if (pending.current) trackDeploy(app.name, pending.current)
+    pending.current = undefined
+  }
+  useEffect(() => handOff, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function propose(title: string, plan: () => Promise<Plan>) {
     setBusy(true)
@@ -50,9 +58,14 @@ function useChange(app: AppView, onDone: () => void) {
     const applying = api.apply(plan.id, `${title}, from the dashboard`)
     applying.catch((e) => setStep((s) => (s?.kind === 'deploying' ? { ...s, error: e as Error } : s)))
     if (plan.action === 'delete') {
+      trackDeploy(app.name, applying, 'delete')
       await applying.catch(() => undefined)
       return
     }
+    pending.current = applying
+    applying.catch(() => undefined).finally(() => {
+      if (pending.current === applying) pending.current = undefined
+    })
     for (let i = 0; i < 100; i++) {
       const p = await api.plan(plan.id)
       if (p.deployment) {
@@ -68,6 +81,7 @@ function useChange(app: AppView, onDone: () => void) {
       open={!!step}
       onOpenChange={(open) => {
         if (!open) {
+          handOff()
           setStep(undefined)
           onDone()
         }

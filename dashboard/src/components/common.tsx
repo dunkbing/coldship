@@ -143,12 +143,35 @@ export function ErrorBox({ error }: { error: Error }) {
   )
 }
 
-export function Empty({ title, children, icon }: { title: string; children?: ReactNode; icon?: ReactNode }) {
+// Empty says what will show up here and, when the viewer may, how to start.
+export function Empty({
+  title,
+  children,
+  icon,
+  action,
+  compact,
+}: {
+  title: string
+  children?: ReactNode
+  icon?: ReactNode
+  action?: ReactNode
+  compact?: boolean
+}) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-card px-6 py-12 text-center">
-      {icon && <div className="text-muted-foreground [&_svg]:size-8">{icon}</div>}
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-card px-6 text-center',
+        compact ? 'py-8' : 'py-12',
+      )}
+    >
+      {icon && (
+        <div className={cn('mb-1 flex items-center justify-center rounded-full bg-muted text-muted-foreground', compact ? 'size-10 [&_svg]:size-5' : 'size-12 [&_svg]:size-6')}>
+          {icon}
+        </div>
+      )}
       <div className="font-semibold">{title}</div>
       {children && <div className="max-w-md text-sm text-muted-foreground">{children}</div>}
+      {action && <div className="mt-2 flex flex-wrap items-center justify-center gap-2">{action}</div>}
     </div>
   )
 }
