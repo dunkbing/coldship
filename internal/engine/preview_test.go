@@ -163,7 +163,7 @@ func TestPreviewLimitAndReaper(t *testing.T) {
 	if _, ok := rt.Containers["img"]; !ok {
 		t.Fatal("regular apps must never be reaped")
 	}
-	entries, _ := e.Audit(ctx, 10)
+	entries, _ := e.Audit(ctx, "", 10)
 	if entries[0].Actor != "coldship" || entries[0].Reason != "preview expired" {
 		t.Fatalf("the reaper should be audited: %+v", entries[0])
 	}

@@ -73,9 +73,24 @@ func (e *Engine) githubGet(ctx context.Context, token, path string, out any) err
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// GitHubToken is the connected token, or "" (for the builder).
+// githubKey names the org's GitHub integration; the default org's is
+// "github", as before orgs existed.
+func githubKey(org string) string {
+	if org == store.DefaultOrg {
+		return "github"
+	}
+	return "github:" + org
+}
+
+// GitHubToken is the token connected for the org in ctx, or "" (for the
+// builder). With no org in ctx there is no token: a build never borrows
+// another org's.
 func (e *Engine) GitHubToken(ctx context.Context) string {
-	in, err := e.st.GetIntegration(ctx, "github")
+	org := store.OrgFrom(ctx)
+	if org == "" {
+		return ""
+	}
+	in, err := e.st.GetIntegration(ctx, githubKey(org))
 	if err != nil || in == nil {
 		return ""
 	}
@@ -83,7 +98,7 @@ func (e *Engine) GitHubToken(ctx context.Context) string {
 }
 
 func (e *Engine) GitHubStatus(ctx context.Context) (GitHubStatus, error) {
-	in, err := e.st.GetIntegration(ctx, "github")
+	in, err := e.st.GetIntegration(ctx, githubKey(store.OrgOr(store.OrgFrom(ctx))))
 	if err != nil || in == nil {
 		return GitHubStatus{}, err
 	}
@@ -102,7 +117,7 @@ func (e *Engine) ConnectGitHub(ctx context.Context, actor, token string) (GitHub
 	if err := e.githubGet(ctx, token, "/user", &user); err != nil {
 		return GitHubStatus{}, err
 	}
-	in := &store.Integration{Name: "github", Secret: token, Account: user.Login, CreatedAt: e.Now()}
+	in := &store.Integration{Name: githubKey(store.OrgOr(store.OrgFrom(ctx))), Secret: token, Account: user.Login, CreatedAt: e.Now()}
 	if err := e.st.SaveIntegration(ctx, in); err != nil {
 		return GitHubStatus{}, err
 	}
@@ -111,7 +126,7 @@ func (e *Engine) ConnectGitHub(ctx context.Context, actor, token string) (GitHub
 }
 
 func (e *Engine) DisconnectGitHub(ctx context.Context, actor string) error {
-	if err := e.st.DeleteIntegration(ctx, "github"); err != nil {
+	if err := e.st.DeleteIntegration(ctx, githubKey(store.OrgOr(store.OrgFrom(ctx)))); err != nil {
 		return err
 	}
 	e.audit(ctx, actor, "github.disconnect", "github", "", nil)

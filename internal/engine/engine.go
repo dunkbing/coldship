@@ -498,10 +498,19 @@ type AppView struct {
 
 func (e *Engine) Plan(ctx context.Context, actor string, req PlanRequest) (*store.Plan, error) {
 	name := req.Delete
-	if req.Spec != nil {
+	switch {
+	case req.Spec != nil:
 		name = req.Spec.Name
+	case req.Patch != nil:
+		name = req.Patch.Name
+	case req.Restore != nil:
+		name = req.Restore.App
 	}
 	defer e.lockApp(name)()
+	ctx, err := e.appOrg(ctx, name, req.previewOf)
+	if err != nil {
+		return nil, err
+	}
 	p, err := e.plan(ctx, actor, req)
 	if err != nil {
 		return nil, err
@@ -640,6 +649,7 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 			((action == planner.OpUpdate || action == planner.OpRedeploy) && !desired.ZeroDowntime()),
 		RequiresApproval: diff.Destructive && prod,
 		Status:           store.PlanPending, CreatedBy: actor, CreatedAt: now, ExpiresAt: now.Add(e.PlanTTL),
+		Org: store.OrgFrom(ctx),
 	}
 	if p.Changes == nil {
 		p.Changes = []planner.Change{}
@@ -666,6 +676,7 @@ func (e *Engine) restorePlan(ctx context.Context, actor string, r *RestoreReques
 		Destructive: true, Downtime: true, RequiresApproval: desired.Stage == spec.StageProduction || app.Spec.Stage == spec.StageProduction,
 		Restore: &store.PlanRestore{Database: r.Database, Snapshot: sn.ID},
 		Status:  store.PlanPending, CreatedBy: actor, CreatedAt: now, ExpiresAt: now.Add(e.PlanTTL),
+		Org: store.OrgFrom(ctx),
 	}
 	p.NextStep = nextStep(p)
 	if err := e.st.SavePlan(ctx, p); err != nil {
@@ -819,6 +830,8 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 	if p, err = e.usablePlan(ctx, planID); err != nil {
 		return nil, err
 	}
+	// Build, data services and audit entries act in the plan's org.
+	ctx = store.WithOrg(ctx, store.OrgOr(p.Org))
 	if p.RequiresApproval && p.ApprovedBy == "" {
 		return nil, apierr.New(403, "approval_required", "plan %s makes a destructive change to a production app and has not been approved", p.ID).
 			WithHint(fmt.Sprintf("ask a human to review and run: coldship approve %s", p.ID)).WithDetail("plan", p.ID)
@@ -833,7 +846,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 	if app != nil {
 		currentBase, current = app.CurrentDeployment, app.Spec
 	}
-	if currentBase != p.BaseDeployment || (p.Action == planner.OpDelete && app == nil) {
+	if currentBase != p.BaseDeployment || (p.Action == planner.OpDelete && app == nil) || (app != nil && app.Org != store.OrgOr(p.Org)) {
 		return nil, apierr.New(409, "plan_stale", "app %s changed since plan %s was made", p.App, p.ID).
 			WithHint("create a new plan; the app was deployed or deleted by someone else in the meantime")
 	}
@@ -870,7 +883,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 		return &ApplyResult{Plan: publicPlan(p), Message: "nothing to do"}, nil
 	}
 
-	d := &store.Deployment{ID: store.NewID("dep"), App: p.App, PlanID: p.ID, Spec: p.Desired,
+	d := &store.Deployment{ID: store.NewID("dep"), App: p.App, Org: store.OrgOr(p.Org), PlanID: p.ID, Spec: p.Desired,
 		Status: store.DeployInProgress, Actor: actor, Reason: reason, CreatedAt: now}
 	p.Deployment = d.ID
 	p.NextStep = nextStep(p)
@@ -930,7 +943,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 		}
 	} else {
 		if app == nil {
-			app = &store.App{Name: p.App, CreatedAt: now}
+			app = &store.App{Name: p.App, Org: store.OrgOr(p.Org), CreatedAt: now}
 		}
 		run := p.Desired.Clone()
 		d.Image = run.Image
@@ -1205,6 +1218,7 @@ func (e *Engine) Rollback(ctx context.Context, actor, appName, toDeployment, rea
 	if app == nil {
 		return nil, apierr.NotFound("app", appName)
 	}
+	ctx = store.WithOrg(ctx, app.Org)
 	deps, err := e.st.ListDeployments(ctx, appName, 100)
 	if err != nil {
 		return nil, err
@@ -1327,8 +1341,9 @@ func (e *Engine) Logs(ctx context.Context, name string, tail int, since string) 
 	return &LogsResult{App: name, Lines: lines, Untrusted: true, Note: untrustedNote}, nil
 }
 
-func (e *Engine) Audit(ctx context.Context, limit int) ([]store.AuditEntry, error) {
-	return e.st.ListAudit(ctx, limit)
+// Audit lists an org's audit entries; org "" lists all.
+func (e *Engine) Audit(ctx context.Context, org string, limit int) ([]store.AuditEntry, error) {
+	return e.st.ListAudit(ctx, org, limit)
 }
 
 // --- tokens ---
@@ -1340,7 +1355,7 @@ var reservedActors = map[string]bool{"coldship": true, "webhook": true, "system"
 // appPatternRe is an app name, optionally with * wildcards: web, shop-*.
 var appPatternRe = regexp.MustCompile(`^[a-z*][a-z0-9*-]{0,39}$`)
 
-func (e *Engine) CreateToken(ctx context.Context, actor, name string, scope store.Scope, apps []string) (string, error) {
+func (e *Engine) CreateToken(ctx context.Context, actor, org, name string, scope store.Scope, apps []string) (string, error) {
 	if !nameOK(name) {
 		return "", apierr.New(400, "invalid_token_name", "token name %q must be lowercase letters, digits and dashes", name)
 	}
@@ -1357,30 +1372,27 @@ func (e *Engine) CreateToken(ctx context.Context, actor, name string, scope stor
 				WithField("apps")
 		}
 	}
-	t, err := e.st.CreateToken(ctx, name, scope, apps)
+	t, err := e.st.CreateToken(ctx, org, name, scope, apps)
 	if err == nil {
 		e.audit(ctx, actor, "token.create", name, "", map[string]any{"scope": scope, "apps": apps})
 	}
 	return t, err
 }
 
-func (e *Engine) ListTokens(ctx context.Context) ([]store.Token, error) {
-	return e.st.ListTokens(ctx)
+func (e *Engine) ListTokens(ctx context.Context, org string) ([]store.Token, error) {
+	return e.st.ListTokens(ctx, org)
 }
 
-// RevokeToken deletes a token and signs out its dashboard sessions. The last
-// admin token can't be revoked, so the server can't be locked out.
-func (e *Engine) RevokeToken(ctx context.Context, actor, name, reason string) error {
-	toks, err := e.st.ListTokens(ctx)
+// RevokeToken deletes one of org's tokens and signs out its dashboard
+// sessions. An org's last admin (token or member) can't be removed, so it
+// can't be locked out.
+func (e *Engine) RevokeToken(ctx context.Context, actor, org, name, reason string) error {
+	toks, err := e.st.ListTokens(ctx, org)
 	if err != nil {
 		return err
 	}
 	var target *store.Token
-	admins := 0
 	for i, t := range toks {
-		if t.Scope == store.ScopeAdmin {
-			admins++
-		}
 		if t.Name == name {
 			target = &toks[i]
 		}
@@ -1388,8 +1400,12 @@ func (e *Engine) RevokeToken(ctx context.Context, actor, name, reason string) er
 	if target == nil {
 		return apierr.NotFound("token", name)
 	}
-	if target.Scope == store.ScopeAdmin && admins == 1 {
-		return apierr.New(409, "last_admin_token", "%s is the only admin token; create another admin token before revoking it", name).
+	members, tokens, err := e.st.CountAdmins(ctx, org)
+	if err != nil {
+		return err
+	}
+	if target.Scope == store.ScopeAdmin && members+tokens == 1 {
+		return apierr.New(409, "last_admin_token", "%s is the only admin; create another admin token or invite an admin before revoking it", name).
 			WithHint("coldship token create --name <name> --scope admin")
 	}
 	if _, err := e.st.DeleteToken(ctx, name); err != nil {
@@ -1406,7 +1422,7 @@ func (e *Engine) EnsureAdminToken(ctx context.Context) (string, error) {
 	if err != nil || n > 0 {
 		return "", err
 	}
-	return e.CreateToken(ctx, "system", "admin", store.ScopeAdmin, nil)
+	return e.CreateToken(ctx, "system", store.DefaultOrg, "admin", store.ScopeAdmin, nil)
 }
 
 // --- helpers ---

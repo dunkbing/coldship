@@ -34,6 +34,7 @@ func TestAPIEndToEnd(t *testing.T) {
 	}
 	defer st.Close()
 	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	eng.SnapshotDir = t.TempDir()
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 
@@ -111,6 +112,7 @@ func TestDashboardSessions(t *testing.T) {
 	}
 	defer st.Close()
 	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	eng.SnapshotDir = t.TempDir()
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 	admin, _ := eng.EnsureAdminToken(ctx)
@@ -216,6 +218,7 @@ func TestGitHookEndpoint(t *testing.T) {
 	bd := builder.NewFake()
 	bd.Refs["https://github.com/acme/shop.git@main"] = strings.Repeat("a", 40)
 	eng := engine.New(st, runtime.NewFake(), bd, nil)
+	eng.SnapshotDir = t.TempDir()
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 	adminTok, _ := eng.EnsureAdminToken(ctx)
@@ -294,6 +297,7 @@ func TestTokensLimitedToApps(t *testing.T) {
 	}
 	defer st.Close()
 	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	eng.SnapshotDir = t.TempDir()
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 	adminTok, _ := eng.EnsureAdminToken(ctx)
@@ -428,6 +432,7 @@ func TestDataServiceAPI(t *testing.T) {
 	}
 	defer st.Close()
 	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	eng.SnapshotDir = t.TempDir()
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 	adminTok, _ := eng.EnsureAdminToken(ctx)
@@ -474,6 +479,7 @@ func TestDeployLogStream(t *testing.T) {
 	}
 	defer st.Close()
 	eng := engine.New(st, runtime.NewFake(), builder.NewFake(), nil)
+	eng.SnapshotDir = t.TempDir()
 	srv := httptest.NewServer(api.New(eng, st, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 	defer srv.Close()
 	tok, _ := eng.EnsureAdminToken(ctx)

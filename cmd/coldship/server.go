@@ -99,11 +99,11 @@ func serverCmd() *cobra.Command {
 				bd.UsePodman()
 			}
 			var engRef *engine.Engine
-			bd.GitHubToken = func() string {
+			bd.GitHubToken = func(ctx context.Context) string {
 				if engRef == nil {
 					return ""
 				}
-				return engRef.GitHubToken(context.Background())
+				return engRef.GitHubToken(ctx)
 			}
 			var px proxy.Proxy
 			if proxyOn {

@@ -411,6 +411,10 @@ func (e *Engine) supersedeWebhookPlans(ctx context.Context, app, newest string) 
 }
 
 func (e *Engine) processHook(ctx context.Context, j hookJob) {
+	// Builds for the push use the app's org's GitHub token.
+	if a, err := e.st.GetApp(ctx, j.app); err == nil && a != nil {
+		ctx = store.WithOrg(ctx, a.Org)
+	}
 	d := j.delivery
 	fail := func(err error) {
 		d.Result, d.Detail = "failed", err.Error()

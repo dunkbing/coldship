@@ -52,6 +52,7 @@ type Token struct {
 	// names or patterns like shop-* (path.Match syntax). Empty means every
 	// app.
 	Apps      []string  `json:"apps,omitempty"`
+	Org       string    `json:"org"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -84,6 +85,7 @@ func splitApps(s string) []string {
 
 type App struct {
 	Name              string    `json:"name"`
+	Org               string    `json:"org"`
 	Spec              *spec.App `json:"spec,omitempty"` // last successfully deployed spec
 	CurrentDeployment string    `json:"current_deployment,omitempty"`
 	// PreviewOf names the app this is a preview of; previews are deleted
@@ -104,6 +106,7 @@ const (
 type Plan struct {
 	ID               string           `json:"id"`
 	App              string           `json:"app"`
+	Org              string           `json:"org,omitempty"`
 	Action           string           `json:"action"` // create|update|delete|redeploy|noop
 	Desired          *spec.App        `json:"desired,omitempty"`
 	BaseDeployment   string           `json:"base_deployment,omitempty"`
@@ -148,6 +151,7 @@ const (
 type Deployment struct {
 	ID        string    `json:"id"`
 	App       string    `json:"app"`
+	Org       string    `json:"org,omitempty"`
 	PlanID    string    `json:"plan_id"`
 	Spec      *spec.App `json:"spec,omitempty"`
 	Status    string    `json:"status"`
@@ -180,6 +184,9 @@ type AuditEntry struct {
 	Target string          `json:"target"`
 	Reason string          `json:"reason,omitempty"`
 	Detail json.RawMessage `json:"detail,omitempty"`
+	// Org is the organization the entry belongs to; server-wide entries
+	// belong to the default org.
+	Org string `json:"-"`
 }
 
 // Store keeps Coldship's state. Columns that can hold secrets (app specs with
@@ -263,6 +270,15 @@ CREATE TABLE IF NOT EXISTS integrations (
   name TEXT PRIMARY KEY, secret TEXT NOT NULL, account TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY, token_name TEXT NOT NULL, scope TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, password TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS orgs (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS members (
+  org TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (org, user_id));
+CREATE TABLE IF NOT EXISTS links (
+  id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, org TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '',
+  user_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
   target TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', detail TEXT);
@@ -298,11 +314,22 @@ func Open(path string, kr *secrets.Keyring) (*Store, error) {
 		`ALTER TABLE apps ADD COLUMN preview_of TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE apps ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tokens ADD COLUMN apps TEXT NOT NULL DEFAULT ''`,
+		// Organizations: everything from before them is in the default org.
+		`ALTER TABLE apps ADD COLUMN org TEXT NOT NULL DEFAULT 'default'`,
+		`ALTER TABLE databases ADD COLUMN org TEXT NOT NULL DEFAULT 'default'`,
+		`ALTER TABLE tokens ADD COLUMN org TEXT NOT NULL DEFAULT 'default'`,
+		`ALTER TABLE audit ADD COLUMN org TEXT NOT NULL DEFAULT 'default'`,
+		`ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN org TEXT NOT NULL DEFAULT 'default'`,
 	} {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()
 			return nil, fmt.Errorf("migrate: %w", err)
 		}
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO orgs(id, name, created_at) VALUES(?, 'Default', ?)`, DefaultOrg, ts(time.Now())); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	st := &Store{db: db}
 	st.kr.Store(kr)
@@ -623,14 +650,14 @@ func NewID(prefix string) string {
 }
 
 // CreateToken stores a new token and returns its plaintext once.
-func (s *Store) CreateToken(ctx context.Context, name string, scope Scope, apps []string) (string, error) {
+func (s *Store) CreateToken(ctx context.Context, org, name string, scope Scope, apps []string) (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	plain := "cst_" + hex.EncodeToString(b)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens(name, hash, scope, apps, created_at) VALUES(?,?,?,?,?)`,
-		name, hashToken(plain), string(scope), joinApps(apps), ts(time.Now()))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens(name, hash, scope, apps, org, created_at) VALUES(?,?,?,?,?,?)`,
+		name, hashToken(plain), string(scope), joinApps(apps), OrgOr(org), ts(time.Now()))
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return "", apierr.New(409, "token_exists", "a token named %q already exists", name)
@@ -643,8 +670,8 @@ func (s *Store) CreateToken(ctx context.Context, name string, scope Scope, apps 
 func (s *Store) LookupToken(ctx context.Context, plain string) (*Token, error) {
 	var t Token
 	var scope, created, apps string
-	err := s.db.QueryRowContext(ctx, `SELECT name, scope, apps, created_at FROM tokens WHERE hash = ?`, hashToken(plain)).
-		Scan(&t.Name, &scope, &apps, &created)
+	err := s.db.QueryRowContext(ctx, `SELECT name, scope, apps, org, created_at FROM tokens WHERE hash = ?`, hashToken(plain)).
+		Scan(&t.Name, &scope, &apps, &t.Org, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -656,9 +683,10 @@ func (s *Store) LookupToken(ctx context.Context, plain string) (*Token, error) {
 	return &t, nil
 }
 
-// ListTokens lists tokens (never their values), oldest first.
-func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, scope, apps, created_at FROM tokens ORDER BY created_at, name`)
+// ListTokens lists an org's tokens (never their values), oldest first; org
+// "" lists every org's.
+func (s *Store) ListTokens(ctx context.Context, org string) ([]Token, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, scope, apps, org, created_at FROM tokens WHERE ? IN ('', org) ORDER BY created_at, name`, org)
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +695,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	for rows.Next() {
 		var t Token
 		var scope, created, apps string
-		if err := rows.Scan(&t.Name, &scope, &apps, &created); err != nil {
+		if err := rows.Scan(&t.Name, &scope, &apps, &t.Org, &created); err != nil {
 			return nil, err
 		}
 		t.Scope, t.Apps = Scope(scope), splitApps(apps)
@@ -716,19 +744,26 @@ func (s *Store) CreateSession(ctx context.Context, t *Token, ttl time.Duration) 
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`, ts(now)); err != nil {
 		return "", err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(hash, token_name, scope, created_at, expires_at) VALUES(?,?,?,?,?)`,
-		hashToken(plain), t.Name, string(t.Scope), ts(now), ts(now.Add(ttl)))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(hash, token_name, scope, org, created_at, expires_at) VALUES(?,?,?,?,?,?)`,
+		hashToken(plain), t.Name, string(t.Scope), OrgOr(t.Org), ts(now), ts(now.Add(ttl)))
 	return plain, err
 }
 
-// LookupSession returns the token identity behind a live session, or nil.
-func (s *Store) LookupSession(ctx context.Context, plain string) (*Token, error) {
-	var t Token
-	var scope, expires, apps string
-	// A session lives only as long as its token, and has its limits.
-	err := s.db.QueryRowContext(ctx, `SELECT s.token_name, t.scope, t.apps, s.expires_at FROM sessions s
-		JOIN tokens t ON t.name = s.token_name WHERE s.hash = ?`, hashToken(plain)).
-		Scan(&t.Name, &scope, &apps, &expires)
+// Identity is who a session acts as: a token, or a user in one org.
+type Identity struct {
+	Name   string // token name, or the user's email
+	Scope  Scope
+	Apps   []string
+	Org    string
+	UserID string // set for user sessions
+}
+
+// LookupSession returns the identity behind a live session, or nil.
+func (s *Store) LookupSession(ctx context.Context, plain string) (*Identity, error) {
+	var id Identity
+	var userID, scope, expires, apps string
+	err := s.db.QueryRowContext(ctx, `SELECT token_name, user_id, org, expires_at FROM sessions WHERE hash = ?`, hashToken(plain)).
+		Scan(&id.Name, &userID, &id.Org, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -738,8 +773,23 @@ func (s *Store) LookupSession(ctx context.Context, plain string) (*Token, error)
 	if exp, _ := time.Parse(tsFormat, expires); time.Now().After(exp) {
 		return nil, nil
 	}
-	t.Scope, t.Apps = Scope(scope), splitApps(apps)
-	return &t, nil
+	if userID != "" {
+		// Read the membership every time, so removing a member or changing
+		// a role applies at once.
+		err = s.db.QueryRowContext(ctx, `SELECT u.email, m.role FROM users u JOIN members m ON m.user_id = u.id AND m.org = ?
+			WHERE u.id = ?`, id.Org, userID).Scan(&id.Name, &scope)
+	} else {
+		// A token session lives only as long as its token, and has its limits.
+		err = s.db.QueryRowContext(ctx, `SELECT scope, apps, org FROM tokens WHERE name = ?`, id.Name).Scan(&scope, &apps, &id.Org)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	id.UserID, id.Scope, id.Apps = userID, Scope(scope), splitApps(apps)
+	return &id, nil
 }
 
 func (s *Store) DeleteSession(ctx context.Context, plain string) error {
@@ -753,6 +803,7 @@ func (s *Store) DeleteSession(ctx context.Context, plain string) error {
 // is only ever injected into the app and the database container.
 type Database struct {
 	App       string
+	Org       string // for data services (App == "")
 	Name      string
 	Engine    string
 	Version   string
@@ -763,8 +814,8 @@ type Database struct {
 func (s *Store) GetDatabase(ctx context.Context, app, name string) (*Database, error) {
 	var d Database
 	var created string
-	err := s.db.QueryRowContext(ctx, `SELECT app, name, engine, version, password, created_at FROM databases WHERE app = ? AND name = ?`, app, name).
-		Scan(&d.App, &d.Name, &d.Engine, &d.Version, &d.Password, &created)
+	err := s.db.QueryRowContext(ctx, `SELECT app, org, name, engine, version, password, created_at FROM databases WHERE app = ? AND name = ?`, app, name).
+		Scan(&d.App, &d.Org, &d.Name, &d.Engine, &d.Version, &d.Password, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -787,16 +838,16 @@ func (s *Store) SaveDatabase(ctx context.Context, d *Database) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO databases(app, name, engine, version, password, created_at) VALUES(?,?,?,?,?,?)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO databases(app, org, name, engine, version, password, created_at) VALUES(?,?,?,?,?,?,?)
 		ON CONFLICT(app, name) DO UPDATE SET engine=excluded.engine, version=excluded.version`,
-		d.App, d.Name, d.Engine, d.Version, pw, ts(d.CreatedAt))
+		d.App, OrgOr(d.Org), d.Name, d.Engine, d.Version, pw, ts(d.CreatedAt))
 	return err
 }
 
 // AllDatabases lists every managed database: standalone data services
 // (App == "") first, then apps' databases, by name. Passwords are left out.
 func (s *Store) AllDatabases(ctx context.Context) ([]Database, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT app, name, engine, version, created_at FROM databases ORDER BY app != '', app, name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT app, org, name, engine, version, created_at FROM databases ORDER BY app != '', app, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -805,7 +856,7 @@ func (s *Store) AllDatabases(ctx context.Context) ([]Database, error) {
 	for rows.Next() {
 		var d Database
 		var created string
-		if err := rows.Scan(&d.App, &d.Name, &d.Engine, &d.Version, &created); err != nil {
+		if err := rows.Scan(&d.App, &d.Org, &d.Name, &d.Engine, &d.Version, &created); err != nil {
 			return nil, err
 		}
 		d.CreatedAt, _ = time.Parse(tsFormat, created)
@@ -1043,7 +1094,7 @@ func (s *Store) GetDeployLog(ctx context.Context, deployment string) ([]string, 
 // --- apps ---
 
 func (s *Store) GetApp(ctx context.Context, name string) (*App, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT name, spec, current_deployment, preview_of, expires_at, created_at, updated_at FROM apps WHERE name = ?`, name)
+	row := s.db.QueryRowContext(ctx, `SELECT name, org, spec, current_deployment, preview_of, expires_at, created_at, updated_at FROM apps WHERE name = ?`, name)
 	a, err := s.scanApp(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -1052,7 +1103,7 @@ func (s *Store) GetApp(ctx context.Context, name string) (*App, error) {
 }
 
 func (s *Store) ListApps(ctx context.Context) ([]App, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, spec, current_deployment, preview_of, expires_at, created_at, updated_at FROM apps ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, org, spec, current_deployment, preview_of, expires_at, created_at, updated_at FROM apps ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1074,7 +1125,7 @@ func (s *Store) scanApp(r scanner) (*App, error) {
 	var a App
 	var specJSON sql.NullString
 	var created, updated, expires string
-	if err := r.Scan(&a.Name, &specJSON, &a.CurrentDeployment, &a.PreviewOf, &expires, &created, &updated); err != nil {
+	if err := r.Scan(&a.Name, &a.Org, &specJSON, &a.CurrentDeployment, &a.PreviewOf, &expires, &created, &updated); err != nil {
 		return nil, err
 	}
 	if expires != "" {
@@ -1116,10 +1167,11 @@ func (s *Store) UpsertApp(ctx context.Context, a *App) error {
 	if a.ExpiresAt != nil {
 		expires = ts(*a.ExpiresAt)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO apps(name, spec, current_deployment, preview_of, expires_at, created_at, updated_at) VALUES(?,?,?,?,?,?,?)
+	// The org is set when the app is created; MoveApp changes it.
+	_, err := s.db.ExecContext(ctx, `INSERT INTO apps(name, org, spec, current_deployment, preview_of, expires_at, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?)
 		ON CONFLICT(name) DO UPDATE SET spec=excluded.spec, current_deployment=excluded.current_deployment,
 		preview_of=excluded.preview_of, expires_at=excluded.expires_at, updated_at=excluded.updated_at`,
-		a.Name, specJSON, a.CurrentDeployment, a.PreviewOf, expires, ts(a.CreatedAt), ts(a.UpdatedAt))
+		a.Name, OrgOr(a.Org), specJSON, a.CurrentDeployment, a.PreviewOf, expires, ts(a.CreatedAt), ts(a.UpdatedAt))
 	return err
 }
 
@@ -1262,13 +1314,33 @@ func (s *Store) AddAudit(ctx context.Context, e AuditEntry) error {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO audit(ts, actor, action, target, reason, detail) VALUES(?,?,?,?,?,?)`,
-		ts(e.Time), e.Actor, e.Action, e.Target, e.Reason, detail)
+	if e.Org == "" {
+		e.Org = s.orgOf(ctx, e.Target)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO audit(ts, actor, action, target, reason, detail, org) VALUES(?,?,?,?,?,?,?)`,
+		ts(e.Time), e.Actor, e.Action, e.Target, e.Reason, detail, e.Org)
 	return err
 }
 
-func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, ts, actor, action, target, reason, detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
+// orgOf guesses the org an audit entry belongs to: the request's, else
+// that of the app or data service it targets, else the default org.
+func (s *Store) orgOf(ctx context.Context, target string) string {
+	if o := OrgFrom(ctx); o != "" {
+		return o
+	}
+	var org string
+	if s.db.QueryRowContext(ctx, `SELECT org FROM apps WHERE name = ?`, target).Scan(&org) == nil {
+		return org
+	}
+	if s.db.QueryRowContext(ctx, `SELECT org FROM databases WHERE app = '' AND name = ?`, target).Scan(&org) == nil {
+		return org
+	}
+	return DefaultOrg
+}
+
+// ListAudit lists an org's entries, newest first; org "" lists all.
+func (s *Store) ListAudit(ctx context.Context, org string, limit int) ([]AuditEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, ts, actor, action, target, reason, detail FROM audit WHERE ? IN ('', org) ORDER BY id DESC LIMIT ?`, org, limit)
 	if err != nil {
 		return nil, err
 	}

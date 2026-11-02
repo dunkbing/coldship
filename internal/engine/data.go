@@ -26,6 +26,8 @@ type DataRequest struct {
 	Name    string `json:"name" jsonschema:"name, lowercase letters, digits and dashes"`
 	Engine  string `json:"engine" jsonschema:"postgres, mysql, redis, or s3 (S3-compatible object storage)"`
 	Version string `json:"version,omitempty" jsonschema:"version (default: the latest supported)"`
+	// Org is set by the server from the caller, never by the request.
+	Org string `json:"-"`
 }
 
 // DataView describes a data service, or a database owned by an app.
@@ -35,6 +37,7 @@ type DataView struct {
 	Version string `json:"version"`
 	// App owns the database; "" for a standalone data service.
 	App    string           `json:"app,omitempty"`
+	Org    string           `json:"org"`
 	Host   string           `json:"host"`
 	Status runtime.DBStatus `json:"status"`
 	// UsedBy lists the apps that connect to it.
@@ -65,7 +68,9 @@ func (e *Engine) serviceDB(ctx context.Context, name string) (runtime.DB, error)
 	if err != nil {
 		return runtime.DB{}, err
 	}
-	if rec == nil {
+	// Another org's service doesn't exist for this caller: never connect
+	// an app to it or hand out its credentials.
+	if org := store.OrgFrom(ctx); rec == nil || (org != "" && rec.Org != org) {
 		return runtime.DB{}, apierr.NotFound("data_service", name).WithHint("see coldship data list, or create it with coldship data create")
 	}
 	return runtime.DB{Name: rec.Name, Engine: rec.Engine, Version: rec.Version, Password: rec.Password}, nil
@@ -101,7 +106,7 @@ func (e *Engine) CreateData(ctx context.Context, actor string, req DataRequest) 
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
 	}
-	rec := &store.Database{Name: req.Name, Engine: req.Engine, Version: req.Version, Password: hex.EncodeToString(b), CreatedAt: e.Now()}
+	rec := &store.Database{Name: req.Name, Org: store.OrgOr(req.Org), Engine: req.Engine, Version: req.Version, Password: hex.EncodeToString(b), CreatedAt: e.Now()}
 	if err := e.st.SaveDatabase(ctx, rec); err != nil {
 		return nil, err
 	}
@@ -154,12 +159,17 @@ func usersOf(apps []store.App, name string) []string {
 
 func (e *Engine) dataView(ctx context.Context, rec store.Database, apps []store.App) DataView {
 	db := runtime.DB{App: rec.App, Name: rec.Name, Engine: rec.Engine}
-	v := DataView{Name: rec.Name, Engine: rec.Engine, Version: rec.Version, App: rec.App, Host: db.Host(), CreatedAt: rec.CreatedAt}
+	v := DataView{Name: rec.Name, Engine: rec.Engine, Version: rec.Version, App: rec.App, Org: rec.Org, Host: db.Host(), CreatedAt: rec.CreatedAt}
 	v.Status, _ = e.rt.DatabaseStatus(ctx, rec.App, rec.Name)
 	if rec.App == "" {
 		v.UsedBy = usersOf(apps, rec.Name)
 	} else {
 		v.UsedBy = []string{rec.App}
+		for _, a := range apps {
+			if a.Name == rec.App {
+				v.Org = a.Org // an app's own database belongs to the app's org
+			}
+		}
 	}
 	env := envFor(db, "")
 	if rec.App != "" {
@@ -205,7 +215,7 @@ func (e *Engine) GetData(ctx context.Context, name string) (*DataView, error) {
 	if err != nil {
 		return nil, err
 	}
-	if rec == nil {
+	if org := store.OrgFrom(ctx); rec == nil || (org != "" && rec.Org != org) {
 		return nil, apierr.NotFound("data_service", name)
 	}
 	apps, err := e.st.ListApps(ctx)

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"github.com/dunkbing/coldship/internal/store"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,7 @@ import (
 
 func TestGitHub(t *testing.T) {
 	e, _ := dbSetup(t)
-	ctx := context.Background()
+	ctx := store.WithOrg(context.Background(), store.DefaultOrg)
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer good" {
 			w.WriteHeader(401)
@@ -40,6 +41,14 @@ func TestGitHub(t *testing.T) {
 	st, err := e.ConnectGitHub(ctx, "admin", "good")
 	if err != nil || st.Account != "octo" || e.GitHubToken(ctx) != "good" {
 		t.Fatalf("%+v %v", st, err)
+	}
+	// Each org has its own connection; no org in ctx means no token.
+	other := store.WithOrg(ctx, "acme")
+	if e.GitHubToken(other) != "" || e.GitHubToken(context.Background()) != "" {
+		t.Fatal("token leaked to another org")
+	}
+	if _, err := e.GitHubRepos(other); code(err) != "github_not_connected" {
+		t.Fatalf("other org: %v", err)
 	}
 	repos, err := e.GitHubRepos(ctx)
 	if err != nil || len(repos) != 1 || !repos[0].Private || repos[0].CloneURL != "https://github.com/octo/site.git" {

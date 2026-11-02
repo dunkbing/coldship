@@ -22,12 +22,49 @@ import (
 )
 
 type principal struct {
-	name  string
-	scope store.Scope
-	apps  []string // empty: every app
+	name   string
+	scope  store.Scope
+	apps   []string // empty: every app
+	org    string
+	userID string // set when a user (not a token) is signed in
 }
 
 func (p principal) limited() bool { return len(p.apps) > 0 }
+
+// serverAdmin reports whether p runs the server itself: an admin of the
+// default org, not limited to some apps.
+func (p principal) serverAdmin() bool {
+	return p.org == store.DefaultOrg && p.scope == store.ScopeAdmin && !p.limited()
+}
+
+func (p principal) fromIdentity(id *store.Identity) principal {
+	return principal{name: id.Name, scope: id.Scope, apps: id.Apps, org: store.OrgOr(id.Org), userID: id.UserID}
+}
+
+// inOrg reports whether app exists in p's org. Apps of other orgs are
+// reported as not found, so their names don't leak.
+func (s *Server) inOrg(ctx context.Context, p principal, app string) error {
+	a, err := s.st.GetApp(ctx, app)
+	if err != nil {
+		return err
+	}
+	if a != nil && a.Org != p.org {
+		return apierr.NotFound("app", app)
+	}
+	return nil
+}
+
+// dataInOrg is inOrg for data services.
+func (s *Server) dataInOrg(ctx context.Context, p principal, name string) error {
+	d, err := s.st.GetDatabase(ctx, "", name)
+	if err != nil {
+		return err
+	}
+	if d != nil && d.Org != p.org {
+		return apierr.NotFound("data_service", name)
+	}
+	return nil
+}
 
 // allowApp returns an error unless p may use app, or app is a preview of an
 // app p may use.
@@ -58,6 +95,7 @@ type Server struct {
 	// publicURL is how Git hosts reach this server, for webhook URLs.
 	publicURL string
 	rotateKey func(context.Context) (map[string]any, error)
+	logins    loginLimiter
 }
 
 // SetKeyRotation enables rotating the secret key through the API.
@@ -104,11 +142,11 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("POST /v1/plans/{id}/approve", store.ScopeAdmin, s.approvePlan)
 	s.route("GET /v1/audit", store.ScopeRead, s.audit)
 	s.route("GET /v1/system", store.ScopeRead, s.system)
-	s.route("GET /v1/system/secrets", store.ScopeAdmin, s.secretsStatus)
+	s.route("GET /v1/system/secrets", store.ScopeAdmin, serverOnly(s.secretsStatus))
 	s.route("GET /v1/system/status", store.ScopeRead, s.serverStatus)
-	s.route("POST /v1/system/secrets/rotate", store.ScopeAdmin, s.rotateSecrets)
-	s.route("POST /v1/system/check", store.ScopeAdmin, s.systemCheck)
-	s.route("POST /v1/system/upgrade", store.ScopeAdmin, s.systemUpgrade)
+	s.route("POST /v1/system/secrets/rotate", store.ScopeAdmin, serverOnly(s.rotateSecrets))
+	s.route("POST /v1/system/check", store.ScopeAdmin, serverOnly(s.systemCheck))
+	s.route("POST /v1/system/upgrade", store.ScopeAdmin, serverOnly(s.systemUpgrade))
 	s.route("GET /v1/data", store.ScopeRead, s.listData)
 	s.route("POST /v1/data", store.ScopeDeploy, s.createData)
 	s.route("GET /v1/data/{name}", store.ScopeRead, s.getData)
@@ -122,6 +160,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("DELETE /v1/integrations/github", store.ScopeAdmin, s.disconnectGitHub)
 	s.route("GET /v1/integrations/github/repos", store.ScopeDeploy, s.githubRepos)
 	s.route("GET /v1/integrations/github/repos/{owner}/{repo}/branches", store.ScopeDeploy, s.githubBranches)
+	s.routeOrgs()
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
 	s.route("GET /v1/tokens", store.ScopeAdmin, s.listTokens)
 	s.route("DELETE /v1/tokens/{name}", store.ScopeAdmin, s.revokeToken)
@@ -159,7 +198,13 @@ func (s *Server) route(pattern string, need store.Scope, h handler) {
 			return
 		}
 		if !p.scope.Allows(need) {
-			writeErr(w, s.log, apierr.New(403, "insufficient_scope", "token %q has scope %s; this action needs %s", p.name, p.scope, need))
+			writeErr(w, s.log, apierr.New(403, "insufficient_scope", "%s has scope %s; this action needs %s", p.name, p.scope, need))
+			return
+		}
+		// Everything below acts in the caller's org.
+		r = r.WithContext(store.WithOrg(r.Context(), p.org))
+		if err := s.orgGuard(r, p, pattern); err != nil {
+			writeErr(w, s.log, err)
 			return
 		}
 		if p.limited() && strings.Contains(pattern, "/v1/data/{name}") && !store.MatchApps(p.apps, r.PathValue("name")) {
@@ -211,7 +256,7 @@ func (s *Server) auth(r *http.Request) (principal, error) {
 		if t == nil {
 			return principal{}, apierr.New(401, "unauthenticated", "session expired or signed out")
 		}
-		return principal{name: t.Name, scope: t.Scope, apps: t.Apps}, nil
+		return principal{}.fromIdentity(t), nil
 	}
 	t, err := s.st.LookupToken(r.Context(), tok)
 	if err != nil {
@@ -220,7 +265,40 @@ func (s *Server) auth(r *http.Request) (principal, error) {
 	if t == nil {
 		return principal{}, apierr.New(401, "unauthenticated", "unknown token")
 	}
-	return principal{name: t.Name, scope: t.Scope, apps: t.Apps}, nil
+	return principal{name: t.Name, scope: t.Scope, apps: t.Apps, org: store.OrgOr(t.Org)}, nil
+}
+
+// orgGuard keeps every by-name or by-id route inside the caller's org.
+func (s *Server) orgGuard(r *http.Request, p principal, pattern string) error {
+	ctx := r.Context()
+	switch {
+	case strings.Contains(pattern, "/v1/apps/{name}"), strings.Contains(pattern, "/v1/previews/{name}"):
+		return s.inOrg(ctx, p, r.PathValue("name"))
+	case strings.Contains(pattern, "/v1/data/{name}"):
+		return s.dataInOrg(ctx, p, r.PathValue("name"))
+	case strings.Contains(pattern, "/v1/plans/{id}"):
+		pl, err := s.st.GetPlan(ctx, r.PathValue("id"))
+		if err != nil {
+			return err
+		}
+		if pl != nil && store.OrgOr(pl.Org) != p.org {
+			return apierr.NotFound("plan", r.PathValue("id"))
+		}
+	case strings.Contains(pattern, "/v1/deployments/{id}"):
+		return s.deploymentInOrg(ctx, p, r.PathValue("id"))
+	}
+	return nil
+}
+
+func (s *Server) deploymentInOrg(ctx context.Context, p principal, id string) error {
+	d, err := s.st.GetDeployment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if d != nil && store.OrgOr(d.Org) != p.org {
+		return apierr.NotFound("deployment", id)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -268,10 +346,44 @@ type WhoAmI struct {
 	Scope store.Scope `json:"scope"`
 	// Apps lists the apps the token is limited to; empty means all.
 	Apps []string `json:"apps,omitempty"`
+	// Org is the organization the caller acts in.
+	Org *store.Org `json:"org,omitempty"`
+	// User is set when a person (not a token) is signed in; Orgs lists
+	// the organizations they belong to.
+	User        *store.User `json:"user,omitempty"`
+	Orgs        []store.Org `json:"orgs,omitempty"`
+	ServerAdmin bool        `json:"server_admin"`
+	// CanCreateOrgs is true for admins of the default org.
+	CanCreateOrgs bool `json:"can_create_orgs"`
 }
 
-func (s *Server) whoami(_ *http.Request, p principal) (any, error) {
-	return WhoAmI{Name: p.name, Scope: p.scope, Apps: p.apps}, nil
+func (s *Server) whoami(r *http.Request, p principal) (any, error) {
+	return s.who(r.Context(), p)
+}
+
+func (s *Server) who(ctx context.Context, p principal) (*WhoAmI, error) {
+	w := &WhoAmI{Name: p.name, Scope: p.scope, Apps: p.apps, ServerAdmin: p.serverAdmin()}
+	o, err := s.st.GetOrg(ctx, p.org)
+	if err != nil {
+		return nil, err
+	}
+	w.Org = o
+	if p.userID != "" {
+		if w.User, err = s.st.GetUser(ctx, p.userID); err != nil {
+			return nil, err
+		}
+		if w.Orgs, err = s.st.UserOrgs(ctx, p.userID); err != nil {
+			return nil, err
+		}
+		for _, o := range w.Orgs {
+			if o.ID == store.DefaultOrg && o.Role == store.ScopeAdmin {
+				w.CanCreateOrgs = true
+			}
+		}
+	} else if o != nil {
+		w.Orgs = []store.Org{*o}
+	}
+	return w, nil
 }
 
 func (s *Server) listPlans(r *http.Request, p principal) (any, error) {
@@ -280,12 +392,12 @@ func (s *Server) listPlans(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	plans, err := s.eng.ListPlans(r.Context(), r.URL.Query().Get("status"), limit)
-	if err != nil || !p.limited() {
-		return plans, err
+	if err != nil {
+		return nil, err
 	}
 	out := plans[:0:0]
 	for _, pl := range plans {
-		if s.allowApp(r.Context(), p, pl.App) == nil {
+		if store.OrgOr(pl.Org) == p.org && (!p.limited() || s.allowApp(r.Context(), p, pl.App) == nil) {
 			out = append(out, pl)
 		}
 	}
@@ -305,14 +417,17 @@ func (s *Server) allowPlan(r *http.Request, p principal) error {
 }
 
 type SessionRequest struct {
-	Token string `json:"token"`
+	Token    string `json:"token,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
-// createSession exchanges an API token for an HttpOnly session cookie, so the
-// dashboard never keeps the token itself.
+// createSession signs the dashboard in, with an API token or a user's email
+// and password, and sets an HttpOnly session cookie: the dashboard never
+// keeps a token itself.
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	// A cross-site form can't set this header, so another site can't sign
-	// the browser in to an attacker's token (login CSRF).
+	// the browser in to an attacker's account (login CSRF).
 	if r.Header.Get(CSRFHeader) == "" {
 		writeErr(w, s.log, apierr.New(403, "csrf_check_failed", "sign-in requests need the %s header", CSRFHeader))
 		return
@@ -321,6 +436,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	var req SessionRequest
 	if err := decode(r, &req); err != nil {
 		writeErr(w, s.log, err)
+		return
+	}
+	if req.Email != "" || req.Password != "" {
+		s.passwordSignIn(w, r, req)
 		return
 	}
 	t, err := s.st.LookupToken(r.Context(), strings.TrimSpace(req.Token))
@@ -337,13 +456,22 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, s.log, err)
 		return
 	}
-	_ = s.st.AddAudit(r.Context(), store.AuditEntry{Actor: t.Name, Action: "session.create", Target: t.Name})
+	_ = s.st.AddAudit(r.Context(), store.AuditEntry{Actor: t.Name, Action: "session.create", Target: t.Name, Org: store.OrgOr(t.Org)})
+	s.setSession(w, r, id, sessionTTL)
+	who, err := s.who(r.Context(), principal{name: t.Name, scope: t.Scope, apps: t.Apps, org: store.OrgOr(t.Org)})
+	if err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, who)
+}
+
+func (s *Server) setSession(w http.ResponseWriter, r *http.Request, id string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
-		Name: SessionCookie, Value: id, Path: "/", MaxAge: int(sessionTTL.Seconds()),
+		Name: SessionCookie, Value: id, Path: "/", MaxAge: int(ttl.Seconds()),
 		HttpOnly: true, SameSite: http.SameSiteStrictMode,
 		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 	})
-	writeJSON(w, http.StatusOK, WhoAmI{Name: t.Name, Scope: t.Scope})
 }
 
 // deleteSession signs the dashboard out: the session is deleted server-side
@@ -490,8 +618,8 @@ func (s *Server) deployLog(r *http.Request, p principal) (any, error) {
 
 func (s *Server) listApps(r *http.Request, p principal) (any, error) {
 	apps, err := s.eng.ListApps(r.Context())
-	if err != nil || !p.limited() {
-		return apps, err
+	if err != nil {
+		return nil, err
 	}
 	return visibleApps(p, apps), nil
 }
@@ -499,7 +627,7 @@ func (s *Server) listApps(r *http.Request, p principal) (any, error) {
 func visibleApps(p principal, apps []store.App) []store.App {
 	out := apps[:0:0]
 	for _, a := range apps {
-		if p.visible(a.Name, a.PreviewOf) {
+		if a.Org == p.org && p.visible(a.Name, a.PreviewOf) {
 			out = append(out, a)
 		}
 	}
@@ -548,11 +676,14 @@ func (s *Server) detectBuild(r *http.Request, p principal) (any, error) {
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	app := req.App
+	if req.Spec != nil {
+		app = req.Spec.Name
+	}
+	if err := s.inOrg(r.Context(), p, app); err != nil {
+		return nil, err
+	}
 	if p.limited() {
-		app := req.App
-		if req.Spec != nil {
-			app = req.Spec.Name
-		}
 		if err := s.allowApp(r.Context(), p, app); err != nil {
 			return nil, err
 		}
@@ -566,6 +697,9 @@ func (s *Server) createPreview(r *http.Request, p principal) (any, error) {
 		return nil, err
 	}
 	req.AdminCaller = p.scope.Allows(store.ScopeAdmin)
+	if err := s.inOrg(r.Context(), p, req.App); err != nil {
+		return nil, err
+	}
 	if p.limited() {
 		if err := s.allowApp(r.Context(), p, req.App); err != nil {
 			return nil, err
@@ -576,8 +710,8 @@ func (s *Server) createPreview(r *http.Request, p principal) (any, error) {
 
 func (s *Server) listPreviews(r *http.Request, p principal) (any, error) {
 	apps, err := s.eng.ListPreviews(r.Context())
-	if err != nil || !p.limited() {
-		return apps, err
+	if err != nil {
+		return nil, err
 	}
 	return visibleApps(p, apps), nil
 }
@@ -631,6 +765,9 @@ func (s *Server) applyPlan(r *http.Request, p principal) (any, error) {
 }
 
 func (s *Server) approvePlan(r *http.Request, p principal) (any, error) {
+	if err := s.allowPlan(r, p); err != nil {
+		return nil, err
+	}
 	return s.eng.Approve(r.Context(), p.name, r.PathValue("id"))
 }
 
@@ -639,7 +776,7 @@ func (s *Server) audit(r *http.Request, p principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	entries, err := s.eng.Audit(r.Context(), limit)
+	entries, err := s.eng.Audit(r.Context(), p.org, limit)
 	if err != nil || !p.limited() {
 		return entries, err
 	}
@@ -744,20 +881,20 @@ func (s *Server) createToken(r *http.Request, p principal) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	tok, err := s.eng.CreateToken(r.Context(), p.name, req.Name, scope, req.Apps)
+	tok, err := s.eng.CreateToken(r.Context(), p.name, p.org, req.Name, scope, req.Apps)
 	if err != nil {
 		return nil, err
 	}
 	return TokenResponse{Name: req.Name, Scope: string(scope), Apps: req.Apps, Token: tok}, nil
 }
 
-func (s *Server) listTokens(r *http.Request, _ principal) (any, error) {
-	return s.eng.ListTokens(r.Context())
+func (s *Server) listTokens(r *http.Request, p principal) (any, error) {
+	return s.eng.ListTokens(r.Context(), p.org)
 }
 
 func (s *Server) revokeToken(r *http.Request, p principal) (any, error) {
 	name := r.PathValue("name")
-	if err := s.eng.RevokeToken(r.Context(), p.name, name, r.URL.Query().Get("reason")); err != nil {
+	if err := s.eng.RevokeToken(r.Context(), p.name, p.org, name, r.URL.Query().Get("reason")); err != nil {
 		return nil, err
 	}
 	return map[string]any{"name": name, "revoked": true}, nil
@@ -772,12 +909,15 @@ func dataNotAllowed(p principal, name string) error {
 
 func (s *Server) listData(r *http.Request, p principal) (any, error) {
 	list, err := s.eng.ListData(r.Context())
-	if err != nil || !p.limited() {
-		return list, err
+	if err != nil {
+		return nil, err
 	}
 	out := list[:0:0]
 	for _, d := range list {
-		if (d.App == "" && store.MatchApps(p.apps, d.Name)) || (d.App != "" && s.allowApp(r.Context(), p, d.App) == nil) {
+		if d.Org != p.org {
+			continue
+		}
+		if !p.limited() || (d.App == "" && store.MatchApps(p.apps, d.Name)) || (d.App != "" && s.allowApp(r.Context(), p, d.App) == nil) {
 			out = append(out, d)
 		}
 	}
@@ -792,6 +932,7 @@ func (s *Server) createData(r *http.Request, p principal) (any, error) {
 	if p.limited() && !store.MatchApps(p.apps, req.Name) {
 		return nil, dataNotAllowed(p, req.Name)
 	}
+	req.Org = p.org
 	return s.eng.CreateData(r.Context(), p.name, req)
 }
 
@@ -857,6 +998,10 @@ func (s *Server) streamDeployLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	if err := s.deploymentInOrg(r.Context(), p, id); err != nil {
+		writeErr(w, s.log, err)
+		return
+	}
 	app, lines, next, stop, err := s.eng.FollowDeployLog(r.Context(), id)
 	if err != nil {
 		writeErr(w, s.log, err)
@@ -917,8 +1062,8 @@ func (s *Server) streamDeployLog(w http.ResponseWriter, r *http.Request) {
 // serverStatus is the whole server's status: tokens limited to some apps
 // don't see it.
 func (s *Server) serverStatus(r *http.Request, p principal) (any, error) {
-	if p.limited() {
-		return nil, apierr.New(403, "app_not_allowed", "token %q is limited to some apps and can't see the whole server", p.name)
+	if p.limited() || p.org != store.DefaultOrg {
+		return nil, apierr.New(403, "server_only", "%s can't see the whole server: only members of the default organization can", p.name)
 	}
 	st := s.eng.Status(r.Context())
 	return struct {

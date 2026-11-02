@@ -96,7 +96,8 @@ type Git struct {
 	// https repositories. SSH uses the server user's keys.
 	CredentialsFile string
 	// GitHubToken, if set, returns a token for cloning private GitHub repos.
-	GitHubToken func() string
+	// ctx carries the org the build is for (store.WithOrg).
+	GitHubToken func(ctx context.Context) string
 	// AllowedProtocols is passed as GIT_ALLOW_PROTOCOL. The default blocks
 	// file:// and ext:: transports.
 	AllowedProtocols string
@@ -110,21 +111,21 @@ func NewGit() *Git {
 	return &Git{GitBin: "git", DockerBin: "docker", AllowedProtocols: "http:https:ssh", Timeout: 20 * time.Minute}
 }
 
-func (g *Git) env() []string {
+func (g *Git) env(ctx context.Context) []string {
 	return append(os.Environ(),
 		"GIT_ALLOW_PROTOCOL="+g.AllowedProtocols,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
 		"DOCKER_BUILDKIT=1",
-		"COLDSHIP_GITHUB_TOKEN="+g.githubToken(),
+		"COLDSHIP_GITHUB_TOKEN="+g.githubToken(ctx),
 	)
 }
 
-func (g *Git) githubToken() string {
+func (g *Git) githubToken(ctx context.Context) string {
 	if g.GitHubToken == nil {
 		return ""
 	}
-	return g.GitHubToken()
+	return g.GitHubToken(ctx)
 }
 
 // UsePodman builds with the podman command (which has no --progress flag).
@@ -132,12 +133,12 @@ func (g *Git) UsePodman() { g.DockerBin, g.podman = "podman", true }
 
 // gitArgs prefixes args with config that disables interactive credential
 // helpers and, if configured, uses the server's credential store.
-func (g *Git) gitArgs(args ...string) []string {
+func (g *Git) gitArgs(ctx context.Context, args ...string) []string {
 	pre := []string{"-c", "credential.helper=", "-c", "core.hooksPath=/dev/null", "-c", "protocol.version=2"}
 	if g.CredentialsFile != "" {
 		pre = append(pre, "-c", "credential.helper=store --file="+g.CredentialsFile)
 	}
-	if g.githubToken() != "" {
+	if g.githubToken(ctx) != "" {
 		// The token comes from the environment, never the command line.
 		pre = append(pre, "-c", `credential.https://github.com.helper=!f() { test "$1" = get && echo username=x-access-token && echo "password=$COLDSHIP_GITHUB_TOKEN"; }; f`)
 	}
@@ -147,7 +148,7 @@ func (g *Git) gitArgs(args ...string) []string {
 func (g *Git) run(ctx context.Context, dir string, log io.Writer, bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
-	cmd.Env = g.env()
+	cmd.Env = g.env(ctx)
 	var out bytes.Buffer
 	if log != nil {
 		cmd.Stdout = io.MultiWriter(&out, log)
@@ -174,7 +175,7 @@ func (g *Git) Resolve(ctx context.Context, b spec.Build) (string, error) {
 	}
 	// Ask for the peeled form too: for an annotated tag, ls-remote filtered by
 	// "v1" alone returns the tag object, not the commit it points to.
-	out, err := g.run(ctx, "", nil, g.GitBin, g.gitArgs("ls-remote", "--", b.Git, want, want+"^{}")...)
+	out, err := g.run(ctx, "", nil, g.GitBin, g.gitArgs(ctx, "ls-remote", "--", b.Git, want, want+"^{}")...)
 	if err != nil {
 		return "", unreachable(b.Git, out)
 	}
@@ -189,7 +190,7 @@ func (g *Git) Resolve(ctx context.Context, b spec.Build) (string, error) {
 		}
 	}
 	e := apierr.New(422, "git_ref_not_found", "ref %q was not found in %s", b.Ref, b.Git).WithField("build.ref")
-	if out, err := g.run(ctx, "", nil, g.GitBin, g.gitArgs("ls-remote", "--heads", "--tags", "--", b.Git)...); err == nil {
+	if out, err := g.run(ctx, "", nil, g.GitBin, g.gitArgs(ctx, "ls-remote", "--heads", "--tags", "--", b.Git)...); err == nil {
 		var names []string
 		for name := range parseLsRemote(out) {
 			name = strings.TrimSuffix(name, "^{}")
@@ -348,15 +349,15 @@ func (g *Git) checkout(ctx context.Context, b spec.Build, log io.Writer) (*check
 	if out, err := g.run(ctx, "", log, g.GitBin, "init", "-q", repo); err != nil {
 		return co, apierr.New(500, "git_clone_failed", "git init failed: %s", lastLine(out))
 	}
-	if out, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("remote", "add", "origin", b.Git)...); err != nil {
+	if out, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs(ctx, "remote", "add", "origin", b.Git)...); err != nil {
 		return co, apierr.New(500, "git_clone_failed", "git remote add failed: %s", lastLine(out))
 	}
 	// Fast path: shallow fetch of exactly the commit. Not every server allows
 	// fetching by SHA (and dumb HTTP cannot do shallow fetches), so fall back
 	// to a full fetch.
-	if _, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("fetch", "-q", "--depth", "1", "origin", b.Commit)...); err != nil {
+	if _, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs(ctx, "fetch", "-q", "--depth", "1", "origin", b.Commit)...); err != nil {
 		fmt.Fprintln(log, "coldship: shallow fetch by commit not supported, fetching all branches")
-		if out, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs("fetch", "-q", "--tags", "origin", "+refs/heads/*:refs/remotes/origin/*")...); err != nil {
+		if out, err := g.run(ctx, repo, log, g.GitBin, g.gitArgs(ctx, "fetch", "-q", "--tags", "origin", "+refs/heads/*:refs/remotes/origin/*")...); err != nil {
 			return co, unreachable(b.Git, out)
 		}
 	}
