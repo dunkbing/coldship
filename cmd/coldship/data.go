@@ -14,7 +14,7 @@ import (
 	"github.com/dunkbing/coldship/internal/engine"
 )
 
-var engineNames = map[string]string{"postgres": "Postgres", "mysql": "MySQL", "redis": "Redis", "s3": "S3 storage"}
+var engineNames = map[string]string{"postgres": "Postgres", "mysql": "MySQL", "redis": "Redis", "s3": "S3 storage", "rustfs": "RustFS storage"}
 
 func dataCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -24,7 +24,7 @@ func dataCmd() *cobra.Command {
 Create one, then connect apps to it:
 
   coldship data create postgres maindb
-  coldship data create s3 uploads
+  coldship data create s3 uploads        # or rustfs, for RustFS
   coldship deploy --name web --use maindb --use uploads
 
 Connected apps get DATABASE_URL (postgres, mysql), REDIS_URL (redis), or the
@@ -69,7 +69,7 @@ AWS_* and S3_* variables S3 libraries read (s3 storage).`,
 
 	var version string
 	create := &cobra.Command{
-		Use:   "create <postgres|mysql|redis|s3> <name>",
+		Use:   "create <postgres|mysql|redis|s3|rustfs> <name>",
 		Short: "Create a data service and wait until it's ready",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

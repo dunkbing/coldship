@@ -104,3 +104,24 @@ func TestDataServices(t *testing.T) {
 		t.Fatal("deleting must snapshot first")
 	}
 }
+
+func TestRustFSStorage(t *testing.T) {
+	e, rt := dbSetup(t)
+	ctx := context.Background()
+	v, err := e.CreateData(ctx, "admin", DataRequest{Name: "media", Engine: "rustfs"})
+	if err != nil || v.Version != "1.0.4" {
+		t.Fatalf("create: %+v %v", v, err)
+	}
+	deploy(t, e, &spec.App{Name: "web", Image: "web:1", Port: 80, Uses: []string{"media"}})
+	env := rt.Containers["web"].Env
+	if env["AWS_ENDPOINT_URL"] != "http://coldship-data-media:9000" || env["S3_BUCKET"] != "media" || env["AWS_SECRET_ACCESS_KEY"] == "" {
+		t.Fatalf("env: %v", env)
+	}
+	if _, err := e.SnapshotData(ctx, "agent", "media", ""); err == nil {
+		t.Fatal("object storage snapshots aren't supported")
+	}
+	bad := &spec.App{Name: "x", Image: "x:1", Databases: []spec.Database{{Name: "m", Engine: "rustfs", Version: "1.0.4"}}}
+	if _, err := e.Plan(ctx, "agent", PlanRequest{Spec: bad}); code(err) != "invalid_spec" {
+		t.Fatalf("rustfs as an app database: %v", err)
+	}
+}

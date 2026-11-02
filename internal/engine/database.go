@@ -366,7 +366,7 @@ func (e *Engine) ScheduledSnapshots(ctx context.Context) (int, error) {
 		return n, errors.Join(append(errs, err)...)
 	}
 	for _, r := range recs {
-		if r.App != "" || r.Engine == spec.EngineS3 {
+		if r.App != "" || spec.IsObjectStorage(r.Engine) {
 			continue
 		}
 		if _, err := e.takeSnapshot(ctx, "coldship", "", spec.Database{Name: r.Name, Engine: r.Engine, Version: r.Version}, "scheduled", false); err != nil {

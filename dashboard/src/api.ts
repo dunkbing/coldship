@@ -236,7 +236,7 @@ export interface ServerStatus {
   data_services: number
 }
 
-export type DataEngine = 'postgres' | 'mysql' | 'redis' | 's3'
+export type DataEngine = 'postgres' | 'mysql' | 'redis' | 's3' | 'rustfs'
 
 // A data service (app === undefined) or a database an app owns.
 export interface DataView {

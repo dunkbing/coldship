@@ -53,7 +53,13 @@ const (
 	// EngineS3 is S3-compatible object storage (SeaweedFS). It is only
 	// available as a standalone data service, not as an app's database.
 	EngineS3 = "s3"
+	// EngineRustFS is S3-compatible object storage on RustFS.
+	EngineRustFS = "rustfs"
 )
+
+// IsObjectStorage reports whether engine is S3-compatible storage, which
+// is a data service only and isn't snapshotted.
+func IsObjectStorage(engine string) bool { return engine == EngineS3 || engine == EngineRustFS }
 
 // Database is a managed database attached to the app. Coldship runs it, keeps
 // its data in a volume, injects its connection URL into the app's env, and
@@ -70,6 +76,7 @@ var supportedVersions = map[string][]string{
 	EngineMySQL:    {"8.4"},
 	EngineRedis:    {"6", "7"},
 	EngineS3:       {"4.51"},
+	EngineRustFS:   {"1.0.4"},
 }
 
 // Versions lists the supported versions of an engine, oldest first; the
@@ -319,7 +326,7 @@ func (a *App) Validate() error {
 			return apierr.Invalid(f+".name", "database name %q must be lowercase letters, digits and dashes", d.Name)
 		case dbNames[d.Name]:
 			return apierr.Invalid(f+".name", "database %q is listed twice", d.Name)
-		case !ok || d.Engine == EngineS3:
+		case !ok || IsObjectStorage(d.Engine):
 			return apierr.Invalid(f+".engine", "engine %q is not supported for an app's database; use postgres, mysql or redis (S3 storage is a data service: coldship data create s3 <name>)", d.Engine).
 				WithFix(map[string]any{"engine": EnginePostgres})
 		case !contains(vs, d.Version):

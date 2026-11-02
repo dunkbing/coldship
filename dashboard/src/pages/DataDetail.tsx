@@ -10,7 +10,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { DataMark, dataKinds, envSummary } from '../components/data'
+import { DataMark, dataKinds, envSummary, isStorage } from '../components/data'
 import { useSession } from '../App'
 import { BackupTable } from './Backups'
 
@@ -188,7 +188,7 @@ export default function DataDetail() {
           <CardTitle>
             <h2>Snapshots</h2>
           </CardTitle>
-          {d.engine !== 's3' && (
+          {!isStorage(d.engine) && (
             <CardAction>
               <Button
                 variant="outline"
@@ -202,7 +202,7 @@ export default function DataDetail() {
           )}
         </CardHeader>
         <CardContent>
-          {d.engine === 's3' ? (
+          {isStorage(d.engine) ? (
             <p className="text-sm text-muted-foreground">
               Snapshots of S3 storage aren't supported yet. Back up the bucket with an S3 tool such as rclone.
             </p>
@@ -279,7 +279,7 @@ export default function DataDetail() {
         </CardContent>
       </Card>
 
-      {d.engine !== 's3' && !me.apps?.length && (
+      {!isStorage(d.engine) && !me.apps?.length && (
         <Card className="mt-4">
           <CardHeader>
             <CardTitle>
@@ -341,7 +341,7 @@ export default function DataDetail() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div className="flex-1 space-y-1.5">
                   <Label htmlFor="confirm-delete" className="block font-normal leading-normal">
-                    Type <Mono>{d.name}</Mono> to delete it and all its data{d.engine !== 's3' && ' (a snapshot is kept)'}
+                    Type <Mono>{d.name}</Mono> to delete it and all its data{!isStorage(d.engine) && ' (a snapshot is kept)'}
                   </Label>
                   <Input
                     id="confirm-delete"

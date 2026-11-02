@@ -148,6 +148,17 @@ var engines = map[string]engineDef{
 		// Any HTTP answer (403 without credentials) means the S3 API is up.
 		ready: []string{"sh", "-c", "wget -q -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q HTTP/"},
 	},
+	spec.EngineRustFS: {
+		// RustFS: the S3 API on port 9000; its web console stays off.
+		image:   func(v string) string { return "rustfs/rustfs:" + v },
+		dataDir: "/data", port: 9000,
+		env: func(d DB) []string {
+			return []string{"RUSTFS_ACCESS_KEY=" + S3AccessKey(d.Name), "RUSTFS_SECRET_KEY=" + d.Password,
+				"RUSTFS_ADDRESS=:9000", "RUSTFS_CONSOLE_ENABLE=false"}
+		},
+		// curl exits 0 on any HTTP answer.
+		ready: []string{"curl", "-s", "-o", "/dev/null", "http://127.0.0.1:9000/"},
+	},
 }
 
 func engineOf(d DB) (engineDef, error) {
@@ -178,6 +189,8 @@ func (d DB) URL() string {
 		return fmt.Sprintf("mysql://app:%s@%s:3306/app", pw, host)
 	case spec.EngineS3:
 		return fmt.Sprintf("http://%s:8333", host)
+	case spec.EngineRustFS:
+		return fmt.Sprintf("http://%s:9000", host)
 	default:
 		return fmt.Sprintf("postgres://app:%s@%s:5432/app?sslmode=disable", pw, host)
 	}
@@ -255,10 +268,35 @@ func (d *Docker) EnsureDatabase(ctx context.Context, db DB, log io.Writer) error
 	if err := d.waitDBReady(ctx, db, log); err != nil {
 		return err
 	}
-	if db.Engine == spec.EngineS3 {
+	switch db.Engine {
+	case spec.EngineS3:
 		return d.ensureBucket(ctx, db)
+	case spec.EngineRustFS:
+		return d.ensureRustFSBucket(ctx, db)
 	}
 	return nil
+}
+
+// ensureRustFSBucket creates the bucket over the S3 API, signed by curl
+// with the container's own keys (from its env, not the command line).
+func (d *Docker) ensureRustFSBucket(ctx context.Context, db DB) error {
+	cmd := fmt.Sprintf(`curl -s -o /dev/null -w '%%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3 -u "$RUSTFS_ACCESS_KEY:$RUSTFS_SECRET_KEY" -X PUT http://127.0.0.1:9000/%s`, db.Name)
+	var lastErr string
+	for i := 0; i < 30; i++ {
+		var out bytes.Buffer
+		code, se, err := d.Exec(ctx, db.container(), []string{"sh", "-c", cmd}, ExecIO{Stdout: &out})
+		status := strings.TrimSpace(out.String())
+		if err == nil && code == 0 && (status == "200" || status == "409") { // 409: it exists
+			return nil
+		}
+		lastErr = errText("HTTP "+status+" "+se, err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	return apierr.New(502, "database_not_ready", "could not create bucket %s: %s", db.Name, lastLine(lastErr))
 }
 
 // ensureBucket creates the S3 service's bucket, named after it. It exists
@@ -365,7 +403,7 @@ func (d *Docker) SnapshotDatabase(ctx context.Context, db DB, w io.Writer) error
 			return apierr.New(502, "snapshot_failed", "redis SAVE failed for %s: %s", db.Name, errText(se, err))
 		}
 		cmd = []string{"cat", "/data/dump.rdb"}
-	case spec.EngineS3:
+	case spec.EngineS3, spec.EngineRustFS:
 		return apierr.New(400, "snapshot_unsupported", "snapshots of S3 storage aren't supported yet").
 			WithHint("back up the bucket with an S3 tool, such as rclone or aws s3 sync")
 	}
@@ -401,7 +439,7 @@ func (d *Docker) RestoreDatabase(ctx context.Context, db DB, r io.Reader, log io
 		if copyErr != nil {
 			return apierr.New(502, "restore_failed", "writing the snapshot failed: %v", copyErr)
 		}
-	case spec.EngineS3:
+	case spec.EngineS3, spec.EngineRustFS:
 		return apierr.New(400, "snapshot_unsupported", "snapshots of S3 storage aren't supported yet")
 	default:
 		code, se, err := d.Exec(ctx, c, eng.restore, ExecIO{Env: execEnv(eng, db), Stdin: r, Stdout: log})

@@ -53,7 +53,7 @@ func New(c *client.Client, version string) *mcp.Server {
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "coldship_create_data",
-		Description: "Create a data service: postgres, mysql, redis, or s3 (S3-compatible object storage, with a bucket named after the service). Waits until it is ready. " +
+		Description: "Create a data service: postgres, mysql, redis, s3 or rustfs (S3-compatible object storage on SeaweedFS or RustFS, with a bucket named after the service). Waits until it is ready. " +
 			"Then connect an app with coldship_plan patch {name: <app>, add_uses: [<service>]}: the app gets DATABASE_URL (postgres, mysql), REDIS_URL (redis), or AWS_* and S3_* variables (s3).",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: &f}},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in engine.DataRequest) (*mcp.CallToolResult, any, error) {

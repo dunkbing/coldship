@@ -24,7 +24,7 @@ import (
 // DataRequest creates a data service.
 type DataRequest struct {
 	Name    string `json:"name" jsonschema:"name, lowercase letters, digits and dashes"`
-	Engine  string `json:"engine" jsonschema:"postgres, mysql, redis, or s3 (S3-compatible object storage)"`
+	Engine  string `json:"engine" jsonschema:"postgres, mysql, redis, s3 (S3-compatible object storage on SeaweedFS) or rustfs (S3-compatible object storage on RustFS)"`
 	Version string `json:"version,omitempty" jsonschema:"version (default: the latest supported)"`
 	// Org is set by the server from the caller, never by the request.
 	Org string `json:"-"`
@@ -50,7 +50,7 @@ type DataView struct {
 
 // envFor is what db injects into an app; override renames a URL variable.
 func envFor(db runtime.DB, override string) map[string]string {
-	if db.Engine == spec.EngineS3 {
+	if spec.IsObjectStorage(db.Engine) {
 		return db.S3Env()
 	}
 	name := override
@@ -83,7 +83,7 @@ func (e *Engine) CreateData(ctx context.Context, actor string, req DataRequest) 
 	}
 	versions := spec.Versions(req.Engine)
 	if len(versions) == 0 {
-		return nil, apierr.Invalid("engine", "engine %q isn't supported; use postgres, mysql, redis or s3", req.Engine).
+		return nil, apierr.Invalid("engine", "engine %q isn't supported; use postgres, mysql, redis, s3 or rustfs", req.Engine).
 			WithFix(map[string]any{"engine": spec.EnginePostgres})
 	}
 	if req.Version == "" {
@@ -255,7 +255,7 @@ func (e *Engine) DeleteData(ctx context.Context, actor, name, reason string) err
 			WithHint("remove it from each app's uses (coldship deploy --name <app> --unuse " + name + ")")
 	}
 	ctx = context.WithoutCancel(ctx)
-	if db.Engine != spec.EngineS3 {
+	if !spec.IsObjectStorage(db.Engine) {
 		if _, err := e.takeSnapshot(ctx, actor, "", spec.Database{Name: name, Engine: db.Engine, Version: db.Version},
 			"before deleting data service "+name, false); err != nil {
 			return apierr.New(502, "snapshot_failed", "%s was not deleted because its snapshot failed: %v", name, err)
@@ -278,7 +278,7 @@ func (e *Engine) SnapshotData(ctx context.Context, actor, name, reason string) (
 	if err != nil {
 		return nil, err
 	}
-	if db.Engine == spec.EngineS3 {
+	if spec.IsObjectStorage(db.Engine) {
 		return nil, apierr.New(400, "snapshot_unsupported", "snapshots of S3 storage aren't supported yet").
 			WithHint("back up the bucket with an S3 tool, such as rclone or aws s3 sync")
 	}
@@ -358,7 +358,7 @@ func (e *Engine) checkUses(ctx context.Context, a *spec.App) error {
 			}
 			return err
 		}
-		if override != "" && db.Engine == spec.EngineS3 {
+		if override != "" && spec.IsObjectStorage(db.Engine) {
 			return apierr.Invalid(fmt.Sprintf("uses[%d]", i), "%s is S3 storage, which sets several AWS_* and S3_* variables; it can't be renamed", name)
 		}
 		for k := range envFor(db, override) {

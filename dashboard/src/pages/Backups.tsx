@@ -385,7 +385,7 @@ function DestinationForm({
             <Checkbox id="path_style" checked={cfg.path_style} onCheckedChange={(v) => setCfg({ ...cfg, path_style: v === true })} />
             <div>
               <Label htmlFor="path_style">Path-style URLs</Label>
-              <p className="text-sm text-muted-foreground">For MinIO, SeaweedFS and other self-hosted S3.</p>
+              <p className="text-sm text-muted-foreground">For MinIO, RustFS, SeaweedFS and other self-hosted S3.</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 sm:col-span-2">

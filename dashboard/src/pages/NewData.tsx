@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { DataMark, dataKinds } from '../components/data'
+import { DataMark, dataKinds, isStorage } from '../components/data'
 
 export default function NewData() {
   const nav = useNavigate()
@@ -82,7 +82,7 @@ export default function NewData() {
                   id="data-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={kind === 's3' ? 'uploads' : 'maindb'}
+                  placeholder={isStorage(kind) ? 'uploads' : 'maindb'}
                   pattern="[a-z][a-z0-9-]{0,39}"
                   title="lowercase letters, digits and dashes, starting with a letter"
                   required
@@ -108,7 +108,7 @@ export default function NewData() {
 
             <p className="text-sm text-muted-foreground">
               Apps you connect get <Mono className="text-foreground">{k.gives}</Mono>.{' '}
-              {kind === 's3' ? 'Snapshots of S3 storage aren’t supported yet.' : 'It’s snapshotted daily and before anything destructive.'}
+              {isStorage(kind) ? 'Snapshots of S3 storage aren’t supported yet.' : 'It’s snapshotted daily and before anything destructive.'}
             </p>
 
             {error && <ErrorBox error={error} />}
