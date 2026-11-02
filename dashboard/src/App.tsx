@@ -7,6 +7,7 @@ import {
   Check,
   ChevronsUpDown,
   Database,
+  DatabaseBackup,
   Gauge,
   KeyRound,
   LogOut,
@@ -27,6 +28,7 @@ import Launch from './pages/Launch'
 import Data from './pages/Data'
 import NewData from './pages/NewData'
 import DataDetail from './pages/DataDetail'
+import Backups from './pages/Backups'
 import Server from './pages/Server'
 import Apps from './pages/Apps'
 import AppDetail from './pages/AppDetail'
@@ -165,6 +167,7 @@ export default function App() {
                 <Route path="/data" element={<Data />} />
                 <Route path="/data/new" element={<NewData />} />
                 <Route path="/data/:name" element={<DataDetail />} />
+                <Route path="/backups" element={<Backups />} />
                 <Route path="/server" element={<Server />} />
                 <Route path="/approvals" element={<Approvals />} />
                 <Route path="/audit" element={<Audit />} />
@@ -221,6 +224,7 @@ function AppSidebar({ me, onSwitch, onSignOut }: { me: WhoAmI; onSwitch: (w: Who
             <SidebarMenu>
               <NavItem to="/apps" icon={<Boxes />} label="Apps" />
               <NavItem to="/data" icon={<Database />} label="Data & Storage" />
+              {!me.apps?.length && <NavItem to="/backups" icon={<DatabaseBackup />} label="Backups" />}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

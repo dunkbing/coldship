@@ -171,6 +171,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/integrations/github/repos/{owner}/{repo}/branches", store.ScopeDeploy, s.githubBranches)
 	s.routeOrgs()
 	s.routeAgents()
+	s.routeBackups()
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
 	s.route("GET /v1/tokens", store.ScopeAdmin, s.listTokens)
 	s.route("DELETE /v1/tokens/{name}", store.ScopeAdmin, s.revokeToken)
@@ -990,8 +991,10 @@ func (s *Server) snapshotData(r *http.Request, p principal) (any, error) {
 }
 
 type DataRestoreRequest struct {
-	Snapshot string `json:"snapshot"`
-	Reason   string `json:"reason"`
+	Snapshot string `json:"snapshot,omitempty"`
+	// Backup is an off-site backup's key, instead of a snapshot.
+	Backup string `json:"backup,omitempty"`
+	Reason string `json:"reason"`
 }
 
 func (s *Server) restoreData(r *http.Request, p principal) (any, error) {
@@ -1002,7 +1005,19 @@ func (s *Server) restoreData(r *http.Request, p principal) (any, error) {
 	if strings.TrimSpace(req.Reason) == "" {
 		return nil, apierr.New(400, "reason_required", "restoring replaces all data; give a reason")
 	}
-	msg, err := s.eng.RestoreData(r.Context(), p.name, r.PathValue("name"), req.Snapshot, req.Reason)
+	if (req.Snapshot == "") == (req.Backup == "") {
+		return nil, apierr.New(400, "invalid_request", "give a snapshot or an off-site backup to restore")
+	}
+	if req.Backup != "" && p.limited() {
+		return nil, apierr.New(403, "app_not_allowed", "token %q is limited to some apps and can't restore off-site backups", p.name)
+	}
+	var msg string
+	var err error
+	if req.Backup != "" {
+		msg, err = s.eng.RestoreDataBackup(r.Context(), p.name, r.PathValue("name"), req.Backup, req.Reason)
+	} else {
+		msg, err = s.eng.RestoreData(r.Context(), p.name, r.PathValue("name"), req.Snapshot, req.Reason)
+	}
 	if err != nil {
 		return nil, err
 	}

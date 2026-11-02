@@ -117,7 +117,28 @@ func dbCmd() *cobra.Command {
 	restore.Flags().StringVar(&restoreReason, "reason", "", "why (recorded in the audit log)")
 	restore.MarkFlagRequired("reason")
 
-	cmd.AddCommand(list, snap, snaps, restore)
+	var backupKey string
+	imp := &cobra.Command{
+		Use:   "import <app> <database> --backup KEY",
+		Short: "Copy an off-site backup in as a snapshot of the app's database, to restore (admin)",
+		Example: `  coldship backups list --app shop --database main
+  coldship db import shop main --backup coldship/apps/shop/main/20261102T030000.000000000Z-snap_1a2b3c.dump
+  coldship db restore shop main <snapshot> --reason "new server"`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sn, err := newClient().ImportBackup(cmd.Context(), args[0], args[1], backupKey)
+			if err != nil {
+				return err
+			}
+			return emit(sn, func() {
+				fmt.Printf("Copied in as snapshot %s. Restore it:\n  coldship db restore %s %s %s --reason \"...\"\n", sn.ID, args[0], args[1], sn.ID)
+			})
+		},
+	}
+	imp.Flags().StringVar(&backupKey, "backup", "", "the backup's key (from coldship backups list)")
+	imp.MarkFlagRequired("backup")
+
+	cmd.AddCommand(list, snap, snaps, restore, imp)
 	return cmd
 }
 

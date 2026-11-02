@@ -196,13 +196,25 @@ AWS_* and S3_* variables S3 libraries read (s3 storage).`,
 		},
 	}
 
-	var restoreReason string
+	var restoreReason, restoreBackup string
 	restore := &cobra.Command{
-		Use:   "restore <name> <snapshot>",
-		Short: "Replace a data service's data with a snapshot; the current data is snapshotted first (admin)",
-		Args:  cobra.ExactArgs(2),
+		Use:   "restore <name> [snapshot]",
+		Short: "Replace a data service's data with a snapshot or an off-site backup; the current data is snapshotted first (admin)",
+		Example: `  coldship data restore maindb snap_1a2b3c --reason "undo bad migration"
+  coldship data restore maindb --backup prod/data/maindb/20261102T030000.000000000Z-snap_1a2b3c.dump --reason "new server"`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			msg, err := newClient().RestoreData(cmd.Context(), args[0], args[1], restoreReason)
+			if (len(args) == 2) == (restoreBackup != "") {
+				return apierr.New(400, "invalid_request", "give a snapshot or --backup, not both").
+					WithHint("coldship data snapshots " + args[0] + ", or coldship backups list --data " + args[0])
+			}
+			var msg string
+			var err error
+			if restoreBackup != "" {
+				msg, err = newClient().RestoreDataBackup(cmd.Context(), args[0], restoreBackup, restoreReason)
+			} else {
+				msg, err = newClient().RestoreData(cmd.Context(), args[0], args[1], restoreReason)
+			}
 			if err != nil {
 				return err
 			}
@@ -210,6 +222,7 @@ AWS_* and S3_* variables S3 libraries read (s3 storage).`,
 		},
 	}
 	restore.Flags().StringVar(&restoreReason, "reason", "", "why (required)")
+	restore.Flags().StringVar(&restoreBackup, "backup", "", "an off-site backup's key (from coldship backups list)")
 	restore.MarkFlagRequired("reason")
 
 	cmd.AddCommand(list, create, show, connection, del, snapshot, snapshots, restore)

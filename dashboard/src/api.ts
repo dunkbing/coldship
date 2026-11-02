@@ -122,6 +122,52 @@ export interface Snapshot {
   reason: string
   actor: string
   created_at: string
+  remote_key?: string
+  remote_at?: string
+  remote_error?: string
+}
+
+export interface BackupStatus {
+  configured: boolean
+  endpoint?: string
+  region?: string
+  bucket?: string
+  prefix?: string
+  access_key?: string
+  secret_key_set?: boolean
+  path_style?: boolean
+  keep?: number
+  public_only: boolean
+  since?: string
+  last_sync?: string
+  last_error?: string
+  pending: number
+  uploaded: number
+  interval?: string
+}
+
+export interface BackupConfig {
+  endpoint: string
+  region: string
+  bucket: string
+  prefix: string
+  access_key: string
+  secret_key: string
+  path_style: boolean
+  keep: number
+}
+
+export interface OffsiteBackup {
+  key: string
+  snapshot: string
+  app?: string
+  database: string
+  engine: string
+  version: string
+  size: number
+  sha256: string
+  reason?: string
+  created_at: string
 }
 
 export interface MetricPoint {
@@ -596,6 +642,15 @@ export const api = {
     req<Snapshot>('POST', `/v1/data/${enc(name)}/snapshots`, { reason }),
   restoreData: (name: string, snapshot: string, reason: string) =>
     req<{ message: string }>('POST', `/v1/data/${enc(name)}/restore`, { snapshot, reason }),
+  restoreDataBackup: (name: string, backup: string, reason: string) =>
+    req<{ message: string }>('POST', `/v1/data/${enc(name)}/restore`, { backup, reason }),
+  backupStatus: () => req<BackupStatus>('GET', '/v1/backups'),
+  saveBackup: (cfg: BackupConfig) => req<BackupStatus>('PUT', '/v1/backups', cfg),
+  testBackup: (cfg: BackupConfig) => req<{ ok: boolean }>('POST', '/v1/backups/test', cfg),
+  deleteBackup: () => req<{ deleted: boolean }>('DELETE', '/v1/backups'),
+  syncBackups: () => req<BackupStatus>('POST', '/v1/backups/sync'),
+  backups: (database = '', app = '') =>
+    req<OffsiteBackup[]>('GET', `/v1/backups/list?database=${enc(database)}&app=${enc(app)}`),
   system: () => req<SystemStatus>('GET', '/v1/system'),
   metrics: (name: string) => req<AppMetrics>('GET', `/v1/apps/${enc(name)}/metrics`),
   github: () => req<GitHubStatus>('GET', '/v1/integrations/github'),

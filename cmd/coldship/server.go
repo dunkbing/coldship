@@ -125,7 +125,7 @@ func serverCmd() *cobra.Command {
 				}
 				snapshotDir = filepath.Join(filepath.Dir(dataAbs), "coldship-snapshots")
 			}
-			eng.SnapshotDir, eng.SnapshotKeep = snapshotDir, snapshotKeep
+			eng.SnapshotDir, eng.SnapshotKeep, eng.SnapshotInterval = snapshotDir, snapshotKeep, snapshotInterval
 			if abs, err := filepath.Abs(data); err == nil {
 				eng.DataDir = filepath.Dir(abs)
 			}
@@ -222,6 +222,7 @@ func serverCmd() *cobra.Command {
 				}()
 			}
 			go eng.RunMetrics(ctx)
+			go eng.RunBackups(ctx, log)
 			go func() {
 				// Delete previews whose time is up.
 				t := time.NewTicker(time.Minute)

@@ -18,6 +18,7 @@ import (
 	"github.com/dunkbing/coldship/internal/api"
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/offsite"
 	"github.com/dunkbing/coldship/internal/store"
 	"github.com/dunkbing/coldship/internal/update"
 )
@@ -322,6 +323,53 @@ func (c *Client) RestoreData(ctx context.Context, name, snapshot, reason string)
 	}
 	err := c.do(ctx, "POST", "/v1/data/"+url.PathEscape(name)+"/restore", api.DataRestoreRequest{Snapshot: snapshot, Reason: reason}, &out)
 	return out.Message, err
+}
+
+func (c *Client) RestoreDataBackup(ctx context.Context, name, backup, reason string) (string, error) {
+	var out struct {
+		Message string `json:"message"`
+	}
+	err := c.do(ctx, "POST", "/v1/data/"+url.PathEscape(name)+"/restore", api.DataRestoreRequest{Backup: backup, Reason: reason}, &out)
+	return out.Message, err
+}
+
+func (c *Client) BackupStatus(ctx context.Context) (*engine.BackupView, error) {
+	var out engine.BackupView
+	return &out, c.do(ctx, "GET", "/v1/backups", nil, &out)
+}
+
+func (c *Client) SaveBackup(ctx context.Context, cfg offsite.Config) (*engine.BackupView, error) {
+	var out engine.BackupView
+	return &out, c.do(ctx, "PUT", "/v1/backups", cfg, &out)
+}
+
+func (c *Client) DeleteBackup(ctx context.Context) error {
+	return c.do(ctx, "DELETE", "/v1/backups", nil, nil)
+}
+
+func (c *Client) SyncBackups(ctx context.Context) (*engine.BackupView, error) {
+	var out engine.BackupView
+	return &out, c.do(ctx, "POST", "/v1/backups/sync", nil, &out)
+}
+
+// Backups lists off-site backups: of one database when given (app "" for
+// a data service), else all.
+func (c *Client) Backups(ctx context.Context, app, database string) ([]engine.Backup, error) {
+	var out []engine.Backup
+	q := url.Values{}
+	if app != "" {
+		q.Set("app", app)
+	}
+	if database != "" {
+		q.Set("database", database)
+	}
+	return out, c.do(ctx, "GET", "/v1/backups/list?"+q.Encode(), nil, &out)
+}
+
+func (c *Client) ImportBackup(ctx context.Context, app, database, backup string) (*store.Snapshot, error) {
+	var out store.Snapshot
+	return &out, c.do(ctx, "POST", "/v1/apps/"+url.PathEscape(app)+"/databases/"+url.PathEscape(database)+"/import",
+		map[string]string{"backup": backup}, &out)
 }
 
 // FollowDeployLog calls line for each line of a deployment's log as it is

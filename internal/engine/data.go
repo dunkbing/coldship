@@ -310,7 +310,7 @@ func (e *Engine) RestoreData(ctx context.Context, actor, name, snapshot, reason 
 	if sn == nil || sn.App != "" || sn.Database != name {
 		return "", apierr.New(404, "snapshot_not_found", "%s has no snapshot %s", name, snapshot).WithHint("coldship data snapshots " + name)
 	}
-	return e.restoreFrom(context.WithoutCancel(ctx), actor, "", spec.Database{Name: name, Engine: db.Engine, Version: db.Version}, sn, reason)
+	return e.restoreFrom(context.WithoutCancel(ctx), actor, "", spec.Database{Name: name, Engine: db.Engine, Version: db.Version}, sn, reason, "")
 }
 
 // ensureUses starts the data services run uses and injects their env.

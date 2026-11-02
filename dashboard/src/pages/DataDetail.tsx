@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DataMark, dataKinds, envSummary } from '../components/data'
 import { useSession } from '../App'
+import { BackupTable } from './Backups'
 
 function Copy({ text }: { text: string }) {
   const [done, setDone] = useState(false)
@@ -52,6 +53,11 @@ export default function DataDetail() {
   const admin = me.scope === 'admin'
   const { data: d, error, reload } = useLoad(() => api.dataOne(name), [name], 5000)
   const snaps = useLoad(() => api.dataSnapshots(name), [name])
+  const backup = useLoad(api.backupStatus, [me.org?.id])
+  const offsite = useLoad(
+    () => (backup.data?.configured && !me.apps?.length ? api.backups(name) : Promise.resolve(undefined)),
+    [name, backup.data?.configured, backup.data?.uploaded],
+  )
   const [conn, setConn] = useState<Record<string, string>>()
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<Error>()
@@ -68,6 +74,7 @@ export default function DataDetail() {
       if (done) setMessage(done)
       reload()
       snaps.reload()
+      backup.reload()
     } catch (err) {
       setActionError(err as Error)
     } finally {
@@ -200,7 +207,10 @@ export default function DataDetail() {
               Snapshots of S3 storage aren't supported yet. Back up the bucket with an S3 tool such as rclone.
             </p>
           ) : !snaps.data || snaps.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">None yet. Snapshots are taken daily and before anything destructive.</p>
+            <p className="text-sm text-muted-foreground">
+              None yet. Snapshots are taken daily and before anything destructive
+              {backup.data?.configured ? ', and copied to the backup bucket.' : '.'}
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -209,6 +219,7 @@ export default function DataDetail() {
                   <TableHead>Taken</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead>Reason</TableHead>
+                  {backup.data?.configured && <TableHead>Off-site</TableHead>}
                   {admin && (
                     <TableHead>
                       <span className="sr-only">Actions</span>
@@ -227,6 +238,22 @@ export default function DataDetail() {
                     </TableCell>
                     <TableCell>{(s.size / 1024).toFixed(1)} KB</TableCell>
                     <TableCell className="text-muted-foreground">{s.reason}</TableCell>
+                    {backup.data?.configured && (
+                      <TableCell>
+                        {s.remote_key ? (
+                          <span className="inline-flex items-center gap-1 text-ok">
+                            <Check className="size-3.5" aria-hidden />
+                            Copied
+                          </span>
+                        ) : s.remote_error ? (
+                          <span className="text-destructive" title={s.remote_error}>
+                            Failed, retrying
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Waiting</span>
+                        )}
+                      </TableCell>
+                    )}
                     {admin && (
                       <TableCell className="text-right">
                         <Button
@@ -251,6 +278,50 @@ export default function DataDetail() {
           )}
         </CardContent>
       </Card>
+
+      {d.engine !== 's3' && !me.apps?.length && (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle>
+              <h2>Off-site backups</h2>
+            </CardTitle>
+            <CardDescription>
+              {backup.data?.configured ? (
+                <>
+                  Copies in <Mono className="text-foreground">{backup.data.bucket}</Mono>, kept even if this server is lost.
+                </>
+              ) : (
+                <>
+                  Off. Snapshots stay on this server only.{' '}
+                  <Link className={linkClass} to="/backups">
+                    Set a bucket
+                  </Link>
+                </>
+              )}
+            </CardDescription>
+          </CardHeader>
+          {backup.data?.configured && (
+            <CardContent>
+              {offsite.error ? (
+                <ErrorBox error={offsite.error} />
+              ) : !offsite.data ? (
+                <p className="text-sm text-muted-foreground">Loading…</p>
+              ) : offsite.data.length === 0 ? (
+                <p className="text-sm text-muted-foreground">None yet. New snapshots are copied within a minute.</p>
+              ) : (
+                <BackupTable
+                  items={offsite.data}
+                  busy={busy}
+                  canRestore={(b) => admin && b.engine === d.engine}
+                  onRestore={(b, reason) =>
+                    act(async () => setMessage((await api.restoreDataBackup(d.name, b.key, reason)).message))
+                  }
+                />
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {admin && (
         <Card className="mt-4 ring-destructive/40">

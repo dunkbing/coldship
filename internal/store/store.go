@@ -889,6 +889,12 @@ type Snapshot struct {
 	// Manual snapshots were asked for through the API. They are pruned
 	// separately, so asking for many can't push out automatic ones.
 	Manual bool `json:"manual,omitempty"`
+	// Org owned the database when the snapshot was taken.
+	Org string `json:"org,omitempty"`
+	// RemoteKey is the off-site copy's object key, once uploaded.
+	RemoteKey   string     `json:"remote_key,omitempty"`
+	RemoteAt    *time.Time `json:"remote_at,omitempty"`
+	RemoteError string     `json:"remote_error,omitempty"`
 }
 
 func (s *Store) SaveSnapshot(ctx context.Context, sn *Snapshot) error {
@@ -923,6 +929,38 @@ func (s *Store) ListSnapshots(ctx context.Context, app, database string) ([]Snap
 		args = append(args, database)
 	}
 	rows, err := s.db.QueryContext(ctx, q+` ORDER BY created_at DESC, rowid DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Snapshot{}
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var sn Snapshot
+		if err := json.Unmarshal([]byte(body), &sn); err != nil {
+			return nil, err
+		}
+		out = append(out, sn)
+	}
+	return out, rows.Err()
+}
+
+// UpdateSnapshot rewrites a snapshot's record; a deleted one stays deleted.
+func (s *Store) UpdateSnapshot(ctx context.Context, sn *Snapshot) error {
+	b, err := json.Marshal(sn)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE snapshots SET body = ? WHERE id = ?`, string(b), sn.ID)
+	return err
+}
+
+// AllSnapshots returns every snapshot, oldest first.
+func (s *Store) AllSnapshots(ctx context.Context) ([]Snapshot, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT body FROM snapshots ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, err
 	}

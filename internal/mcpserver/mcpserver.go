@@ -71,6 +71,27 @@ func New(c *client.Client, version string) *mcp.Server {
 			return result(c.SnapshotData(ctx, in.Name, in.Reason))
 		})
 
+	type backupsArgs struct {
+		Data     string `json:"data,omitempty" jsonschema:"a data service, to list its off-site backups"`
+		App      string `json:"app,omitempty" jsonschema:"an app, with database, to list that database's off-site backups"`
+		Database string `json:"database,omitempty" jsonschema:"the app's database"`
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "coldship_backups",
+		Description: "Off-site backups: whether snapshots are copied to an S3 bucket, the last sync and its error, and, given a data service (or app and database), the backups in the bucket, newest first. Restoring one is for admins: coldship data restore <name> --backup <key>.",
+		Annotations: ro},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in backupsArgs) (*mcp.CallToolResult, any, error) {
+			st, err := c.BackupStatus(ctx)
+			if err != nil || !st.Configured || (in.Data == "" && in.Database == "") {
+				return result(st, err)
+			}
+			app, db := in.App, in.Database
+			if in.Data != "" {
+				app, db = "", in.Data
+			}
+			list, err := c.Backups(ctx, app, db)
+			return result(map[string]any{"status": st, "backups": list}, err)
+		})
+
 	mcp.AddTool(s, &mcp.Tool{Name: "coldship_get_app", Description: "Get one app: spec, container status and latest deployment.", Annotations: ro},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in appArg) (*mcp.CallToolResult, any, error) {
 			return result(c.GetApp(ctx, in.App))

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -145,9 +146,11 @@ func (e *Engine) takeSnapshot(ctx context.Context, actor, app string, d spec.Dat
 		return nil, snapErr
 	}
 	sn.Size, sn.SHA256 = cw.n, hex.EncodeToString(h.Sum(nil))
+	sn.Org = e.ownerOrgs().of(ctx, *sn)
 	if err := e.st.SaveSnapshot(ctx, sn); err != nil {
 		return nil, err
 	}
+	e.KickBackups()
 	e.audit(ctx, actor, "database.snapshot", app, reason, map[string]any{"database": d.Name, "snapshot": sn.ID, "size": sn.Size})
 	e.pruneSnapshots(ctx, app, d.Name, manual)
 	return sn, nil
@@ -261,12 +264,13 @@ func (e *Engine) restore(ctx context.Context, actor string, p *store.Plan, reaso
 			db = d
 		}
 	}
-	return e.restoreFrom(ctx, actor, p.App, db, sn, reason)
+	return e.restoreFrom(ctx, actor, p.App, db, sn, reason, "")
 }
 
 // restoreFrom verifies a snapshot, saves the current data as a snapshot, and
-// restores db (owned by app, or a data service when app is "").
-func (e *Engine) restoreFrom(ctx context.Context, actor, app string, db spec.Database, sn *store.Snapshot, reason string) (string, error) {
+// restores db (owned by app, or a data service when app is ""). from says
+// where the snapshot came from, for the message; "" names the snapshot.
+func (e *Engine) restoreFrom(ctx context.Context, actor, app string, db spec.Database, sn *store.Snapshot, reason, from string) (string, error) {
 	f, err := os.Open(sn.Path)
 	if err != nil {
 		return "", apierr.New(500, "snapshot_missing", "snapshot file %s is missing: %v", sn.Path, err)
@@ -298,8 +302,11 @@ func (e *Engine) restoreFrom(ctx context.Context, actor, app string, db spec.Dat
 		target = db.Name
 	}
 	e.audit(ctx, actor, "database.restore", target, reason, map[string]any{"database": db.Name, "snapshot": sn.ID, "saved_before": before.ID})
-	return fmt.Sprintf("restored database %s from snapshot %s (%s); the data from before the restore is saved as snapshot %s",
-		db.Name, sn.ID, sn.CreatedAt.UTC().Format(time.RFC3339), before.ID), nil
+	if from == "" {
+		from = fmt.Sprintf("snapshot %s (%s)", sn.ID, sn.CreatedAt.UTC().Format(time.RFC3339))
+	}
+	return fmt.Sprintf("restored database %s from %s; the data from before the restore is saved as snapshot %s",
+		db.Name, from, before.ID), nil
 }
 
 func (e *Engine) Databases(ctx context.Context, app string) ([]DatabaseView, error) {
@@ -332,20 +339,23 @@ func (e *Engine) Snapshots(ctx context.Context, app, database string) ([]store.S
 	return e.st.ListSnapshots(ctx, app, database)
 }
 
-// ScheduledSnapshots snapshots every database of every app except previews.
+// ScheduledSnapshots snapshots every database of every app except previews,
+// and every data service. One failing doesn't stop the rest.
 func (e *Engine) ScheduledSnapshots(ctx context.Context) (int, error) {
 	apps, err := e.st.ListApps(ctx)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
+	var errs []error
 	for _, a := range apps {
 		if a.Spec == nil || a.PreviewOf != "" {
 			continue
 		}
 		for _, d := range a.Spec.Databases {
 			if _, err := e.snapshotNamed(ctx, "coldship", a.Name, d.Name, "scheduled", false); err != nil {
-				return n, fmt.Errorf("%s/%s: %w", a.Name, d.Name, err)
+				errs = append(errs, fmt.Errorf("%s/%s: %w", a.Name, d.Name, err))
+				continue
 			}
 			n++
 		}
@@ -353,16 +363,17 @@ func (e *Engine) ScheduledSnapshots(ctx context.Context) (int, error) {
 	// Data services, except S3 storage, which can't be snapshotted yet.
 	recs, err := e.st.AllDatabases(ctx)
 	if err != nil {
-		return n, err
+		return n, errors.Join(append(errs, err)...)
 	}
 	for _, r := range recs {
 		if r.App != "" || r.Engine == spec.EngineS3 {
 			continue
 		}
 		if _, err := e.takeSnapshot(ctx, "coldship", "", spec.Database{Name: r.Name, Engine: r.Engine, Version: r.Version}, "scheduled", false); err != nil {
-			return n, fmt.Errorf("data service %s: %w", r.Name, err)
+			errs = append(errs, fmt.Errorf("data service %s: %w", r.Name, err))
+			continue
 		}
 		n++
 	}
-	return n, nil
+	return n, errors.Join(errs...)
 }

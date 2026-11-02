@@ -20,6 +20,7 @@ import (
 
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/builder"
+	"github.com/dunkbing/coldship/internal/offsite"
 	"github.com/dunkbing/coldship/internal/planner"
 	"github.com/dunkbing/coldship/internal/proxy"
 	"github.com/dunkbing/coldship/internal/runtime"
@@ -53,7 +54,12 @@ type Engine struct {
 	// keep per database.
 	SnapshotDir  string
 	SnapshotKeep int
-	Now          func() time.Time
+	// SnapshotInterval is how often every database is snapshotted.
+	SnapshotInterval time.Duration
+	// NewRemote opens an off-site bucket (tests swap it).
+	NewRemote func(cfg offsite.Config, restricted bool) (offsite.Remote, error)
+	bk        backupState
+	Now       func() time.Time
 }
 
 // New creates an engine. px may be nil, which disables domains.

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { DatabaseBackup, Plus } from 'lucide-react'
 import { api, type DataView } from '../api'
 import { useLoad } from '../hooks'
 import { Empty, ErrorBox, Mono, PageHeader, StatusDot, TableSkeleton, Time } from '@/components/common'
@@ -56,12 +56,20 @@ export default function Data() {
         title="Data & Storage"
         description="Databases and object storage your apps connect to. Only reachable from Coldship's network."
         actions={
+          <>
+          <Button asChild variant="outline">
+            <Link to="/backups">
+              <DatabaseBackup />
+              Backups
+            </Link>
+          </Button>
           <Button asChild>
             <Link to="/data/new">
               <Plus />
               Add
             </Link>
           </Button>
+          </>
         }
       />
 

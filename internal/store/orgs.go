@@ -285,7 +285,7 @@ func (s *Store) DeleteOrg(ctx context.Context, id string) error {
 		`DELETE FROM members WHERE org = ?1`,
 		`DELETE FROM tokens WHERE org = ?1`,
 		`DELETE FROM links WHERE org = ?1`,
-		`DELETE FROM integrations WHERE name = 'github:' || ?1`,
+		`DELETE FROM integrations WHERE name IN ('github:' || ?1, 'backup:' || ?1)`,
 		`DELETE FROM agents WHERE org = ?1`,
 		`DELETE FROM orgs WHERE id = ?1`,
 	} {
