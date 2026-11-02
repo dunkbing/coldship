@@ -121,7 +121,8 @@ func TestNotifications(t *testing.T) {
 	req, body := box.last()
 	var ev Event
 	json.Unmarshal([]byte(body), &ev)
-	if ev.Kind != EvDeployFailed || ev.App != "web" || ev.Link != "https://coldship.example.com/apps/web" || !strings.Contains(ev.Detail, "exited") {
+	// Actor is the caller's token name: agents skip their own sessions' events by it.
+	if ev.Kind != EvDeployFailed || ev.App != "web" || ev.Actor != "agent" || ev.Link != "https://coldship.example.com/apps/web" || !strings.Contains(ev.Detail, "exited") {
 		t.Fatalf("event: %+v", ev)
 	}
 	mac := hmac.New(sha256.New, []byte(wh.Secret))

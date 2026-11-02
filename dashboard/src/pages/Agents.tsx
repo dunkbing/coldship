@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Bell, Bot, MessageSquarePlus, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
-import { api, type Agent, type AgentPreset, type AgentSession, type Scope } from '../api'
+import { api, type Agent, type AgentPreset, type AgentSession, type Channel, type Scope } from '../api'
 import { useSession } from '../App'
 import { useLoad } from '../hooks'
 import { CardsSkeleton, Empty, ErrorBox, Mono, PageHeader, StatusDot, Time, ToneBadge } from '@/components/common'
@@ -271,8 +271,15 @@ function AgentDialog({
   const [alertFix, setAlertFix] = useState(agent?.alert_fix ?? false)
   const me = useSession()
   const alertKinds = Object.keys(alertLabels).filter((k) => k !== 'disk.low' || (me.org?.id ?? 'default') === 'default')
+  const [channels, setChannels] = useState<Channel[]>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
+  const wantChannels = triggers.length > 0
+
+  useEffect(() => {
+    if (wantChannels && !channels) api.channels().then(setChannels, () => setChannels([]))
+  }, [wantChannels, channels])
+  const noReports = wantChannels && channels && !channels.some((c) => c.events.includes('agent.report'))
 
   function pickKind(k: string) {
     setKind(k)
@@ -450,6 +457,15 @@ function AgentDialog({
                 </label>
               ))}
             </div>
+            {noReports && (
+              <p className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">
+                No notification channel gets agent reports yet.{' '}
+                <Link to="/org/notifications" className="font-medium underline">
+                  Add one
+                </Link>{' '}
+                with “An agent reports on an alert” picked, or read reports in the session.
+              </p>
+            )}
             {triggers.length > 0 && scope === 'deploy' && (
               <label className="mt-3 flex items-start gap-2 text-sm">
                 <Checkbox className="mt-0.5" checked={alertFix} onCheckedChange={(v) => setAlertFix(v === true)} />

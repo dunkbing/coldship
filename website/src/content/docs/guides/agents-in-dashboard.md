@@ -41,11 +41,12 @@ An agent can start on its own when something goes wrong. In its settings, under 
 | Off-site backups fail | `backup.failing` |
 | The server's disk is almost full | `disk.low` (default organization only) |
 
-When one fires, Coldship starts a session and asks the agent to look into it with its tools (status, logs, deploy logs, metrics) and finish with a short report. That report goes to the organization's [notification channels](/guides/notifications/) as `agent.report`, with a link to the session, so you can read what it did and carry on the conversation.
+When one fires, Coldship starts a session and asks the agent to look into it with its tools (status, logs, deploy logs, metrics) and finish with a short report. That report goes to the organization's [notification channels](/guides/notifications/) as `agent.report`, with a link to the session, so you can read what it did and carry on the conversation. Channels pick their events when they're added, so a channel added before this existed needs adding again with **An agent reports on an alert**.
 
 - **It only looks, unless you say otherwise.** Alert sessions are viewers. Turn on **Let it fix things** (for a deployer agent) to let it roll back or restart; destructive production changes still wait for an admin.
 - **Agents limited to some apps** only hear about those apps, and not about server-wide alerts like the disk.
 - **Nobody may be watching.** If the agent asks permission for a tool, `agent.waiting` tells your channels; unanswered after 15 minutes, the request is declined and the turn ends, so it reports what it has. Alert sessions end after 15 minutes without messages.
+- **Allow its tools ahead of time.** Agents like Claude Code ask before each tool they haven't been allowed. Start one session yourself and choose **Always allow** for the coldship tools it uses; that's kept in its home volume, so alert sessions don't stop to ask.
 - **No storms.** Each agent takes an alert at most once per app every 30 minutes, at most 2 alert sessions run at once (leaving room for yours), and an agent's own deploys never start agents.
 - **Alert text is data.** Error messages and build output can be written by anyone who can push code, so Coldship hands them to the agent fenced off and marked as data, not instructions.
 

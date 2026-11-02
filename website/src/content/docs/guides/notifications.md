@@ -9,7 +9,7 @@ Coldship tells you when something needs attention, wherever your team already lo
 
 ## Events
 
-| Event | When | On by default |
+| Event | When | On by default (new channels) |
 |---|---|---|
 | `deploy.failed` | A deploy or build failed, a push couldn't be deployed, or a restart interrupted a deploy | yes |
 | `deploy.succeeded` | A deploy finished | no |
