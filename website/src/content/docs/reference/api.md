@@ -42,6 +42,12 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/backups/sync` | admin | Copy snapshots now |
 | `GET` | `/v1/backups/list?database=&app=` | read | Backups in the bucket, newest first: all, a data service's (`database`), or an app database's (`app` and `database`) |
 | `DELETE` | `/v1/backups` | admin | Stop copying; the bucket's contents stay |
+| `GET` | `/v1/channels` | read | [Notification](/guides/notifications/) channels: kind, where they go (never URLs or tokens), events, last delivery |
+| `GET` | `/v1/channels/events` | read | The events channels can get |
+| `POST` | `/v1/channels` | admin | Add a channel: `{kind, name?, url?, bot_token?, chat_id?, events?}`. A webhook's signing `secret` is returned once |
+| `PATCH` | `/v1/channels/{id}` | admin | Change its name, events or target (empty fields keep theirs) |
+| `DELETE` | `/v1/channels/{id}` | admin | Remove it |
+| `POST` | `/v1/channels/{id}/test` | admin | Send a test message; fails with `channel_unreachable` if it isn't delivered |
 | `POST` | `/v1/build/detect` | deploy | `{app}` or `{spec}`: check out the commit and report how it would be built, without building |
 | `POST` | `/v1/previews` | deploy | Create or update a preview: `{app, ref?, image?, name?, ttl?, env?, inherit_env?, reason?}` |
 | `GET` | `/v1/previews` | read | List previews |

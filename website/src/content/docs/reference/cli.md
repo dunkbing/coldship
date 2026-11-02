@@ -49,7 +49,7 @@ Runs the API server, the Docker runtime and the dashboard.
 | `--preview-ttl` / `--preview-max-ttl` | | `24h` / `168h` | Default and maximum preview lifetime |
 | `--max-previews` | | `20` | Most previews at once |
 | `--secret-key-file` | `COLDSHIP_SECRET_KEY_FILE` | `coldship.key` next to `--data` | Key that encrypts stored secrets. `COLDSHIP_SECRET_KEY` (base64 32 bytes) supplies the key directly instead. |
-| `--public-url` | `COLDSHIP_PUBLIC_URL` | | How Git hosts reach this server, for webhook URLs |
+| `--public-url` | `COLDSHIP_PUBLIC_URL` | | How people and Git hosts reach this server, for webhook URLs and links in notifications |
 | `--snapshot-dir` | `COLDSHIP_SNAPSHOT_DIR` | `coldship-snapshots` next to `--data` | Where database snapshots are stored |
 | `--snapshot-keep` | | `20` | Snapshots kept per database, counted separately for manual and automatic ones (so manual snapshots never push out automatic ones) |
 | `--db-snapshot-interval` | | `24h` | Scheduled snapshots of every database (`0` disables) |
@@ -122,6 +122,16 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 | `coldship db snapshot <app> <database> [--reason "..."]` | Snapshot now |
 | `coldship db snapshots <app> [--database D]` | Snapshots, newest first |
 | `coldship db restore <app> <database> <snapshot> --reason "..."` | Plan and apply a restore. Stops with exit 3 if approval is needed. |
+
+## Notifications
+
+| Command | Description |
+|---|---|
+| `coldship notify` | Channels, their events and last delivery |
+| `coldship notify add <slack\|discord\|telegram\|webhook> [--name N] [--events a,b] [--chat-id ID]` | Add a channel (admin). The URL comes from `COLDSHIP_NOTIFY_URL`, a Telegram bot token from `COLDSHIP_TELEGRAM_TOKEN`, or a prompt |
+| `coldship notify test <id>` | Send a test message (admin) |
+| `coldship notify rm <id>` | Remove a channel (admin) |
+| `coldship notify events` | The events channels can get |
 
 ## Data services
 

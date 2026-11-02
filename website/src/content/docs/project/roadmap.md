@@ -9,6 +9,7 @@ Coldship today deploys container images, or builds them from Git repositories (w
 - **Seeded previews.** Start a preview's volumes from a sanitized snapshot of the parent's data instead of empty.
 - **Database upgrades.** Major version changes by dump and restore.
 - **Policies.** Spend and instance caps per token, and per-app permissions.
-- **Notifications.** Approval requests to Slack or a webhook, and event webhooks that can wake an agent when a deploy fails.
+- **Agents on alerts.** Start an agent session when a deploy fails or an app goes down, with the logs at hand, to diagnose it and propose a fix for a person to approve.
+- **Email notifications.** Alongside Slack, Discord, Telegram and webhooks.
 - **Multi-node.** A separate node agent, with Postgres as the state store.
 - **Encrypted backups.** Encrypt off-site backups with a passphrase you keep, on top of the bucket's encryption.
