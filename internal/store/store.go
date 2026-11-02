@@ -329,6 +329,8 @@ func Open(path string, kr *secrets.Keyring) (*Store, error) {
 		`ALTER TABLE audit ADD COLUMN org TEXT NOT NULL DEFAULT 'default'`,
 		`ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN org TEXT NOT NULL DEFAULT 'default'`,
+		`ALTER TABLE agents ADD COLUMN triggers TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN alert_fix INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			db.Close()

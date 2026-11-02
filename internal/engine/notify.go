@@ -41,6 +41,8 @@ const (
 	EvBackupFailing   = "backup.failing"
 	EvBackupRecovered = "backup.recovered"
 	EvDiskLow         = "disk.low"
+	EvAgentReport     = "agent.report"
+	EvAgentWaiting    = "agent.waiting"
 )
 
 // EventKind describes an event for pickers.
@@ -61,6 +63,8 @@ var EventKinds = []EventKind{
 	{EvBackupFailing, "Off-site backups are failing", true, false},
 	{EvBackupRecovered, "Off-site backups work again", true, false},
 	{EvDiskLow, "The server's disk is almost full", true, true},
+	{EvAgentReport, "An agent reports on an alert", true, false},
+	{EvAgentWaiting, "An agent on an alert waits for an answer", true, false},
 }
 
 // Event is something worth telling people. Title and Detail may hold
@@ -71,7 +75,9 @@ type Event struct {
 	App        string    `json:"app,omitempty"`
 	Deployment string    `json:"deployment,omitempty"`
 	Plan       string    `json:"plan,omitempty"`
-	Severity   string    `json:"severity"` // error | warning | ok | info
+	Session    string    `json:"agent_session,omitempty"`
+	Actor      string    `json:"actor,omitempty"` // who caused it, when someone did
+	Severity   string    `json:"severity"`        // error | warning | ok | info
 	Title      string    `json:"title"`
 	Detail     string    `json:"detail,omitempty"`
 	Link       string    `json:"link,omitempty"`
@@ -125,6 +131,9 @@ func (e *Engine) Subscribe(f func(Event)) {
 	n.subsMu.Unlock()
 }
 
+// Emit is emit for other packages (agents' reports).
+func (e *Engine) Emit(ctx context.Context, ev Event) { e.emit(ctx, ev) }
+
 // emit sends ev to its org's channels and the subscribers. It never blocks.
 func (e *Engine) emit(ctx context.Context, ev Event) {
 	n := e.notif()
@@ -143,6 +152,8 @@ func (e *Engine) emit(ctx context.Context, ev Event) {
 	}
 	if n.baseURL != "" && ev.Link == "" {
 		switch {
+		case ev.Session != "":
+			ev.Link = n.baseURL + "/agents/sessions/" + url.PathEscape(ev.Session)
 		case ev.Kind == EvApprovalNeeded:
 			ev.Link = n.baseURL + "/approvals"
 		case ev.App != "":
@@ -176,7 +187,7 @@ func (e *Engine) askApproval(ctx context.Context, p *store.Plan, by string) {
 	if seen {
 		return
 	}
-	e.emit(ctx, Event{Kind: EvApprovalNeeded, Org: p.Org, App: p.App, Plan: p.ID, Severity: "warning",
+	e.emit(ctx, Event{Kind: EvApprovalNeeded, Org: p.Org, App: p.App, Plan: p.ID, Actor: by, Severity: "warning",
 		Title:  fmt.Sprintf("%s: a change needs approval", p.App),
 		Detail: fmt.Sprintf("%s wants to apply plan %s, a destructive change to a production app. Review it, then: coldship approve %s", by, p.ID, p.ID)})
 }
@@ -594,13 +605,13 @@ func (e *Engine) notifyDeploy(ctx context.Context, p *store.Plan, d *store.Deplo
 			detail += "\nThe previous version is still running."
 		}
 		detail += "\nDeploy log: coldship deploy-log " + d.ID
-		e.emit(ctx, Event{Kind: EvDeployFailed, Org: p.Org, App: p.App, Deployment: d.ID, Plan: p.ID, Severity: "error",
+		e.emit(ctx, Event{Kind: EvDeployFailed, Org: p.Org, App: p.App, Deployment: d.ID, Plan: p.ID, Actor: actor, Severity: "error",
 			Title: p.App + ": " + what, Detail: clipText(detail, 1500)})
 		return
 	}
 	if p.Action == planner.OpDelete || p.Action == "noop" || d.Status != store.DeployRunning {
 		return
 	}
-	e.emit(ctx, Event{Kind: EvDeploySucceeded, Org: p.Org, App: p.App, Deployment: d.ID, Plan: p.ID, Severity: "ok",
+	e.emit(ctx, Event{Kind: EvDeploySucceeded, Org: p.Org, App: p.App, Deployment: d.ID, Plan: p.ID, Actor: actor, Severity: "ok",
 		Title: p.App + " deployed", Detail: "Deployed by " + actor + "."})
 }

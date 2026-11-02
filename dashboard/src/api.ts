@@ -470,6 +470,8 @@ export interface Agent {
   keys: string[]
   scope: Scope
   apps?: string[]
+  triggers: string[]
+  alert_fix: boolean
   created_by: string
   created_at: string
   running: number
@@ -514,6 +516,8 @@ export interface AgentSession {
   status: SessionStatus
   error?: string
   agent_info?: string
+  alert?: string
+  alert_app?: string
   items?: SessionItem[]
 }
 
@@ -622,7 +626,7 @@ export const api = {
   moveApp: (name: string, org: string) => req<App>('POST', `/v1/apps/${enc(name)}/move`, { org }),
   tokens: () => req<Token[]>('GET', '/v1/tokens'),
   agents: () => req<{ presets: AgentPreset[]; agents: Agent[] }>('GET', '/v1/agents'),
-  saveAgent: (name: string, body: { kind: string; command?: string; env?: Record<string, string>; scope?: Scope; apps?: string[] }) =>
+  saveAgent: (name: string, body: { kind: string; command?: string; env?: Record<string, string>; scope?: Scope; apps?: string[]; triggers?: string[]; alert_fix?: boolean }) =>
     req<Agent>('PUT', `/v1/agents/${enc(name)}`, body),
   deleteAgent: (name: string) => req<{ deleted: boolean }>('DELETE', `/v1/agents/${enc(name)}`),
   startSession: (agent: string) => req<AgentSession>('POST', `/v1/agents/${enc(agent)}/sessions`),

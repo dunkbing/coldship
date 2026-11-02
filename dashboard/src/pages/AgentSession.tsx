@@ -140,7 +140,14 @@ export default function AgentSession() {
             <SessionStatusDot status={session.status} />
             <span>· {session.agent_info || agentLabels[session.kind] || session.kind}</span>
             <ToneBadge t={session.scope === 'deploy' ? 'info' : 'muted'}>{session.scope === 'deploy' ? 'Deployer' : 'Viewer'}</ToneBadge>
-            <span>· started by {session.started_by}</span>
+            {session.alert ? (
+              <ToneBadge t="warn">
+                started by an alert: {session.alert_app ? `${session.alert_app} ` : ''}
+                {session.alert}
+              </ToneBadge>
+            ) : (
+              <span>· started by {session.started_by}</span>
+            )}
           </div>
         </div>
         {live && canAct && (

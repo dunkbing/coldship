@@ -181,6 +181,14 @@ func serverCmd() *cobra.Command {
 			} else {
 				apiSrv.SetAgents(mgr)
 				go srv.Serve(ln)
+				// Alerts start the agents listening for them; their reports
+				// go out like any other notification.
+				mgr.Notify = func(a agents.Alert) {
+					eng.Emit(ctx, engine.Event{Kind: a.Kind, Org: a.Org, App: a.App, Actor: a.Actor, Severity: a.Severity, Title: a.Title, Detail: a.Detail, Session: a.Session})
+				}
+				eng.Subscribe(func(ev engine.Event) {
+					mgr.Alert(agents.Alert{Kind: ev.Kind, Org: ev.Org, App: ev.App, Actor: ev.Actor, Severity: ev.Severity, Title: ev.Title, Detail: ev.Detail})
+				})
 			}
 
 			// Self-upgrade: the checker installs a new binary, then calls

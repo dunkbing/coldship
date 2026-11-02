@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Bot, MessageSquarePlus, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Bell, Bot, MessageSquarePlus, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
 import { api, type Agent, type AgentPreset, type AgentSession, type Scope } from '../api'
 import { useSession } from '../App'
 import { useLoad } from '../hooks'
@@ -8,6 +8,7 @@ import { CardsSkeleton, Empty, ErrorBox, Mono, PageHeader, StatusDot, Time, Tone
 import { AgentMark, agentBlurbs, agentLabels } from '@/components/agent'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,6 +16,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 const kinds = ['claude', 'codex', 'gemini', 'custom']
+
+export const alertLabels: Record<string, string> = {
+  'app.down': 'An app goes down',
+  'deploy.failed': 'A deploy or build fails',
+  'backup.failing': 'Off-site backups fail',
+  'disk.low': "The server's disk is almost full",
+}
 
 export function SessionStatusDot({ status }: { status: AgentSession['status'] }) {
   switch (status) {
@@ -118,6 +126,11 @@ export default function Agents() {
                       <ShieldCheck className="size-3" /> {a.scope === 'deploy' ? 'Deployer' : 'Viewer'}
                     </ToneBadge>
                     {a.apps?.length ? <Mono>{a.apps.join(', ')}</Mono> : <span>every app</span>}
+                    {a.triggers.length > 0 && (
+                      <ToneBadge t="warn">
+                        <Bell className="size-3" /> on {a.triggers.length === 1 ? alertLabels[a.triggers[0]]?.toLowerCase() : `${a.triggers.length} alerts`}
+                      </ToneBadge>
+                    )}
                     {a.running > 0 && <ToneBadge t="ok">{a.running} running</ToneBadge>}
                   </div>
                 </div>
@@ -169,7 +182,17 @@ export default function Agents() {
                     <TableCell>
                       <SessionStatusDot status={s.status} />
                     </TableCell>
-                    <TableCell className="hidden text-muted-foreground sm:table-cell">{s.started_by}</TableCell>
+                    <TableCell className="hidden text-muted-foreground sm:table-cell">
+                      {s.alert ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Bell className="size-3.5 text-warn" />
+                          {s.alert_app ? `${s.alert_app}: ` : ''}
+                          {s.alert}
+                        </span>
+                      ) : (
+                        s.started_by
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       <Time iso={s.created_at} />
                     </TableCell>
@@ -244,6 +267,10 @@ function AgentDialog({
   const [env, setEnv] = useState<{ k: string; v: string }[]>(kind === 'custom' && !agent ? [{ k: '', v: '' }] : [])
   const [scope, setScope] = useState<Scope>(agent?.scope ?? 'deploy')
   const [apps, setApps] = useState(agent?.apps?.join(', ') ?? '')
+  const [triggers, setTriggers] = useState<string[]>(agent?.triggers ?? [])
+  const [alertFix, setAlertFix] = useState(agent?.alert_fix ?? false)
+  const me = useSession()
+  const alertKinds = Object.keys(alertLabels).filter((k) => k !== 'disk.low' || (me.org?.id ?? 'default') === 'default')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
 
@@ -268,6 +295,8 @@ function AgentDialog({
         env: vars,
         scope,
         apps: apps.split(/[\s,]+/).filter(Boolean),
+        triggers,
+        alert_fix: alertFix,
       })
       onSaved()
     } catch (err) {
@@ -404,6 +433,35 @@ function AgentDialog({
             A deployer agent can change apps and data; destructive production changes still wait for an admin. A session never gets more than the
             role of the person who starts it.
           </p>
+          <fieldset>
+            <legend className="mb-1 text-sm font-medium">Start on its own when</legend>
+            <p className="mb-2 text-xs text-muted-foreground">
+              It looks into the alert, then its report goes to the organization's notification channels.
+              {apps.trim() && ' With apps set, only alerts about those apps.'}
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {alertKinds.map((k) => (
+                <label key={k} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={triggers.includes(k)}
+                    onCheckedChange={(v) => setTriggers(v === true ? [...triggers, k] : triggers.filter((t) => t !== k))}
+                  />
+                  {alertLabels[k]}
+                </label>
+              ))}
+            </div>
+            {triggers.length > 0 && scope === 'deploy' && (
+              <label className="mt-3 flex items-start gap-2 text-sm">
+                <Checkbox className="mt-0.5" checked={alertFix} onCheckedChange={(v) => setAlertFix(v === true)} />
+                <span>
+                  Let it fix things
+                  <span className="block text-xs text-muted-foreground">
+                    Off: on alerts it only looks (a viewer). On: it may roll back or restart, as a deployer.
+                  </span>
+                </span>
+              </label>
+            )}
+          </fieldset>
           {error && <ErrorBox error={error} />}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

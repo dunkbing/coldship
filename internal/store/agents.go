@@ -17,9 +17,13 @@ type AgentConfig struct {
 	Kind    string // claude | codex | gemini | custom
 	Command string // custom agents: the command that speaks ACP on stdio
 	// Env holds the provider keys, like ANTHROPIC_API_KEY.
-	Env       map[string]string
-	Scope     Scope
-	Apps      []string
+	Env   map[string]string
+	Scope Scope
+	Apps  []string
+	// Triggers are the alerts that start a session on their own; AlertFix
+	// gives those sessions the agent's role instead of read-only.
+	Triggers  []string
+	AlertFix  bool
 	CreatedBy string
 	CreatedAt time.Time
 }
@@ -35,18 +39,19 @@ func (s *Store) SaveAgent(ctx context.Context, a *AgentConfig) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO agents(org, name, kind, command, env, scope, apps, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(org, name) DO UPDATE SET kind=excluded.kind, command=excluded.command, env=excluded.env, scope=excluded.scope, apps=excluded.apps`,
-		a.Org, a.Name, a.Kind, a.Command, env, string(a.Scope), joinApps(a.Apps), a.CreatedBy, ts(a.CreatedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO agents(org, name, kind, command, env, scope, apps, triggers, alert_fix, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(org, name) DO UPDATE SET kind=excluded.kind, command=excluded.command, env=excluded.env, scope=excluded.scope, apps=excluded.apps,
+		triggers=excluded.triggers, alert_fix=excluded.alert_fix`,
+		a.Org, a.Name, a.Kind, a.Command, env, string(a.Scope), joinApps(a.Apps), joinApps(a.Triggers), a.AlertFix, a.CreatedBy, ts(a.CreatedAt))
 	return err
 }
 
-const agentCols = `org, name, kind, command, env, scope, apps, created_by, created_at`
+const agentCols = `org, name, kind, command, env, scope, apps, triggers, alert_fix, created_by, created_at`
 
 func (s *Store) scanAgent(r scanner) (*AgentConfig, error) {
 	var a AgentConfig
-	var env, scope, apps, created string
-	if err := r.Scan(&a.Org, &a.Name, &a.Kind, &a.Command, &env, &scope, &apps, &a.CreatedBy, &created); err != nil {
+	var env, scope, apps, triggers, created string
+	if err := r.Scan(&a.Org, &a.Name, &a.Kind, &a.Command, &env, &scope, &apps, &triggers, &a.AlertFix, &a.CreatedBy, &created); err != nil {
 		return nil, err
 	}
 	plain, err := s.open(env, "agents.env:"+a.Org+"/"+a.Name)
@@ -56,7 +61,7 @@ func (s *Store) scanAgent(r scanner) (*AgentConfig, error) {
 	if err := json.Unmarshal(plain, &a.Env); err != nil {
 		return nil, err
 	}
-	a.Scope, a.Apps = Scope(scope), splitApps(apps)
+	a.Scope, a.Apps, a.Triggers = Scope(scope), splitApps(apps), splitApps(triggers)
 	a.CreatedAt, _ = time.Parse(tsFormat, created)
 	return &a, nil
 }

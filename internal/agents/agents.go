@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -87,6 +88,17 @@ type Manager struct {
 	IdleTimeout time.Duration
 	// Image runs agents (default node:22-bookworm-slim).
 	Image string
+	// Alerts: at most MaxAlertSessions run at once (leaving room for people),
+	// one per agent, event and app every AlertCooldown. A permission request
+	// nobody answers in PermissionTimeout is cancelled. Notify sends reports.
+	MaxAlertSessions  int
+	AlertCooldown     time.Duration
+	AlertIdle         time.Duration
+	PermissionTimeout time.Duration
+	Notify            func(Alert)
+
+	alerts    chan Alert
+	lastAlert map[string]time.Time
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -94,7 +106,9 @@ type Manager struct {
 }
 
 func New(st *store.Store, l Launcher, log *slog.Logger) *Manager {
-	return &Manager{st: st, launch: l, log: log, MaxSessions: 4, IdleTimeout: 30 * time.Minute, Image: image, sessions: map[string]*Session{}}
+	return &Manager{st: st, launch: l, log: log, MaxSessions: 4, IdleTimeout: 30 * time.Minute, Image: image, sessions: map[string]*Session{},
+		MaxAlertSessions: 2, AlertCooldown: 30 * time.Minute, AlertIdle: 15 * time.Minute, PermissionTimeout: 15 * time.Minute,
+		alerts: make(chan Alert, alertQueue), lastAlert: map[string]time.Time{}}
 }
 
 // Start removes leftovers of a previous run (containers and tokens) and
@@ -108,6 +122,7 @@ func (m *Manager) Start(ctx context.Context) {
 			m.log.Debug("removing old agent containers failed", "err", err)
 		}
 	}
+	go m.runAlerts(ctx)
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()
@@ -128,14 +143,22 @@ func (m *Manager) reap() {
 	var idle []*Session
 	for _, s := range m.sessions {
 		s.mu.Lock()
-		if s.live() && s.Status != StatusWorking && time.Since(s.lastActive) > m.IdleTimeout {
+		limit := m.IdleTimeout
+		if s.alert != nil {
+			limit = m.AlertIdle
+		}
+		if s.live() && s.Status != StatusWorking && time.Since(s.lastActive) > limit {
 			idle = append(idle, s)
 		}
 		s.mu.Unlock()
 	}
 	m.mu.Unlock()
 	for _, s := range idle {
-		s.stop("ended after " + m.IdleTimeout.String() + " without prompts")
+		limit := m.IdleTimeout
+		if s.alert != nil {
+			limit = m.AlertIdle
+		}
+		s.stop("ended after " + limit.String() + " without prompts")
 	}
 }
 
@@ -162,13 +185,19 @@ type AgentView struct {
 	Keys      []string    `json:"keys"` // names of the variables set
 	Scope     store.Scope `json:"scope"`
 	Apps      []string    `json:"apps,omitempty"`
+	Triggers  []string    `json:"triggers"`
+	AlertFix  bool        `json:"alert_fix"`
 	CreatedBy string      `json:"created_by"`
 	CreatedAt time.Time   `json:"created_at"`
 	Running   int         `json:"running"`
 }
 
 func (m *Manager) view(a store.AgentConfig) AgentView {
-	v := AgentView{Name: a.Name, Kind: a.Kind, Command: a.Command, Scope: a.Scope, Apps: a.Apps, CreatedBy: a.CreatedBy, CreatedAt: a.CreatedAt, Keys: []string{}}
+	v := AgentView{Name: a.Name, Kind: a.Kind, Command: a.Command, Scope: a.Scope, Apps: a.Apps, CreatedBy: a.CreatedBy, CreatedAt: a.CreatedAt, Keys: []string{},
+		Triggers: a.Triggers, AlertFix: a.AlertFix}
+	if v.Triggers == nil {
+		v.Triggers = []string{}
+	}
 	for k := range a.Env {
 		v.Keys = append(v.Keys, k)
 	}
@@ -203,6 +232,9 @@ type ConfigRequest struct {
 	Env     map[string]string `json:"env,omitempty"`
 	Scope   string            `json:"scope,omitempty"`
 	Apps    []string          `json:"apps,omitempty"`
+	// Triggers and AlertFix are kept when left out.
+	Triggers *[]string `json:"triggers,omitempty"`
+	AlertFix *bool     `json:"alert_fix,omitempty"`
 }
 
 var (
@@ -268,12 +300,29 @@ func (m *Manager) Save(ctx context.Context, org, actor, name string, req ConfigR
 	a := &store.AgentConfig{Org: org, Name: name, Kind: req.Kind, Command: strings.TrimSpace(req.Command), Env: env, Scope: scope, Apps: req.Apps,
 		CreatedBy: actor, CreatedAt: time.Now()}
 	if old != nil {
-		a.CreatedBy, a.CreatedAt = old.CreatedBy, old.CreatedAt
+		a.CreatedBy, a.CreatedAt, a.Triggers, a.AlertFix = old.CreatedBy, old.CreatedAt, old.Triggers, old.AlertFix
+	}
+	if req.Triggers != nil {
+		a.Triggers = nil
+		for _, k := range *req.Triggers {
+			if !slices.Contains(AlertKinds, k) {
+				return nil, apierr.Invalid("triggers", "%q isn't an alert agents respond to (%s)", k, strings.Join(AlertKinds, ", "))
+			}
+			if k == "disk.low" && org != store.DefaultOrg {
+				return nil, apierr.Invalid("triggers", "disk alerts are about the server; only the default organization gets them")
+			}
+			if !slices.Contains(a.Triggers, k) {
+				a.Triggers = append(a.Triggers, k)
+			}
+		}
+	}
+	if req.AlertFix != nil {
+		a.AlertFix = *req.AlertFix
 	}
 	if err := m.st.SaveAgent(ctx, a); err != nil {
 		return nil, err
 	}
-	m.audit(ctx, org, actor, "agent.save", name, map[string]any{"kind": a.Kind, "scope": scope, "apps": a.Apps})
+	m.audit(ctx, org, actor, "agent.save", name, map[string]any{"kind": a.Kind, "scope": scope, "apps": a.Apps, "triggers": a.Triggers, "alert_fix": a.AlertFix})
 	v := m.view(*a)
 	return &v, nil
 }
@@ -375,6 +424,8 @@ type SessionView struct {
 	Status    string    `json:"status"`
 	Error     string    `json:"error,omitempty"`
 	AgentInfo string    `json:"agent_info,omitempty"`
+	Alert     string    `json:"alert,omitempty"` // the event that started it
+	AlertApp  string    `json:"alert_app,omitempty"`
 	Items     []*Item   `json:"items,omitempty"`
 }
 
@@ -400,6 +451,13 @@ type Session struct {
 	lastActive time.Time
 	ctx        context.Context
 	cancel     context.CancelFunc
+
+	// Sessions started by an alert: the first prompt, and what was sent back.
+	alert       *Alert
+	alertKey    string
+	prompt      string
+	reported    bool
+	askedPeople bool
 }
 
 // live reports whether the session runs; hold s.mu (or use isLive).
@@ -423,6 +481,10 @@ type StartRequest struct {
 	Agent  string
 	Actor  string
 	Caller store.Scope // the person's role; the agent gets no more
+	Prompt string      // sent once the session is ready
+
+	alert    *Alert
+	alertKey string
 }
 
 // StartSession launches the agent and connects to it. It returns at once;
@@ -456,12 +518,16 @@ func (m *Manager) StartSession(ctx context.Context, r StartRequest) (*SessionVie
 	sctx, cancel := context.WithCancel(context.Background())
 	s := &Session{ID: newID(), Org: r.Org, Agent: a.Name, Kind: a.Kind, StartedBy: r.Actor, Scope: scope, CreatedAt: time.Now(),
 		m: m, Status: StatusStarting, byKey: map[string]*Item{}, subs: map[chan Event]struct{}{}, perms: map[string]chan acp.PermissionOutcome{},
-		lastActive: time.Now(), ctx: sctx, cancel: cancel}
+		lastActive: time.Now(), ctx: sctx, cancel: cancel, alert: r.alert, alertKey: r.alertKey, prompt: strings.TrimSpace(r.Prompt)}
 	m.sessions[s.ID] = s
 	m.order = append(m.order, s.ID)
 	m.prune()
 	m.mu.Unlock()
-	m.audit(ctx, r.Org, r.Actor, "agent.session.start", a.Name, map[string]any{"session": s.ID, "scope": scope})
+	detail := map[string]any{"session": s.ID, "scope": scope}
+	if r.alert != nil {
+		detail["alert"], detail["app"] = r.alert.Kind, r.alert.App
+	}
+	m.audit(ctx, r.Org, r.Actor, "agent.session.start", a.Name, detail)
 	go s.run(*a)
 	return s.View(true), nil
 }
@@ -526,6 +592,9 @@ func (s *Session) View(items bool) *SessionView {
 func (s *Session) view(items bool) *SessionView {
 	v := &SessionView{ID: s.ID, Agent: s.Agent, Kind: s.Kind, Scope: string(s.Scope), StartedBy: s.StartedBy, CreatedAt: s.CreatedAt,
 		Status: s.Status, Error: s.Error, AgentInfo: s.agentInfo}
+	if s.alert != nil {
+		v.Alert, v.AlertApp = s.alert.Kind, s.alert.App
+	}
 	if items {
 		v.Items = make([]*Item, len(s.items))
 		for i, it := range s.items {
@@ -620,6 +689,7 @@ func (s *Session) run(a store.AgentConfig) {
 		s.add("notice", err.Error())
 		s.setStatus(StatusFailed, err.Error())
 		s.cleanup()
+		s.report("The agent didn't start: " + err.Error())
 	}
 	scopeApps := a.Apps
 	tokName := TokenPrefix + s.ID
@@ -729,6 +799,11 @@ func (s *Session) run(a store.AgentConfig) {
 	s.mu.Unlock()
 	status.done()
 	s.setStatus(StatusReady, "")
+	if s.prompt != "" {
+		if err := s.Prompt(s.StartedBy, s.prompt); err != nil {
+			s.report("The agent couldn't take the alert: " + err.Error())
+		}
+	}
 }
 
 // authMethod picks the sign-in method that uses an API key from env.
@@ -819,11 +894,16 @@ func (s *Session) Prompt(actor, text string) error {
 		s.mu.Lock()
 		s.lastActive = time.Now()
 		s.mu.Unlock()
+		failed := ""
 		switch {
 		case err != nil:
-			s.add("notice", "the agent failed: "+err.Error())
+			failed = "the agent failed: " + err.Error()
+			s.add("notice", failed)
 		case res.StopReason != "" && res.StopReason != "end_turn":
 			s.add("notice", "stopped: "+strings.ReplaceAll(res.StopReason, "_", " "))
+		}
+		if s.isLive() {
+			s.report(failed)
 		}
 		s.mu.Lock()
 		if s.Status == StatusWorking {
@@ -921,7 +1001,17 @@ func (s *Session) askPermission(ctx context.Context, p acp.PermissionParams) acp
 	view := &PermissionView{ID: id, Title: clip(title, 500), Input: clip(rawText(p.ToolCall.RawInput), maxOutput), Options: p.Options, Status: "pending"}
 	s.perms[id] = ch
 	s.upsert(&Item{Key: "perm:" + id, Kind: "permission", Permission: view})
+	unattended := s.alert != nil
 	s.mu.Unlock()
+	// Nobody may be watching an alert session: ask people, and don't hold
+	// a session slot forever.
+	var timeout <-chan time.Time
+	if unattended {
+		s.waiting(title)
+		t := time.NewTimer(s.m.PermissionTimeout)
+		defer t.Stop()
+		timeout = t.C
+	}
 	var out acp.PermissionOutcome
 	var ok bool
 	select {
@@ -931,6 +1021,16 @@ func (s *Session) askPermission(ctx context.Context, p acp.PermissionParams) acp
 		}
 	case <-ctx.Done():
 		out = acp.PermissionOutcome{Outcome: "cancelled"}
+	case <-timeout:
+		// ACP answers "cancelled" only for a cancelled turn: cancel it.
+		out = acp.PermissionOutcome{Outcome: "cancelled"}
+		s.add("notice", "nobody answered in "+s.m.PermissionTimeout.String()+"; the turn was cancelled")
+		s.mu.Lock()
+		conn, sid := s.conn, s.acpID
+		s.mu.Unlock()
+		if conn != nil && sid != "" {
+			conn.Notify("session/cancel", map[string]string{"sessionId": sid})
+		}
 	}
 	if out.Outcome == "cancelled" {
 		s.mu.Lock()
