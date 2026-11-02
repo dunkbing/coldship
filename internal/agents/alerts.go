@@ -196,3 +196,12 @@ func (m *Manager) notify(a Alert) {
 		m.Notify(a)
 	}
 }
+
+// alertTitles name sessions started by an alert.
+var alertTitles = map[string]string{
+	"app.down":       "App down",
+	"deploy.failed":  "Deploy failed",
+	"job.failed":     "Job failed",
+	"backup.failing": "Backups failing",
+	"disk.low":       "Disk almost full",
+}

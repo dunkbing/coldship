@@ -24,11 +24,23 @@ Give the agent a **role**, deployer or viewer, and optionally limit it to some a
 
 ## Sessions
 
-**New session** starts the agent; the first start downloads it, which takes a minute. Then write to it. As it works you see its messages, its plan, and each tool call with input and output.
+**New session** starts the agent; the first start downloads it, which takes a minute. Then write to it. As it works you see its messages, its plan, and the tools it uses (Coldship's tools read as "List apps" or "Logs", with their input, and runs of several fold into one line you can open).
 
 When the agent wants to run a tool, a card asks you to **Allow** or **Reject** it. Anyone in the organization who can deploy may answer. Choices like "Always allow" are remembered by the agent in its home volume, so they carry over to later sessions, whoever starts them. **Stop** interrupts the current turn; **End session** stops the agent.
 
-Sessions end after 30 minutes without a message, and at most 4 run at once on the server (across all organizations). Transcripts are kept in memory, so they're gone after a restart.
+Under the message box are the settings the agent offers, if any: its **mode** (like asking first, or only planning) and options such as its **model**. Changing one applies to this session and shows in the transcript for everyone. Type **/** for the agent's own commands. The bar on the right shows how full its context is, when the agent reports it.
+
+Sessions end after 30 minutes without a message, and at most 4 run at once on the server (across all organizations).
+
+### Ask an agent from anywhere
+
+With an agent connected, **Ask an agent** buttons appear where they help: on an app's page, on a failed deployment (**Ask why**), on a failed job run, next to the diagnosis of a failing app, and on the Server page. Each opens a session with a first message you can edit, like "The deployment dep_… of the app web failed. Find out why…". The message names the app or deployment; the agent reads logs and errors itself with its tools, where Coldship marks them as untrusted.
+
+### History and resuming
+
+Each organization keeps its last 100 sessions, with a title (the agent's, or your first message), encrypted like every other secret. Open an ended session to read it, including after the server restarts. **Resume** starts it again: agents that support reloading a conversation (ACP `loadSession`, like Claude Code) pick up where they left off, since they keep it in their home volume; others start over in the same transcript, and the transcript says so. The trash button deletes a transcript; the audit log still records what the agent did.
+
+Agents' messages are shown as Markdown. Images in them are shown as links and never loaded, so an agent tricked by something it read can't send data out just by being displayed.
 
 ## Responding to alerts
 

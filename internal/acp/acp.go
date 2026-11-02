@@ -325,7 +325,98 @@ type NewSessionParams struct {
 }
 
 type NewSessionResult struct {
-	SessionID string `json:"sessionId"`
+	SessionID     string         `json:"sessionId"`
+	Modes         *ModeState     `json:"modes,omitempty"`
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+}
+
+// LoadSessionParams reopens an earlier session (agents with loadSession);
+// the agent replays its history as session/update before answering.
+type LoadSessionParams struct {
+	SessionID  string      `json:"sessionId"`
+	Cwd        string      `json:"cwd"`
+	MCPServers []MCPServer `json:"mcpServers"`
+}
+
+type LoadSessionResult struct {
+	Modes         *ModeState     `json:"modes,omitempty"`
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+}
+
+// AgentCapabilities: the parts Coldship uses.
+type AgentCapabilities struct {
+	LoadSession bool `json:"loadSession"`
+}
+
+// ModeState is the agent's session modes (like "ask" or "plan").
+type ModeState struct {
+	CurrentModeID  string `json:"currentModeId"`
+	AvailableModes []Mode `json:"availableModes"`
+}
+
+type Mode struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// ConfigOption is a session setting the agent offers, like its model.
+// Coldship advertises no boolean support, so these are selects.
+type ConfigOption struct {
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	Category     string          `json:"category,omitempty"`
+	Type         string          `json:"type"`
+	CurrentValue json.RawMessage `json:"currentValue"`
+	Options      []ConfigValue   `json:"options,omitempty"`
+}
+
+// ConfigValue is a choice, or a group of choices (Group set).
+type ConfigValue struct {
+	Value       string        `json:"value,omitempty"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Group       string        `json:"group,omitempty"`
+	Options     []ConfigValue `json:"options,omitempty"`
+}
+
+// Has reports whether v is one of the option's choices.
+func (o ConfigOption) Has(v string) bool {
+	var has func([]ConfigValue) bool
+	has = func(list []ConfigValue) bool {
+		for _, c := range list {
+			if (c.Group == "" && c.Value == v) || (c.Group != "" && has(c.Options)) {
+				return true
+			}
+		}
+		return false
+	}
+	return has(o.Options)
+}
+
+// Command is a slash command the agent offers; it is invoked by sending
+// "/name input" as a prompt.
+type Command struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Input       *CommandInput `json:"input,omitempty"`
+}
+
+type CommandInput struct {
+	Hint string `json:"hint"`
+}
+
+// Usage is how full the agent's context window is.
+type Usage struct {
+	Size int64 `json:"size"`
+	Used int64 `json:"used"`
+	Cost *Cost `json:"cost,omitempty"`
+}
+
+type Cost struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
 }
 
 type ContentBlock struct {
@@ -359,6 +450,15 @@ type Update struct {
 	Status        string          `json:"status,omitempty"`
 	RawInput      json.RawMessage `json:"rawInput,omitempty"`
 	Entries       []PlanEntry     `json:"entries,omitempty"`
+
+	// current_mode_update, config_option_update, available_commands_update,
+	// usage_update (session_info_update uses Title).
+	CurrentModeID     string         `json:"currentModeId,omitempty"`
+	ConfigOptions     []ConfigOption `json:"configOptions,omitempty"`
+	AvailableCommands []Command      `json:"availableCommands,omitempty"`
+	Size              *int64         `json:"size,omitempty"`
+	Used              *int64         `json:"used,omitempty"`
+	Cost              *Cost          `json:"cost,omitempty"`
 }
 
 type PlanEntry struct {

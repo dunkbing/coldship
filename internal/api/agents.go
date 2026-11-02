@@ -26,6 +26,9 @@ func (s *Server) routeAgents() {
 	s.route("POST /v1/agent-sessions/{id}/permissions/{perm}", store.ScopeDeploy, s.agentsOnly(s.answerAgent))
 	s.route("POST /v1/agent-sessions/{id}/cancel", store.ScopeDeploy, s.agentsOnly(s.cancelAgent))
 	s.route("DELETE /v1/agent-sessions/{id}", store.ScopeDeploy, s.agentsOnly(s.stopAgentSession))
+	s.route("POST /v1/agent-sessions/{id}/resume", store.ScopeDeploy, s.agentsOnly(s.resumeAgentSession))
+	s.route("POST /v1/agent-sessions/{id}/settings", store.ScopeDeploy, s.agentsOnly(s.configureAgent))
+	s.route("DELETE /v1/agent-sessions/{id}/transcript", store.ScopeDeploy, s.agentsOnly(s.forgetAgentSession))
 	s.mux.HandleFunc("GET /v1/agent-sessions/{id}/stream", s.streamAgentSession)
 }
 
@@ -76,8 +79,47 @@ func (s *Server) deleteAgent(r *http.Request, p principal) (any, error) {
 	return map[string]any{"name": name, "deleted": true}, nil
 }
 
+type StartSessionRequest struct {
+	// Prompt is sent as the first message once the agent is ready.
+	Prompt string `json:"prompt,omitempty"`
+}
+
 func (s *Server) startAgentSession(r *http.Request, p principal) (any, error) {
-	return s.agents.StartSession(r.Context(), agents.StartRequest{Org: p.org, Agent: r.PathValue("agent"), Actor: p.name, Caller: p.scope})
+	var req StartSessionRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	if len(req.Prompt) > 20000 {
+		return nil, apierr.Invalid("prompt", "the prompt is too long")
+	}
+	return s.agents.StartSession(r.Context(), agents.StartRequest{Org: p.org, Agent: r.PathValue("agent"), Actor: p.name, Caller: p.scope, Prompt: req.Prompt})
+}
+
+func (s *Server) resumeAgentSession(r *http.Request, p principal) (any, error) {
+	return s.agents.Resume(r.Context(), p.org, r.PathValue("id"), p.name, p.scope)
+}
+
+func (s *Server) configureAgent(r *http.Request, p principal) (any, error) {
+	ss, err := s.agents.Session(p.org, r.PathValue("id"))
+	if err != nil {
+		return nil, err
+	}
+	var req agents.SettingRequest
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	if err := ss.Configure(p.name, req); err != nil {
+		return nil, err
+	}
+	return ss.View(false), nil
+}
+
+func (s *Server) forgetAgentSession(r *http.Request, p principal) (any, error) {
+	id := r.PathValue("id")
+	if err := s.agents.Forget(r.Context(), p.org, id, p.name); err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": id, "deleted": true}, nil
 }
 
 func (s *Server) listAgentSessions(_ *http.Request, p principal) (any, error) {

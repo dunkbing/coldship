@@ -26,6 +26,7 @@ import {
   ToneBadge,
   type Tone,
 } from '@/components/common'
+import { AskAgent } from '@/components/AskAgent'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -129,7 +130,16 @@ export default function AppDetail() {
             )}
           </>
         }
-        actions={<RollbackButton app={a} onDone={app.reload} />}
+        actions={
+          <div className="flex flex-wrap items-start gap-2">
+            <AskAgent
+              size="default"
+              title={`Ask an agent about ${a.name}`}
+              prompt={`Check on the app ${a.name}: is it healthy? Look at its status, recent deploys, logs and metrics, and tell me about anything wrong.`}
+            />
+            <RollbackButton app={a} onDone={app.reload} />
+          </div>
+        }
       />
 
       {a.preview_of && <PreviewBanner a={a} />}
@@ -524,9 +534,20 @@ function DiagnoseTab({ name }: { name: string }) {
         </CardContent>
       </Card>
     )
+  const trouble = d.data.findings.some((f) => f.severity === 'error' || f.severity === 'warning')
   return (
     <Card>
       <CardContent className="space-y-4">
+        {trouble && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm">
+            <span className="text-muted-foreground">An agent can dig into these findings and suggest a fix.</span>
+            <AskAgent
+              label="Ask an agent to fix it"
+              title={`Fix ${name}`}
+              prompt={`Diagnose the app ${name}: read its diagnosis, deploy log and logs, find the root cause of what's wrong, and propose a fix. Ask me before changing anything.`}
+            />
+          </div>
+        )}
         <ul className="space-y-3">
           {d.data.findings.map((f, i) => (
             <li key={i} className={cn('space-y-1 border-l-2 pl-3', sevBorder[f.severity] ?? 'border-l-border')}>
@@ -600,9 +621,20 @@ function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean;
           </div>
           {x.kept_previous && <div className="mt-1 text-xs text-ok">previous version kept running</div>}
           {x.error && <div className="mt-1 line-clamp-2 max-w-xs text-xs whitespace-normal text-destructive">{x.error}</div>}
-          <Button variant="ghost" size="xs" className="mt-1 -ml-2" onClick={onToggle} aria-expanded={open}>
-            {open ? 'Hide log' : 'Log'}
-          </Button>
+          <div className="mt-1 -ml-2 flex flex-wrap items-center gap-1">
+            <Button variant="ghost" size="xs" onClick={onToggle} aria-expanded={open}>
+              {open ? 'Hide log' : 'Log'}
+            </Button>
+            {x.status === 'failed' && (
+              <AskAgent
+                variant="ghost"
+                size="xs"
+                label="Ask why"
+                title={`Why did ${x.id} fail?`}
+                prompt={`The deployment ${x.id} of the app ${x.app} failed. Find out why from its deploy log and the app's state, and suggest a fix.`}
+              />
+            )}
+          </div>
         </TableCell>
         <TableCell className="align-top">
           <Mono>{x.image || x.spec?.image || '—'}</Mono>

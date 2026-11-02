@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type FormEvent } from 'react'
+import { Suspense, createContext, lazy, useContext, useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
@@ -42,8 +42,10 @@ import Tokens from './pages/Tokens'
 import OrgSettings from './pages/OrgSettings'
 import Account from './pages/Account'
 import Agents from './pages/Agents'
-import AgentSession from './pages/AgentSession'
 import UpdateBanner from './components/UpdateBanner'
+
+// The session page brings a Markdown renderer: load it when opened.
+const AgentSession = lazy(() => import('./pages/AgentSession'))
 import { ErrorBox, PageSkeleton } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -179,7 +181,14 @@ export default function App() {
                 <Route path="/org/settings" element={<OrgSettings />} />
                 <Route path="/account" element={<Account />} />
                 <Route path="/agents" element={me.apps?.length ? <Navigate to="/apps" replace /> : <Agents />} />
-                <Route path="/agents/sessions/:id" element={<AgentSession />} />
+                <Route
+                  path="/agents/sessions/:id"
+                  element={
+                    <Suspense fallback={<PageSkeleton kind="detail" />}>
+                      <AgentSession />
+                    </Suspense>
+                  }
+                />
                 <Route path="*" element={<Navigate to="/apps" replace />} />
               </Routes>
             </main>

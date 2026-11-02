@@ -551,11 +551,41 @@ export interface AgentSession {
   agent_info?: string
   alert?: string
   alert_app?: string
+  title?: string
+  updated_at?: string
+  resumable: boolean
+  modes?: { currentModeId: string; availableModes: { id: string; name: string; description?: string }[] }
+  config_options?: AgentConfigOption[]
+  commands?: AgentCommand[]
+  usage?: { size: number; used: number; cost?: { amount: number; currency: string } }
   items?: SessionItem[]
 }
 
+// A setting the agent offers (ACP config option), like its model.
+export interface AgentConfigOption {
+  id: string
+  name: string
+  description?: string
+  category?: string
+  type: string
+  currentValue: string | boolean
+  options?: AgentConfigValue[]
+}
+export interface AgentConfigValue {
+  value?: string
+  name: string
+  description?: string
+  group?: string
+  options?: AgentConfigValue[]
+}
+export interface AgentCommand {
+  name: string
+  description: string
+  input?: { hint: string }
+}
+
 export interface SessionEvent {
-  type: 'snapshot' | 'item' | 'status'
+  type: 'snapshot' | 'item' | 'status' | 'session'
   item?: SessionItem
   status?: SessionStatus
   error?: string
@@ -662,7 +692,11 @@ export const api = {
   saveAgent: (name: string, body: { kind: string; command?: string; env?: Record<string, string>; scope?: Scope; apps?: string[]; triggers?: string[]; alert_fix?: boolean }) =>
     req<Agent>('PUT', `/v1/agents/${enc(name)}`, body),
   deleteAgent: (name: string) => req<{ deleted: boolean }>('DELETE', `/v1/agents/${enc(name)}`),
-  startSession: (agent: string) => req<AgentSession>('POST', `/v1/agents/${enc(agent)}/sessions`),
+  startSession: (agent: string, prompt?: string) => req<AgentSession>('POST', `/v1/agents/${enc(agent)}/sessions`, prompt ? { prompt } : undefined),
+  resumeSession: (id: string) => req<AgentSession>('POST', `/v1/agent-sessions/${enc(id)}/resume`),
+  configureSession: (id: string, setting: { mode?: string; option?: string; value?: string }) =>
+    req<AgentSession>('POST', `/v1/agent-sessions/${enc(id)}/settings`, setting),
+  forgetSession: (id: string) => req<{ deleted: boolean }>('DELETE', `/v1/agent-sessions/${enc(id)}/transcript`),
   sessions: () => req<AgentSession[]>('GET', '/v1/agent-sessions'),
   session: (id: string) => req<AgentSession>('GET', `/v1/agent-sessions/${enc(id)}`),
   prompt: (id: string, text: string) => req<{ sent: boolean }>('POST', `/v1/agent-sessions/${enc(id)}/prompt`, { text }),

@@ -82,11 +82,14 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `PATCH` | `/v1/account`, `POST` `/v1/account/password` | person | Change your name; change your password (`{current, new}`) |
 | `POST` | `/v1/apps/{name}/move` | admin of both | Move an app to another organization: `{org}` |
 | `GET` | `/v1/agents` | read | `{presets, agents}`: the agents you can connect, and the org's connected ones (key names only, never values) |
-| `PUT` | `/v1/agents/{name}` | admin | Connect or change an agent: `{kind, command?, env?, scope?, apps?, triggers?, alert_fix?}`. `kind` is `claude`, `codex`, `gemini` or `custom`; an empty `env` value keeps the saved one; `scope` is `read` or `deploy`; `triggers` are the [alerts](/guides/agents-in-dashboard/#responding-to-alerts) that start it (`app.down`, `deploy.failed`, `backup.failing`, `disk.low`), and `alert_fix` gives those sessions its role instead of viewer. Left out, both keep their saved values |
+| `PUT` | `/v1/agents/{name}` | admin | Connect or change an agent: `{kind, command?, env?, scope?, apps?, triggers?, alert_fix?}`. `kind` is `claude`, `codex`, `gemini` or `custom`; an empty `env` value keeps the saved one; `scope` is `read` or `deploy`; `triggers` are the [alerts](/guides/agents-in-dashboard/#responding-to-alerts) that start it (`app.down`, `deploy.failed`, `job.failed`, `backup.failing`, `disk.low`), and `alert_fix` gives those sessions its role instead of viewer. Left out, both keep their saved values |
 | `DELETE` | `/v1/agents/{name}` | admin | Remove an agent and end its sessions |
-| `POST` | `/v1/agents/{name}/sessions` | deploy | Start a session; it becomes `ready` in the background |
-| `GET` | `/v1/agent-sessions`, `/v1/agent-sessions/{id}` | read | Sessions, and one with its transcript |
-| `GET` | `/v1/agent-sessions/{id}/stream` | read | Server-sent events, as JSON: a `snapshot`, then `item` and `status` changes |
+| `POST` | `/v1/agents/{name}/sessions` | deploy | Start a session: `{prompt?}`; it becomes `ready` in the background, then gets `prompt` as its first message |
+| `GET` | `/v1/agent-sessions`, `/v1/agent-sessions/{id}` | read | The org's last 100 sessions (with `title` and `resumable`), and one with its transcript, `modes`, `config_options`, `commands` and `usage` |
+| `GET` | `/v1/agent-sessions/{id}/stream` | read | Server-sent events, as JSON: a `snapshot`, then `item`, `status` and `session` (settings, title, usage) changes |
+| `POST` | `/v1/agent-sessions/{id}/settings` | deploy | Change a setting the agent offers: `{mode}`, or `{option, value}` (like `{"option": "model", "value": "..."}`) |
+| `POST` | `/v1/agent-sessions/{id}/resume` | deploy | Start an ended session again; the agent reloads its conversation if it supports that |
+| `DELETE` | `/v1/agent-sessions/{id}/transcript` | deploy | Delete an ended session's transcript |
 | `POST` | `/v1/agent-sessions/{id}/prompt` | deploy | Send a message: `{text}` |
 | `POST` | `/v1/agent-sessions/{id}/permissions/{perm}` | deploy | Answer the agent's request: `{option}` |
 | `POST` | `/v1/agent-sessions/{id}/cancel`, `DELETE` `/v1/agent-sessions/{id}` | deploy | Stop the current turn; end the session |

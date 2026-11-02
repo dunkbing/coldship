@@ -122,17 +122,25 @@ func (m *Manager) Start(ctx context.Context) {
 			m.log.Debug("removing old agent containers failed", "err", err)
 		}
 	}
+	if err := m.st.EndAgentSessions(ctx, ""); err != nil {
+		m.log.Warn("ending old agent sessions failed", "err", err)
+	}
 	go m.runAlerts(ctx)
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()
+		save := time.NewTicker(2 * time.Second)
+		defer save.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				m.StopAll()
+				m.saveDirty()
 				return
 			case <-t.C:
 				m.reap()
+			case <-save.C:
+				m.saveDirty()
 			}
 		}
 	}()
@@ -160,6 +168,13 @@ func (m *Manager) reap() {
 		}
 		s.stop("ended after " + limit.String() + " without prompts")
 	}
+}
+
+// Shutdown ends every session and saves what is left, before the server
+// exits.
+func (m *Manager) Shutdown() {
+	m.StopAll()
+	m.saveDirty()
 }
 
 // StopAll ends every session (on shutdown).
@@ -407,7 +422,7 @@ type PermissionView struct {
 
 // Event is what the dashboard's stream receives.
 type Event struct {
-	Type   string       `json:"type"` // snapshot | item | status
+	Type   string       `json:"type"` // snapshot | item | status | session (settings, title, usage)
 	Item   *Item        `json:"item,omitempty"`
 	Status string       `json:"status,omitempty"`
 	Error  string       `json:"error,omitempty"`
@@ -426,7 +441,16 @@ type SessionView struct {
 	AgentInfo string    `json:"agent_info,omitempty"`
 	Alert     string    `json:"alert,omitempty"` // the event that started it
 	AlertApp  string    `json:"alert_app,omitempty"`
-	Items     []*Item   `json:"items,omitempty"`
+	Title     string    `json:"title,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	// Resumable: ended, but can be started again (the agent reloads its
+	// conversation if it supports that).
+	Resumable bool               `json:"resumable"`
+	Modes     *acp.ModeState     `json:"modes,omitempty"`
+	Config    []acp.ConfigOption `json:"config_options,omitempty"`
+	Commands  []acp.Command      `json:"commands,omitempty"`
+	Usage     *acp.Usage         `json:"usage,omitempty"`
+	Items     []*Item            `json:"items,omitempty"`
 }
 
 type Session struct {
@@ -451,6 +475,21 @@ type Session struct {
 	lastActive time.Time
 	ctx        context.Context
 	cancel     context.CancelFunc
+
+	// What the agent offers and reports (ACP), and the transcript's title.
+	title     string
+	modes     *acp.ModeState
+	config    []acp.ConfigOption
+	commands  []acp.Command
+	usage     *acp.Usage
+	updatedAt time.Time
+	dirty     bool // changed since last saved
+	resume    bool // the next run reloads acpID
+	loading   bool // the agent is replaying history we already have
+
+	// alertKind and alertApp say what started it, for good; alert is set
+	// while nobody has taken over.
+	alertKind, alertApp string
 
 	// Sessions started by an alert: the first prompt, and what was sent back.
 	alert       *Alert
@@ -505,20 +544,21 @@ func (m *Manager) StartSession(ctx context.Context, r StartRequest) (*SessionVie
 		scope = r.Caller
 	}
 	m.mu.Lock()
-	running := 0
-	for _, s := range m.sessions {
-		if s.isLive() {
-			running++
-		}
-	}
-	if running >= m.MaxSessions {
+	if err := m.full(); err != nil {
 		m.mu.Unlock()
-		return nil, apierr.New(429, "too_many_sessions", "%d agent sessions are running, the most this server allows; end one first", running)
+		return nil, err
 	}
 	sctx, cancel := context.WithCancel(context.Background())
 	s := &Session{ID: newID(), Org: r.Org, Agent: a.Name, Kind: a.Kind, StartedBy: r.Actor, Scope: scope, CreatedAt: time.Now(),
 		m: m, Status: StatusStarting, byKey: map[string]*Item{}, subs: map[chan Event]struct{}{}, perms: map[string]chan acp.PermissionOutcome{},
 		lastActive: time.Now(), ctx: sctx, cancel: cancel, alert: r.alert, alertKey: r.alertKey, prompt: strings.TrimSpace(r.Prompt)}
+	if r.alert != nil {
+		s.alertKind, s.alertApp = r.alert.Kind, r.alert.App
+		s.title = alertTitles[r.alert.Kind]
+		if r.alert.App != "" {
+			s.title += ": " + r.alert.App
+		}
+	}
 	m.sessions[s.ID] = s
 	m.order = append(m.order, s.ID)
 	m.prune()
@@ -528,8 +568,103 @@ func (m *Manager) StartSession(ctx context.Context, r StartRequest) (*SessionVie
 		detail["alert"], detail["app"] = r.alert.Kind, r.alert.App
 	}
 	m.audit(ctx, r.Org, r.Actor, "agent.session.start", a.Name, detail)
+	s.save()
+	m.st.PruneAgentSessions(ctx, r.Org, keepSessions)
 	go s.run(*a)
 	return s.View(true), nil
+}
+
+// keepSessions is how many transcripts each organization keeps.
+const keepSessions = 100
+
+// full refuses a session over MaxSessions. Holds m.mu.
+func (m *Manager) full() error {
+	running := 0
+	for _, s := range m.sessions {
+		if s.isLive() {
+			running++
+		}
+	}
+	if running >= m.MaxSessions {
+		return apierr.New(429, "too_many_sessions", "%d agent sessions are running, the most this server allows; end one first", running)
+	}
+	return nil
+}
+
+// Resume starts an ended session again. If the agent supports it, it
+// reloads its conversation; otherwise it starts over in the same transcript.
+func (m *Manager) Resume(ctx context.Context, org, id, actor string, caller store.Scope) (*SessionView, error) {
+	s, err := m.Session(org, id)
+	if err != nil {
+		return nil, err
+	}
+	a, err := m.st.GetAgent(ctx, org, s.Agent)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		return nil, apierr.New(409, "agent_removed", "the agent %s was removed; connect it again to continue", s.Agent)
+	}
+	if m.launch == nil {
+		return nil, apierr.New(409, "agents_unavailable", "agents need a container engine, which this server doesn't have")
+	}
+	scope := a.Scope
+	if !caller.Allows(scope) {
+		scope = caller
+	}
+	m.mu.Lock()
+	if err := m.full(); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	s.mu.Lock()
+	if s.live() {
+		s.mu.Unlock()
+		m.mu.Unlock()
+		return nil, apierr.New(409, "session_running", "the session is still running")
+	}
+	sctx, cancel := context.WithCancel(context.Background())
+	s.ctx, s.cancel = sctx, cancel
+	s.Scope, s.Kind = scope, a.Kind
+	s.Status, s.Error = StatusStarting, ""
+	s.conn, s.proc, s.token = nil, nil, ""
+	s.perms = map[string]chan acp.PermissionOutcome{}
+	s.alert, s.prompt, s.usage = nil, "", nil
+	s.resume = s.acpID != ""
+	s.lastActive = time.Now()
+	s.broadcast(Event{Type: "status", Status: StatusStarting})
+	s.mu.Unlock()
+	m.mu.Unlock()
+	s.add("notice", "resumed by "+actor)
+	m.audit(ctx, org, actor, "agent.session.resume", a.Name, map[string]any{"session": s.ID, "scope": scope})
+	s.save()
+	go s.run(*a)
+	return s.View(false), nil
+}
+
+// Forget deletes an ended session's transcript.
+func (m *Manager) Forget(ctx context.Context, org, id, actor string) error {
+	s, err := m.Session(org, id)
+	if err != nil {
+		return err
+	}
+	if s.isLive() {
+		return apierr.New(409, "session_running", "end the session first")
+	}
+	m.mu.Lock()
+	delete(m.sessions, id)
+	for i, x := range m.order {
+		if x == id {
+			m.order = append(m.order[:i], m.order[i+1:]...)
+			break
+		}
+	}
+	m.mu.Unlock()
+	if err := m.st.DeleteAgentSession(ctx, org, id); err != nil {
+		return err
+	}
+	m.audit(ctx, org, actor, "agent.session.delete", s.Agent, map[string]any{"session": id})
+	return nil
 }
 
 // prune forgets the oldest ended sessions beyond 30. Holds m.mu.
@@ -554,31 +689,138 @@ func (m *Manager) prune() {
 	}
 }
 
-// Session returns an org's session.
+// Session returns an org's session, loading a saved one if needed.
 func (m *Manager) Session(org, id string) (*Session, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	s := m.sessions[id]
-	if s == nil || s.Org != org {
+	m.mu.Unlock()
+	if s != nil {
+		if s.Org != org {
+			return nil, apierr.NotFound("agent_session", id)
+		}
+		return s, nil
+	}
+	rec, err := m.st.GetAgentSession(context.Background(), org, id)
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
 		return nil, apierr.NotFound("agent_session", id)
 	}
+	s = m.restore(rec)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cur := m.sessions[id]; cur != nil {
+		return cur, nil // loaded meanwhile
+	}
+	m.sessions[id] = s
+	m.order = append(m.order, id)
+	m.prune()
 	return s, nil
 }
 
-// Sessions lists an org's sessions, newest first.
+// restore rebuilds an ended session from its record.
+func (m *Manager) restore(r *store.AgentSessionRecord) *Session {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &Session{ID: r.ID, Org: r.Org, Agent: r.Agent, Kind: r.Kind, StartedBy: r.StartedBy, Scope: r.Scope, CreatedAt: r.CreatedAt,
+		m: m, Status: r.Status, Error: r.Error, agentInfo: r.AgentInfo, acpID: r.ACPID, title: r.Title, updatedAt: r.UpdatedAt,
+		alertKind: r.Alert, alertApp: r.AlertApp, byKey: map[string]*Item{}, subs: map[chan Event]struct{}{},
+		perms: map[string]chan acp.PermissionOutcome{}, ctx: ctx, cancel: cancel}
+	if s.Status != StatusEnded && s.Status != StatusFailed {
+		s.Status = StatusEnded
+	}
+	var d savedData
+	if err := json.Unmarshal(r.Data, &d); err != nil && len(r.Data) > 0 {
+		m.log.Warn("reading a saved agent session failed", "session", r.ID, "err", err)
+	}
+	s.items, s.seq, s.modes, s.config, s.commands = d.Items, d.Seq, d.Modes, d.Config, d.Commands
+	for _, it := range s.items {
+		s.byKey[it.Key] = it
+		if it.Permission != nil && it.Permission.Status == "pending" {
+			it.Permission.Status = "cancelled"
+		}
+	}
+	return s
+}
+
+// savedData is what a session's record keeps beyond the list's columns.
+type savedData struct {
+	Items    []*Item            `json:"items"`
+	Seq      int                `json:"seq"`
+	Modes    *acp.ModeState     `json:"modes,omitempty"`
+	Config   []acp.ConfigOption `json:"config_options,omitempty"`
+	Commands []acp.Command      `json:"commands,omitempty"`
+}
+
+// save writes the session to the store.
+func (s *Session) save() {
+	s.mu.Lock()
+	s.dirty = false
+	b, err := json.Marshal(savedData{Items: s.items, Seq: s.seq, Modes: s.modes, Config: s.config, Commands: s.commands})
+	rec := &store.AgentSessionRecord{ID: s.ID, Org: s.Org, Agent: s.Agent, Kind: s.Kind, Scope: s.Scope, StartedBy: s.StartedBy,
+		Title: s.title, Status: s.Status, Error: s.Error, AgentInfo: s.agentInfo, Alert: s.alertKind, AlertApp: s.alertApp,
+		ACPID: s.acpID, CreatedAt: s.CreatedAt, UpdatedAt: s.updatedAt, Data: b}
+	s.mu.Unlock()
+	if err == nil {
+		err = s.m.st.SaveAgentSession(context.Background(), rec)
+	}
+	if err != nil {
+		s.m.log.Warn("saving an agent session failed", "session", s.ID, "err", err)
+	}
+}
+
+// saveDirty saves sessions that changed since they were last saved.
+func (m *Manager) saveDirty() {
+	m.mu.Lock()
+	var dirty []*Session
+	for _, s := range m.sessions {
+		s.mu.Lock()
+		if s.dirty {
+			dirty = append(dirty, s)
+		}
+		s.mu.Unlock()
+	}
+	m.mu.Unlock()
+	for _, s := range dirty {
+		s.save()
+	}
+}
+
+// Sessions lists an org's sessions, newest first: the saved ones, with
+// those in memory up to date.
 func (m *Manager) Sessions(org string) []*SessionView {
 	m.mu.Lock()
-	var list []*Session
-	for i := len(m.order) - 1; i >= 0; i-- {
-		if s := m.sessions[m.order[i]]; s.Org == org {
-			list = append(list, s)
+	mem := map[string]*Session{}
+	for _, s := range m.sessions {
+		if s.Org == org {
+			mem[s.ID] = s
 		}
 	}
 	m.mu.Unlock()
-	out := make([]*SessionView, 0, len(list))
-	for _, s := range list {
+	recs, err := m.st.ListAgentSessions(context.Background(), org, keepSessions)
+	if err != nil {
+		m.log.Warn("listing agent sessions failed", "err", err)
+	}
+	out := make([]*SessionView, 0, len(recs)+len(mem))
+	for _, r := range recs {
+		if s := mem[r.ID]; s != nil {
+			out = append(out, s.View(false))
+			delete(mem, r.ID)
+			continue
+		}
+		v := &SessionView{ID: r.ID, Agent: r.Agent, Kind: r.Kind, Scope: string(r.Scope), StartedBy: r.StartedBy, CreatedAt: r.CreatedAt,
+			UpdatedAt: r.UpdatedAt, Status: r.Status, Error: r.Error, AgentInfo: r.AgentInfo, Alert: r.Alert, AlertApp: r.AlertApp,
+			Title: r.Title, Resumable: r.ACPID != ""}
+		if v.Status != StatusEnded && v.Status != StatusFailed {
+			v.Status = StatusEnded
+		}
+		out = append(out, v)
+	}
+	for _, s := range mem {
 		out = append(out, s.View(false))
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out
 }
 
@@ -591,10 +833,8 @@ func (s *Session) View(items bool) *SessionView {
 // view is View with s.mu held.
 func (s *Session) view(items bool) *SessionView {
 	v := &SessionView{ID: s.ID, Agent: s.Agent, Kind: s.Kind, Scope: string(s.Scope), StartedBy: s.StartedBy, CreatedAt: s.CreatedAt,
-		Status: s.Status, Error: s.Error, AgentInfo: s.agentInfo}
-	if s.alert != nil {
-		v.Alert, v.AlertApp = s.alert.Kind, s.alert.App
-	}
+		Status: s.Status, Error: s.Error, AgentInfo: s.agentInfo, Alert: s.alertKind, AlertApp: s.alertApp, Title: s.title,
+		UpdatedAt: s.updatedAt, Resumable: !s.live() && s.acpID != "", Modes: s.modes, Config: s.config, Commands: s.commands, Usage: s.usage}
 	if items {
 		v.Items = make([]*Item, len(s.items))
 		for i, it := range s.items {
@@ -627,6 +867,8 @@ func (s *Session) Subscribe() (<-chan Event, func()) {
 // broadcast sends e to subscribers. A subscriber too slow to keep up is
 // dropped (its stream ends, and the dashboard reconnects). Holds s.mu.
 func (s *Session) broadcast(e Event) {
+	s.dirty = true
+	s.updatedAt = time.Now()
 	for ch := range s.subs {
 		select {
 		case ch <- e:
@@ -645,6 +887,12 @@ func (s *Session) setStatus(status, errText string) {
 	}
 	s.Status, s.Error = status, errText
 	s.broadcast(Event{Type: "status", Status: status, Error: errText})
+}
+
+// changed tells subscribers the session's settings, title or usage
+// changed. Holds s.mu.
+func (s *Session) changed() {
+	s.broadcast(Event{Type: "session", View: s.view(false)})
 }
 
 // upsert adds or replaces an item. Holds s.mu.
@@ -673,6 +921,15 @@ const (
 	maxText   = 200 << 10
 	maxOutput = 16 << 10
 )
+
+// clipTitle makes a one-line title of at most 80 characters.
+func clipTitle(t string) string {
+	t = strings.Join(strings.Fields(t), " ")
+	if r := []rune(t); len(r) > 80 {
+		t = string(r[:79]) + "…"
+	}
+	return t
+}
 
 func clip(s string, n int) string {
 	if len(s) > n {
@@ -773,34 +1030,78 @@ func (s *Session) run(a store.AgentConfig) {
 		}
 		m.log.Info("agent auth methods", "agent", a.Name, "methods", strings.Join(ids, ","))
 	}
-	params := acp.NewSessionParams{Cwd: workDir, MCPServers: []acp.MCPServer{{
+	var caps acp.AgentCapabilities
+	if len(init.AgentCapabilities) > 0 {
+		json.Unmarshal(init.AgentCapabilities, &caps)
+	}
+	servers := []acp.MCPServer{{
 		Name: "coldship", Command: "/usr/local/bin/coldship", Args: []string{"mcp"},
 		Env: []acp.EnvVar{{Name: "COLDSHIP_URL", Value: "unix://" + socketMount + "/api.sock"}, {Name: "COLDSHIP_TOKEN", Value: tok}},
-	}}}
-	var ns acp.NewSessionResult
-	err = conn.Call(ictx, "session/new", params, &ns)
-	var re *acp.RPCError
-	if errors.As(err, &re) && re.Code == acp.CodeAuthRequired {
-		if method := authMethod(init.AuthMethods, a.Env); method != "" {
-			if err = conn.Call(ictx, "authenticate", map[string]string{"methodId": method}, nil); err == nil {
-				err = conn.Call(ictx, "session/new", params, &ns)
+	}}
+	// call signs in with the API key if the agent asks, then retries.
+	call := func(method string, params, out any) error {
+		err := conn.Call(ictx, method, params, out)
+		var re *acp.RPCError
+		if errors.As(err, &re) && re.Code == acp.CodeAuthRequired {
+			if am := authMethod(init.AuthMethods, a.Env); am != "" {
+				if err = conn.Call(ictx, "authenticate", map[string]string{"methodId": am}, nil); err == nil {
+					err = conn.Call(ictx, method, params, out)
+				}
+			}
+			if err != nil {
+				err = fmt.Errorf("the agent wants to sign in (%v): check its API key", err)
 			}
 		}
-		if err != nil {
-			err = fmt.Errorf("the agent wants to sign in (%v): check its API key", err)
+		return err
+	}
+
+	s.mu.Lock()
+	resume, oldID := s.resume, s.acpID
+	s.resume = false
+	s.mu.Unlock()
+	loaded := false
+	if resume {
+		if caps.LoadSession {
+			s.mu.Lock()
+			s.loading = true
+			s.mu.Unlock()
+			var ls acp.LoadSessionResult
+			err := call("session/load", acp.LoadSessionParams{SessionID: oldID, Cwd: workDir, MCPServers: servers}, &ls)
+			s.mu.Lock()
+			s.loading = false
+			if err == nil {
+				loaded = true
+				s.modes, s.config = ls.Modes, ls.ConfigOptions
+				s.changed()
+			}
+			s.mu.Unlock()
+			if err != nil {
+				s.add("notice", "the agent couldn't reopen its earlier conversation ("+err.Error()+"), so it starts over: it doesn't remember the messages above")
+			}
+		} else {
+			s.add("notice", "this agent can't reopen an earlier conversation, so it starts over: it doesn't remember the messages above")
 		}
 	}
-	if err != nil {
-		fail(fmt.Errorf("starting a session failed: %w", err))
-		return
+	if !loaded {
+		var ns acp.NewSessionResult
+		if err := call("session/new", acp.NewSessionParams{Cwd: workDir, MCPServers: servers}, &ns); err != nil {
+			fail(fmt.Errorf("starting a session failed: %w", err))
+			return
+		}
+		s.mu.Lock()
+		s.acpID = ns.SessionID
+		s.modes, s.config = ns.Modes, ns.ConfigOptions
+		s.changed()
+		s.mu.Unlock()
 	}
-	s.mu.Lock()
-	s.acpID = ns.SessionID
-	s.mu.Unlock()
 	status.done()
 	s.setStatus(StatusReady, "")
-	if s.prompt != "" {
-		if err := s.Prompt(s.StartedBy, s.prompt); err != nil {
+	s.mu.Lock()
+	prompt := s.prompt
+	s.prompt = ""
+	s.mu.Unlock()
+	if prompt != "" {
+		if err := s.Prompt(s.StartedBy, prompt); err != nil {
 			s.report("The agent couldn't take the alert: " + err.Error())
 		}
 	}
@@ -843,6 +1144,7 @@ func (s *Session) cleanup() {
 	if proc != nil {
 		proc.Kill()
 	}
+	s.save()
 }
 
 // stop ends the session.
@@ -886,6 +1188,10 @@ func (s *Session) Prompt(actor, text string) error {
 	s.broadcast(Event{Type: "status", Status: StatusWorking})
 	s.seq++
 	s.upsert(&Item{Key: fmt.Sprintf("user:%d", s.seq), Kind: "user", Text: clip(text, maxText), By: actor})
+	if s.title == "" {
+		s.title = clipTitle(text)
+		s.changed()
+	}
 	conn, id := s.conn, s.acpID
 	s.mu.Unlock()
 	go func() {
@@ -1099,6 +1405,42 @@ func (s *Session) apply(u acp.Update) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch u.SessionUpdate {
+	case "current_mode_update":
+		if s.modes != nil {
+			m := *s.modes
+			m.CurrentModeID = u.CurrentModeID
+			s.modes = &m
+			s.changed()
+		}
+		return
+	case "config_option_update":
+		s.config = u.ConfigOptions
+		s.changed()
+		return
+	case "available_commands_update":
+		if len(u.AvailableCommands) > 200 {
+			u.AvailableCommands = u.AvailableCommands[:200]
+		}
+		s.commands = u.AvailableCommands
+		s.changed()
+		return
+	case "session_info_update":
+		if u.Title != nil {
+			s.title = clipTitle(*u.Title)
+			s.changed()
+		}
+		return
+	case "usage_update":
+		if u.Size != nil && u.Used != nil {
+			s.usage = &acp.Usage{Size: *u.Size, Used: *u.Used, Cost: u.Cost}
+			s.changed()
+		}
+		return
+	}
+	if s.loading {
+		return // the agent replays what the transcript already has
+	}
+	switch u.SessionUpdate {
 	case "agent_message_chunk", "agent_thought_chunk":
 		kind := "agent"
 		if u.SessionUpdate == "agent_thought_chunk" {
@@ -1202,4 +1544,102 @@ func (l *lineLog) done() {
 	l.mu.Lock()
 	l.off = true
 	l.mu.Unlock()
+}
+
+// SettingRequest changes a session's mode, or one of its config options
+// (like the model).
+type SettingRequest struct {
+	Mode   string `json:"mode,omitempty"`
+	Option string `json:"option,omitempty"`
+	Value  string `json:"value,omitempty"`
+}
+
+// Configure changes a setting the agent offers.
+func (s *Session) Configure(actor string, req SettingRequest) error {
+	s.mu.Lock()
+	conn, id, live := s.conn, s.acpID, s.live()
+	ready := live && s.Status != StatusStarting && conn != nil && id != ""
+	var label string
+	var opt *acp.ConfigOption
+	switch {
+	case req.Mode != "" && req.Option != "":
+		s.mu.Unlock()
+		return apierr.Invalid("mode", "give a mode or an option, not both")
+	case req.Mode != "":
+		if s.modes != nil {
+			for _, md := range s.modes.AvailableModes {
+				if md.ID == req.Mode {
+					label = "the mode to " + md.Name
+				}
+			}
+		}
+		if label == "" {
+			s.mu.Unlock()
+			return apierr.Invalid("mode", "the agent has no mode %q", req.Mode)
+		}
+	case req.Option != "":
+		for i := range s.config {
+			if s.config[i].ID == req.Option {
+				o := s.config[i]
+				opt = &o
+			}
+		}
+		if opt == nil || !opt.Has(req.Value) {
+			s.mu.Unlock()
+			return apierr.Invalid("value", "the agent has no setting %q with the value %q", req.Option, req.Value)
+		}
+		label = strings.ToLower(opt.Name) + " to " + choiceName(opt.Options, req.Value)
+	default:
+		s.mu.Unlock()
+		return apierr.Invalid("mode", "give a mode or an option to change")
+	}
+	s.mu.Unlock()
+	if !ready {
+		return apierr.New(409, "agent_not_ready", "the session isn't running")
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	defer cancel()
+	if req.Mode != "" {
+		if err := conn.Call(ctx, "session/set_mode", map[string]string{"sessionId": id, "modeId": req.Mode}, nil); err != nil {
+			return apierr.New(502, "agent_error", "the agent didn't change its mode: %v", err)
+		}
+		s.mu.Lock()
+		if s.modes != nil {
+			m := *s.modes
+			m.CurrentModeID = req.Mode
+			s.modes = &m
+		}
+		s.changed()
+		s.mu.Unlock()
+	} else {
+		var res struct {
+			ConfigOptions []acp.ConfigOption `json:"configOptions"`
+		}
+		if err := conn.Call(ctx, "session/set_config_option", map[string]string{"sessionId": id, "configId": req.Option, "value": req.Value}, &res); err != nil {
+			return apierr.New(502, "agent_error", "the agent didn't change the setting: %v", err)
+		}
+		s.mu.Lock()
+		if res.ConfigOptions != nil {
+			s.config = res.ConfigOptions
+		}
+		s.changed()
+		s.mu.Unlock()
+	}
+	s.add("notice", actor+" set "+label)
+	s.m.audit(context.Background(), s.Org, actor, "agent.session.setting", s.Agent,
+		map[string]any{"session": s.ID, "mode": req.Mode, "option": req.Option, "value": req.Value})
+	return nil
+}
+
+func choiceName(list []acp.ConfigValue, v string) string {
+	for _, c := range list {
+		if c.Group != "" {
+			if n := choiceName(c.Options, v); n != v {
+				return n
+			}
+		} else if c.Value == v {
+			return c.Name
+		}
+	}
+	return v
 }

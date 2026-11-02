@@ -3,6 +3,7 @@ import { useLoad } from '../hooks'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { ErrorBox, Mono, PageHeader, PageSkeleton } from '@/components/common'
+import { AskAgent } from '@/components/AskAgent'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 function bytes(n: number): string {
@@ -86,6 +87,13 @@ export default function Server() {
           <>
             {h.hostname} · {h.os} · {h.arch} · up {duration(h.uptime_seconds)}. Refreshes every 5 seconds.
           </>
+        }
+        actions={
+          <AskAgent
+            size="default"
+            title="Ask an agent about the server"
+            prompt="Check the server's health: disk, memory and CPU, and which apps and data services use the most. Tell me about anything that needs attention."
+          />
         }
       />
 

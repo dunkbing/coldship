@@ -20,9 +20,10 @@ import (
 
 // fakeLauncher runs a fake ACP agent in-process, over pipes.
 type fakeLauncher struct {
-	mu    sync.Mutex
-	specs []runtime.AttachSpec
-	agent *fakeAgent
+	mu      sync.Mutex
+	specs   []runtime.AttachSpec
+	agent   *fakeAgent
+	canLoad bool
 }
 
 func (f *fakeLauncher) RunAttached(_ context.Context, s runtime.AttachSpec, _ io.Writer) (*runtime.Attached, error) {
@@ -32,7 +33,7 @@ func (f *fakeLauncher) RunAttached(_ context.Context, s runtime.AttachSpec, _ io
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
-	a := &fakeAgent{in: inR, out: outW, pending: map[string]chan json.RawMessage{}, cancel: make(chan struct{}, 1), exited: make(chan struct{})}
+	a := &fakeAgent{in: inR, out: outW, pending: map[string]chan json.RawMessage{}, cancel: make(chan struct{}, 1), exited: make(chan struct{}), canLoad: f.canLoad}
 	f.mu.Lock()
 	f.agent = a
 	f.mu.Unlock()
@@ -63,6 +64,29 @@ type fakeAgent struct {
 	cancel  chan struct{}
 	exited  chan struct{}
 	fsErr   int
+
+	canLoad bool
+	cmu     sync.Mutex
+	calls   []string // methods called, with their main parameter
+}
+
+func (a *fakeAgent) called(s string) {
+	a.cmu.Lock()
+	a.calls = append(a.calls, s)
+	a.cmu.Unlock()
+}
+
+func (a *fakeAgent) callList() string {
+	a.cmu.Lock()
+	defer a.cmu.Unlock()
+	return strings.Join(a.calls, " ")
+}
+
+var fakeModes = map[string]any{"currentModeId": "ask", "availableModes": []map[string]string{{"id": "ask", "name": "Ask"}, {"id": "plan", "name": "Plan"}}}
+
+func fakeConfig(model string) []map[string]any {
+	return []map[string]any{{"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": model,
+		"options": []map[string]any{{"value": "small", "name": "Small"}, {"group": "big", "name": "Big ones", "options": []map[string]string{{"value": "big", "name": "Big"}}}}}}
 }
 
 type rpc struct {
@@ -134,7 +158,8 @@ func (a *fakeAgent) handle(m rpc) {
 	switch m.Method {
 	case "initialize":
 		a.reply(m.ID, map[string]any{"protocolVersion": 1, "agentInfo": map[string]string{"name": "fake", "version": "1.0"},
-			"authMethods": []map[string]string{{"id": "browser-login", "name": "Log in"}, {"id": "api-key", "name": "API key"}}})
+			"agentCapabilities": map[string]bool{"loadSession": a.canLoad},
+			"authMethods":       []map[string]string{{"id": "browser-login", "name": "Log in"}, {"id": "api-key", "name": "API key"}}})
 	case "authenticate":
 		var p struct{ MethodID string }
 		json.Unmarshal(m.Params, &p)
@@ -148,12 +173,45 @@ func (a *fakeAgent) handle(m rpc) {
 		var p acp.NewSessionParams
 		json.Unmarshal(m.Params, &p)
 		a.mcp = p.MCPServers
-		a.reply(m.ID, map[string]string{"sessionId": "s1"})
+		a.called("new")
+		a.reply(m.ID, map[string]any{"sessionId": "s1", "modes": fakeModes, "configOptions": fakeConfig("small")})
+	case "session/load":
+		var p acp.LoadSessionParams
+		json.Unmarshal(m.Params, &p)
+		a.mcp = p.MCPServers
+		a.called("load:" + p.SessionID)
+		// Replays history, which the client already has.
+		a.update(map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]string{"type": "text", "text": "old question"}})
+		a.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "old answer"}})
+		a.reply(m.ID, map[string]any{"modes": fakeModes, "configOptions": fakeConfig("big")})
+	case "session/set_mode":
+		var p struct{ ModeID string }
+		json.Unmarshal(m.Params, &p)
+		a.called("mode:" + p.ModeID)
+		a.reply(m.ID, map[string]any{})
+	case "session/set_config_option":
+		var p struct{ ConfigID, Value string }
+		json.Unmarshal(m.Params, &p)
+		a.called("config:" + p.ConfigID + "=" + p.Value)
+		a.reply(m.ID, map[string]any{"configOptions": fakeConfig(p.Value)})
 	case "session/cancel":
 		a.cancel <- struct{}{}
 	case "session/prompt":
 		var p acp.PromptParams
 		json.Unmarshal(m.Params, &p)
+		if strings.HasPrefix(p.Prompt[0].Text, "quick") {
+			a.called("prompt:" + p.Prompt[0].Text)
+			a.update(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []map[string]any{
+				{"name": "review", "description": "Review changes", "input": map[string]string{"hint": "what to review"}}}})
+			a.update(map[string]any{"sessionUpdate": "usage_update", "size": 200000, "used": 5000})
+			a.update(map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "plan"})
+			a.update(map[string]any{"sessionUpdate": "agent_message_chunk", "messageId": "q", "content": map[string]string{"type": "text", "text": "ok"}})
+			if p.Prompt[0].Text == "quick title" {
+				a.update(map[string]any{"sessionUpdate": "session_info_update", "title": "Fixing web\n"})
+			}
+			a.reply(m.ID, map[string]string{"stopReason": "end_turn"})
+			return
+		}
 		if p.Prompt[0].Text == "wait" {
 			res := a.call("session/request_permission", map[string]any{"sessionId": "s1", "toolCall": map[string]any{"toolCallId": "t9", "title": "Delete everything"},
 				"options": []map[string]string{{"optionId": "ok", "name": "Allow", "kind": "allow_once"}}})
@@ -450,5 +508,145 @@ func TestAlerts(t *testing.T) {
 	}
 	if n := len(notices(KindReport)); n > 2 {
 		t.Fatalf("%d reports", n)
+	}
+}
+
+func TestSessionHistoryAndSettings(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"), secrets.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	fl := &fakeLauncher{canLoad: true}
+	m := New(st, fl, quiet)
+	if _, err := m.Save(ctx, "default", "dana", "helper", ConfigRequest{Kind: "claude", Env: map[string]string{"ANTHROPIC_API_KEY": "k"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A first message given at the start is sent once the agent is ready,
+	// and names the session.
+	sv, err := m.StartSession(ctx, StartRequest{Org: "default", Agent: "helper", Actor: "dana", Caller: store.ScopeDeploy, Prompt: "quick look at web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Session("default", sv.ID)
+	waitFor(t, "the first answer", func() bool {
+		v := s.View(false)
+		return v.Status == StatusReady && v.Usage != nil
+	})
+	v := s.View(true)
+	if v.Title != "quick look at web" || v.Modes == nil || v.Modes.CurrentModeID != "plan" || len(v.Commands) != 1 || v.Commands[0].Input.Hint != "what to review" ||
+		len(v.Config) != 1 || v.Usage.Used != 5000 {
+		t.Fatalf("view: %+v", v)
+	}
+	// The agent's own title wins, on one line.
+	if err := s.Prompt("dana", "quick title"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "title", func() bool { return s.View(false).Title == "Fixing web" })
+	waitFor(t, "ready", func() bool { return s.View(false).Status == StatusReady })
+
+	// Settings: only what the agent offers.
+	if err := s.Configure("dana", SettingRequest{Mode: "yolo"}); err == nil {
+		t.Fatal("unknown mode")
+	}
+	if err := s.Configure("dana", SettingRequest{Option: "model", Value: "huge"}); err == nil {
+		t.Fatal("unknown model")
+	}
+	if err := s.Configure("dana", SettingRequest{Mode: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Configure("dana", SettingRequest{Option: "model", Value: "big"}); err != nil {
+		t.Fatal(err)
+	}
+	v = s.View(true)
+	if v.Modes.CurrentModeID != "ask" || string(v.Config[0].CurrentValue) != `"big"` {
+		t.Fatalf("settings: %+v %s", v.Modes, v.Config[0].CurrentValue)
+	}
+	if c := fl.agent.callList(); !strings.Contains(c, "mode:ask") || !strings.Contains(c, "config:model=big") {
+		t.Fatalf("calls: %s", c)
+	}
+	if last := v.Items[len(v.Items)-1]; last.Kind != "notice" || last.Text != "dana set model to Big" {
+		t.Fatalf("notice: %+v", last)
+	}
+	if err := m.Forget(ctx, "default", sv.ID, "dana"); err == nil {
+		t.Fatal("forgot a running session")
+	}
+	s.Stop("dana")
+	items := len(s.View(true).Items)
+
+	// After a restart, the transcript is still there.
+	m2 := New(st, fl, quiet)
+	list := m2.Sessions("default")
+	if len(list) != 1 || list[0].Title != "Fixing web" || list[0].Status != StatusEnded || !list[0].Resumable {
+		t.Fatalf("list: %+v", list)
+	}
+	if _, err := m2.Session("acme", sv.ID); err == nil {
+		t.Fatal("another org reads the transcript")
+	}
+	s2, err := m2.Session("default", sv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := s2.View(true); len(v.Items) != items || v.Modes == nil || len(v.Commands) != 1 {
+		t.Fatalf("restored: %d items (want %d) %+v", len(v.Items), items, v)
+	}
+	if err := s2.Prompt("dana", "hello?"); err == nil {
+		t.Fatal("prompted an ended session")
+	}
+
+	// Resuming reloads the agent's conversation, without repeating it.
+	if _, err := m2.Resume(ctx, "default", sv.ID, "sam", store.ScopeRead); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "resumed", func() bool { return s2.View(false).Status == StatusReady })
+	if c := fl.agent.callList(); !strings.HasPrefix(c, "load:s1") {
+		t.Fatalf("calls: %s", c)
+	}
+	v = s2.View(true)
+	if v.Scope != string(store.ScopeRead) || len(v.Items) != items+1 || v.Items[items].Text != "resumed by sam" || string(v.Config[0].CurrentValue) != `"big"` {
+		t.Fatalf("resumed: %+v", v.Items[items:])
+	}
+	if _, err := m2.Resume(ctx, "default", sv.ID, "sam", store.ScopeDeploy); err == nil {
+		t.Fatal("resumed a running session")
+	}
+	if err := s2.Prompt("sam", "quick again"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "answer", func() bool { return strings.Contains(fl.agent.callList(), "prompt:quick again") })
+	waitFor(t, "ready", func() bool { return s2.View(false).Status == StatusReady })
+	s2.Stop("sam")
+
+	// An agent that can't reload starts over, and says so.
+	fl.canLoad = false
+	if _, err := m2.Resume(ctx, "default", sv.ID, "sam", store.ScopeDeploy); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "resumed", func() bool { return s2.View(false).Status == StatusReady })
+	v = s2.View(true)
+	if c := fl.agent.callList(); c != "new" || !strings.Contains(v.Items[len(v.Items)-1].Text, "starts over") {
+		t.Fatalf("calls %q, last %+v", c, v.Items[len(v.Items)-1])
+	}
+
+	// A restart while it runs leaves it ended, not running.
+	m3 := New(st, fl, quiet)
+	cctx, cancel := context.WithCancel(ctx)
+	m3.Start(cctx)
+	if l := m3.Sessions("default"); l[0].Status != StatusEnded {
+		t.Fatalf("after restart: %+v", l[0])
+	}
+	cancel()
+	s2.Stop("sam")
+
+	if err := m2.Forget(ctx, "default", sv.ID, "dana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.Session("default", sv.ID); err == nil {
+		t.Fatal("still there after forgetting")
+	}
+	if l := m2.Sessions("default"); len(l) != 0 {
+		t.Fatalf("list after forgetting: %+v", l)
 	}
 }

@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { Bot, SquareTerminal } from 'lucide-react'
 import { siClaude, siGooglegemini } from 'simple-icons'
 import { cn } from '@/lib/utils'
@@ -43,54 +42,54 @@ export function AgentMark({ kind, size = 36 }: { kind: string; size?: number }) 
   )
 }
 
-// Markdown, the small safe subset agents use: fenced code, inline code,
-// bold and paragraphs. It builds React elements, so nothing in the text is
-// ever treated as HTML.
-export function AgentText({ text }: { text: string }) {
-  const blocks: ReactNode[] = []
-  const parts = text.split(/```[^\n]*\n?/)
-  parts.forEach((part, i) => {
-    if (i % 2 === 1) {
-      blocks.push(
-        <pre key={i} className="my-2 overflow-x-auto rounded-lg border bg-muted p-3 font-mono text-[0.8125rem] whitespace-pre">
-          {part.replace(/\n$/, '')}
-        </pre>,
-      )
-      return
-    }
-    part
-      .split(/\n{2,}/)
-      .filter((p) => p.trim())
-      .forEach((p, j) => {
-        blocks.push(
-          <p key={`${i}-${j}`} className="my-1.5 whitespace-pre-wrap">
-            {inline(p)}
-          </p>,
-        )
-      })
-  })
-  return <div className="text-sm leading-relaxed wrap-anywhere">{blocks}</div>
+// toolName turns a tool's title into words: agents name Coldship's MCP
+// tools like "mcp__coldship__coldship_list_apps", which reads as
+// "List apps".
+export function toolName(title: string): string {
+  const m = /(?:^|_)coldship_([a-z0-9][a-z0-9_]*)$/.exec(title.trim())
+  if (!m) return title
+  const words = m[1].replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-function inline(s: string): ReactNode[] {
-  const out: ReactNode[] = []
-  const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g
-  let last = 0
-  let m: RegExpExecArray | null
-  while ((m = re.exec(s))) {
-    if (m.index > last) out.push(s.slice(last, m.index))
-    const t = m[0]
-    out.push(
-      t.startsWith('`') ? (
-        <code key={m.index} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.8125rem]">
-          {t.slice(1, -1)}
-        </code>
-      ) : (
-        <strong key={m.index}>{t.slice(2, -2)}</strong>
-      ),
-    )
-    last = m.index + t.length
+export function isColdshipTool(title: string): boolean {
+  return /coldship_[a-z]/.test(title)
+}
+
+function parse(s: string): unknown {
+  try {
+    return JSON.parse(s)
+  } catch {
+    return undefined
   }
-  if (last < s.length) out.push(s.slice(last))
-  return out
+}
+
+// inputSummary is a one-line "app: web · lines: 100" for flat inputs.
+export function inputSummary(input?: string): string {
+  if (!input) return ''
+  const v = parse(input)
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return ''
+  const parts: string[] = []
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (x === null || x === undefined || x === '') continue
+    if (typeof x === 'object') parts.push(`${k}: …`)
+    else parts.push(`${k}: ${String(x)}`)
+  }
+  const s = parts.join(' · ')
+  return s.length > 90 ? s.slice(0, 89) + '…' : s
+}
+
+// toolOutput unwraps an MCP result ({content: [{type: "text", text}]})
+// and pretty-prints JSON, so people read data, not envelopes.
+export function toolOutput(out?: string): string {
+  if (!out) return ''
+  let text = out
+  const v = parse(out) as { content?: { type: string; text?: string }[] } | undefined
+  if (v && Array.isArray(v.content)) {
+    const texts = v.content.filter((c) => c.type === 'text' && c.text).map((c) => c.text!)
+    if (texts.length) text = texts.join('\n')
+  }
+  const inner = parse(text)
+  if (inner !== undefined && typeof inner === 'object') return JSON.stringify(inner, null, 2)
+  return text
 }

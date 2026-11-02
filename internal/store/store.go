@@ -225,6 +225,7 @@ var sealedColumns = []struct {
 	{"integrations", "secret", []string{"name"}, func(k []string) string { return "integrations.secret:" + k[0] }},
 	{"agents", "env", []string{"org", "name"}, func(k []string) string { return "agents.env:" + k[0] + "/" + k[1] }},
 	{"channels", "target", []string{"id"}, func(k []string) string { return "channels.target:" + k[0] }},
+	{"agent_sessions", "data", []string{"id"}, func(k []string) string { return "agent_sessions.data:" + k[0] }},
 }
 
 func (s *Store) seal(plain []byte, aad string) (string, error) { return s.kr.Load().Seal(plain, aad) }
@@ -292,6 +293,12 @@ CREATE TABLE IF NOT EXISTS job_runs (
   status TEXT NOT NULL, exit_code INTEGER, error TEXT NOT NULL DEFAULT '', started_at TEXT NOT NULL, finished_at TEXT NOT NULL DEFAULT '',
   log TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS job_runs_app ON job_runs(app, job, started_at);
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id TEXT PRIMARY KEY, org TEXT NOT NULL, agent TEXT NOT NULL, kind TEXT NOT NULL, scope TEXT NOT NULL, started_by TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', agent_info TEXT NOT NULL DEFAULT '',
+  alert TEXT NOT NULL DEFAULT '', alert_app TEXT NOT NULL DEFAULT '', acp_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS agent_sessions_org ON agent_sessions(org, created_at);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
   target TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', detail TEXT);

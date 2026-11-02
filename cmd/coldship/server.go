@@ -176,9 +176,11 @@ func serverCmd() *cobra.Command {
 
 			// AI agents run in containers and reach the API through a Unix
 			// socket in a directory of its own, the only thing mounted in.
+			var agentMgr *agents.Manager
 			if mgr, ln, err := startAgents(ctx, eng.DataDir, st, rt, log); err != nil {
 				log.Warn("AI agents are off", "err", err)
 			} else {
+				agentMgr = mgr
 				apiSrv.SetAgents(mgr)
 				go srv.Serve(ln)
 				// Alerts start the agents listening for them; their reports
@@ -262,6 +264,11 @@ func serverCmd() *cobra.Command {
 			log.Info("coldship listening", "addr", addr, "data", data, "version", version)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				return err
+			}
+			if agentMgr != nil {
+				// End sessions and save their transcripts, so they can be
+				// read and resumed after the restart.
+				agentMgr.Shutdown()
 			}
 			if restartTo == "" {
 				// Plain shutdown: give webhook builds a minute to finish;

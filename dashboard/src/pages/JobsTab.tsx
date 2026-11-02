@@ -4,6 +4,7 @@ import { api, type AppView, type Job, type JobRun, type JobStatus } from '@/api'
 import { useSession } from '@/App'
 import { timeAgo, timeUntil, useLoad } from '@/hooks'
 import { Empty, ErrorBox, Mono, StatusDot, TableSkeleton } from '@/components/common'
+import { AskAgent } from '@/components/AskAgent'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -255,6 +256,13 @@ function RunLog({ app, id }: { app: string; id: string }) {
         {x.exit_code !== undefined && <> · exit code {x.exit_code}</>}
       </div>
       {x.error && x.status !== 'succeeded' && <p className="text-sm text-destructive">{x.error}</p>}
+      {(x.status === 'failed' || x.status === 'timed_out') && (
+        <AskAgent
+          label="Ask an agent why"
+          title={`Why did ${x.job} fail?`}
+          prompt={`The scheduled job ${x.job} of the app ${app} failed (run ${x.id}). Read the run's output and the app's state, find out why, and suggest a fix.`}
+        />
+      )}
       <pre className="max-h-80 overflow-auto rounded-md bg-background p-3 font-mono text-xs whitespace-pre-wrap">{x.log || '(no output)'}</pre>
     </div>
   )

@@ -165,19 +165,22 @@ export default function Agents() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">Agent</TableHead>
+                  <TableHead className="pl-4">Session</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="hidden sm:table-cell">Started by</TableHead>
-                  <TableHead>Started</TableHead>
+                  <TableHead>Last active</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sessions.data.map((s) => (
                   <TableRow key={s.id}>
-                    <TableCell className="pl-4">
-                      <Link to={`/agents/sessions/${s.id}`} className="inline-flex items-center gap-2 font-medium hover:underline">
-                        <AgentMark kind={s.kind} size={24} />
-                        {s.agent}
+                    <TableCell className="max-w-0 pl-4 sm:w-1/2">
+                      <Link to={`/agents/sessions/${s.id}`} className="flex min-w-0 items-center gap-2.5 hover:underline">
+                        <AgentMark kind={s.kind} size={28} />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">{s.title || 'New conversation'}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{s.agent}</span>
+                        </span>
                       </Link>
                     </TableCell>
                     <TableCell>
@@ -187,22 +190,23 @@ export default function Agents() {
                       {s.alert ? (
                         <span className="inline-flex items-center gap-1.5">
                           <Bell className="size-3.5 text-warn" />
-                          {s.alert_app ? `${s.alert_app}: ` : ''}
-                          {s.alert}
+                          {alertLabels[s.alert] ?? s.alert}
                         </span>
                       ) : (
                         s.started_by
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      <Time iso={s.created_at} />
+                      <Time iso={s.updated_at && !s.updated_at.startsWith('0001') ? s.updated_at : s.created_at} />
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </Card>
-          <p className="mt-2 text-xs text-muted-foreground">Transcripts are kept in memory: they're gone after the server restarts.</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            The last 100 sessions are kept, encrypted like other secrets. Open an ended one to read it, or resume it to carry on.
+          </p>
         </>
       )}
 

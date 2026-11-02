@@ -159,3 +159,62 @@
     font-family: var(--font-mono);
     }
 }
+/* Agents' Markdown: compact prose that fits the chat. */
+.agent-md > :first-child {
+  margin-top: 0;
+}
+.agent-md > :last-child {
+  margin-bottom: 0;
+}
+.agent-md p {
+  margin: 0.4rem 0;
+}
+.agent-md ul,
+.agent-md ol {
+  margin: 0.4rem 0;
+  padding-left: 1.25rem;
+}
+.agent-md ul {
+  list-style: disc;
+}
+.agent-md ol {
+  list-style: decimal;
+}
+.agent-md li {
+  margin: 0.15rem 0;
+}
+.agent-md li > p {
+  margin: 0;
+}
+.agent-md h1,
+.agent-md h2,
+.agent-md h3,
+.agent-md h4 {
+  margin: 0.9rem 0 0.35rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.agent-md h1 {
+  font-size: 1.05rem;
+}
+.agent-md h2 {
+  font-size: 1rem;
+}
+.agent-md h3,
+.agent-md h4 {
+  font-size: 0.9rem;
+}
+.agent-md blockquote {
+  margin: 0.5rem 0;
+  border-left: 3px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+}
+.agent-md hr {
+  margin: 0.75rem 0;
+  border-color: var(--border);
+}
+.agent-md input[type='checkbox'] {
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
