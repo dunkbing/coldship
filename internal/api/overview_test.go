@@ -48,6 +48,23 @@ func TestOverview(t *testing.T) {
 			t.Fatal(n, err)
 		}
 	}
+	// A production app outside the limited token's patterns, with a change
+	// waiting for approval, and a data service outside them too.
+	p, err := admin.Plan(ctx, engine.PlanRequest{Spec: &spec.App{Name: "vault", Stage: spec.StageProduction, Image: "nginx:1", Port: 80}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Apply(ctx, p.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Plan(ctx, engine.PlanRequest{Delete: "vault"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"vaultdb", "shop-cache"} {
+		if _, err := admin.CreateData(ctx, engine.DataRequest{Name: n, Engine: "redis"}); err != nil {
+			t.Fatal(n, err)
+		}
+	}
 	rt.Statuses = map[string]runtime.Status{ // set before any request reads it
 		"api": {Exists: false},
 		"web": {Exists: true, Running: true, RestartCount: 3},
@@ -78,14 +95,14 @@ func TestOverview(t *testing.T) {
 	}
 
 	v := get(adminTok)
-	if len(v.Apps) != 3 || len(v.Deploys) != 3 || v.Jobs != 3 || v.Server == nil {
+	if len(v.Apps) != 4 || len(v.Deploys) != 4 || v.Jobs != 3 || v.Data.Total != 2 || v.Server == nil {
 		t.Fatalf("admin overview: %d apps, %d deploys, %d jobs, server %v", len(v.Apps), len(v.Deploys), v.Jobs, v.Server)
 	}
 	kinds := map[string]string{}
 	for _, a := range v.Attention {
 		kinds[a.Kind+":"+a.App] = a.Severity
 	}
-	if kinds["app_failing:api"] != "error" || kinds["app_failing:web"] != "error" || kinds["job_failed:api"] != "warning" {
+	if kinds["app_failing:api"] != "error" || kinds["app_failing:web"] != "error" || kinds["job_failed:api"] != "warning" || kinds["approval:vault"] != "warning" {
 		t.Fatalf("attention: %+v", v.Attention)
 	}
 	if v.Attention[0].Severity != "error" || v.Attention[len(v.Attention)-1].Severity == "error" {
@@ -100,11 +117,11 @@ func TestOverview(t *testing.T) {
 		t.Fatal(err)
 	}
 	lv := get(tr.Token)
-	if len(lv.Apps) != 2 || len(lv.Deploys) != 2 || lv.Server != nil || lv.Agents != nil {
-		t.Fatalf("limited overview: %d apps, %d deploys, server %v, agents %v", len(lv.Apps), len(lv.Deploys), lv.Server, lv.Agents)
+	if len(lv.Apps) != 2 || len(lv.Deploys) != 2 || lv.Data.Total != 1 || lv.Server != nil || lv.Agents != nil {
+		t.Fatalf("limited overview: %d apps, %d deploys, %d data, server %v, agents %v", len(lv.Apps), len(lv.Deploys), lv.Data.Total, lv.Server, lv.Agents)
 	}
 	b, _ := json.Marshal(lv)
-	if strings.Contains(string(b), `"api"`) || strings.Contains(string(b), "api:") || strings.Contains(string(b), "/apps/api") {
+	if s := string(b); strings.Contains(s, `"api"`) || strings.Contains(s, "api:") || strings.Contains(s, "/apps/api") || strings.Contains(s, "vault") {
 		t.Fatalf("a limited token sees another app: %s", b)
 	}
 }

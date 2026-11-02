@@ -4,7 +4,8 @@ import { Boxes, Building2, Database, LogOut, MessageSquare, Plus, Search, Sparkl
 import { api, type Agent, type AgentSession, type App, type DataView, type WhoAmI } from '../api'
 import { accountPage, navGroups } from '../nav'
 import { cn } from '@/lib/utils'
-import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from '@/components/ui/command'
+import { Button } from '@/components/ui/button'
+import { Command, CommandDialog, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from '@/components/ui/command'
 
 const PaletteContext = createContext<() => void>(() => {})
 
@@ -37,7 +38,8 @@ export function PaletteProvider({
     })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+      // ⌘K on a Mac (where Ctrl+K edits text), Ctrl+K elsewhere.
+      if (e.key.toLowerCase() === 'k' && (isMac ? e.metaKey : e.ctrlKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault()
         setOpen((o) => !o)
       }
@@ -258,8 +260,9 @@ function PaletteBody({ me, close, onSwitch, onSignOut }: { me: WhoAmI; close: ()
     shown = shown.filter((g) => g.ranked.length).sort((x, y) => y.ranked[0].score - x.ranked[0].score)
   }
   const ask = q && agents.length > 0
+  const matched = shown.some((g) => g.ranked.length)
   // The best match is selected as the search changes.
-  const first = shown.find((g) => g.ranked.length)?.ranked[0].e.id ?? (ask ? 'ask' : '')
+  const first = shown.find((g) => g.ranked.length)?.ranked[0].e.id ?? ''
   const [selected, setSelected] = useState('')
   useEffect(() => setSelected(first), [first, q])
 
@@ -267,7 +270,17 @@ function PaletteBody({ me, close, onSwitch, onSignOut }: { me: WhoAmI; close: ()
     <Command shouldFilter={false} loop value={selected} onValueChange={setSelected}>
       <CommandInput autoFocus placeholder="Search pages, apps, data…" value={search} onValueChange={setSearch} />
       <CommandList>
-        {!shown.some((g) => g.ranked.length) && !ask && <CommandEmpty>Nothing matches “{q}”.</CommandEmpty>}
+        {!matched && (
+          <div className="flex flex-col items-center gap-3 px-2 pt-5 pb-4 text-center text-sm text-muted-foreground">
+            Nothing matches “{q}”.
+            {/* A button, not a list item, so Enter on a typo doesn't start a session. */}
+            {ask && (
+              <Button variant="outline" size="sm" onClick={startAsk} disabled={busy === 'ask'} className="max-w-full">
+                <Sparkles /> <span className="truncate">Ask {agents[0].name}: “{q}”</span>
+              </Button>
+            )}
+          </div>
+        )}
         {shown.map(
           (g) =>
             g.ranked.length > 0 && (
@@ -282,7 +295,7 @@ function PaletteBody({ me, close, onSwitch, onSignOut }: { me: WhoAmI; close: ()
               </CommandGroup>
             ),
         )}
-        {ask && (
+        {ask && matched && (
           <CommandGroup heading="Ask an agent">
             <CommandItem value="ask" onSelect={startAsk} disabled={busy === 'ask'}>
               <Sparkles />
