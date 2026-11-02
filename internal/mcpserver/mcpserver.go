@@ -132,6 +132,12 @@ func New(c *client.Client, version string) *mcp.Server {
 			return result(c.Logs(ctx, in.App, in.Tail, in.Since))
 		})
 
+	mcp.AddTool(s, &mcp.Tool{Name: "coldship_server_status",
+		Description: "The server itself: CPU, memory, swap, load, disks, uptime and the container engine. For when apps are slow or deploys fail for no app-specific reason. Only tokens of the default organization may see it.", Annotations: ro},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+			return result(c.ServerStatus(ctx))
+		})
+
 	mcp.AddTool(s, &mcp.Tool{Name: "coldship_diagnose",
 		Description: "Start here when an app is broken: container state, latest deployment, recent logs and likely causes with suggested fixes, in one call.", Annotations: ro},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in appArg) (*mcp.CallToolResult, any, error) {

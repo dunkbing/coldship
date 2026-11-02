@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
+  Bot,
   Boxes,
   Building2,
   Check,
@@ -36,6 +37,8 @@ import Team from './pages/Team'
 import Tokens from './pages/Tokens'
 import OrgSettings from './pages/OrgSettings'
 import Account from './pages/Account'
+import Agents from './pages/Agents'
+import AgentSession from './pages/AgentSession'
 import UpdateBanner from './components/UpdateBanner'
 import { ErrorBox, PageSkeleton } from '@/components/common'
 import { Button } from '@/components/ui/button'
@@ -169,6 +172,8 @@ export default function App() {
                 <Route path="/org/tokens" element={me.scope === 'admin' ? <Tokens /> : <Navigate to="/org/team" replace />} />
                 <Route path="/org/settings" element={<OrgSettings />} />
                 <Route path="/account" element={<Account />} />
+                <Route path="/agents" element={me.apps?.length ? <Navigate to="/apps" replace /> : <Agents />} />
+                <Route path="/agents/sessions/:id" element={<AgentSession />} />
                 <Route path="*" element={<Navigate to="/apps" replace />} />
               </Routes>
             </main>
@@ -224,6 +229,7 @@ function AppSidebar({ me, onSwitch, onSignOut }: { me: WhoAmI; onSwitch: (w: Who
           <SidebarGroupContent>
             <SidebarMenu>
               <NavItem to="/approvals" icon={<ShieldCheck />} label="Approvals" badge={needApproval} />
+              {!me.apps?.length && <NavItem to="/agents" icon={<Bot />} label="Agents" />}
               <NavItem to="/audit" icon={<ScrollText />} label="Audit log" />
               {me.org?.id === 'default' && !me.apps?.length && <NavItem to="/server" icon={<Gauge />} label="Server" />}
             </SidebarMenu>

@@ -266,6 +266,13 @@ func (c *Client) CreateToken(ctx context.Context, name, scope string, apps ...st
 	return &out, c.do(ctx, "POST", "/v1/tokens", api.TokenRequest{Name: name, Scope: scope, Apps: apps}, &out)
 }
 
+// ServerStatus is the host's CPU, memory, disks and container engine
+// (default organization only).
+func (c *Client) ServerStatus(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	return out, c.do(ctx, "GET", "/v1/system/status", nil, &out)
+}
+
 // CreateInvite makes a single-use link that adds someone to the token's
 // organization with role.
 func (c *Client) CreateInvite(ctx context.Context, role string) (*api.LinkView, error) {

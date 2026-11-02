@@ -378,6 +378,76 @@ export interface Token {
   created_at: string
 }
 
+export interface AgentPreset {
+  kind: string
+  name: string
+  cmd: string[]
+  keys: string[]
+  notes?: string
+}
+
+export interface Agent {
+  name: string
+  kind: string
+  command?: string
+  keys: string[]
+  scope: Scope
+  apps?: string[]
+  created_by: string
+  created_at: string
+  running: number
+}
+
+export type SessionStatus = 'starting' | 'ready' | 'working' | 'ended' | 'failed'
+
+export interface PermissionOption {
+  optionId: string
+  name: string
+  kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'
+}
+
+// One entry of an agent session's transcript. All text comes from the
+// agent: render it as text, never HTML.
+export interface SessionItem {
+  key: string
+  kind: 'user' | 'agent' | 'thought' | 'tool' | 'plan' | 'permission' | 'log' | 'notice'
+  text?: string
+  by?: string
+  time: string
+  tool?: { id: string; title: string; kind?: string; status: 'pending' | 'in_progress' | 'completed' | 'failed'; input?: string; output?: string }
+  plan?: { content: string; priority?: string; status: 'pending' | 'in_progress' | 'completed' }[]
+  permission?: {
+    id: string
+    title: string
+    input?: string
+    options: PermissionOption[]
+    status: 'pending' | 'answered' | 'cancelled'
+    chosen?: string
+    answered_by?: string
+  }
+}
+
+export interface AgentSession {
+  id: string
+  agent: string
+  kind: string
+  scope: Scope
+  started_by: string
+  created_at: string
+  status: SessionStatus
+  error?: string
+  agent_info?: string
+  items?: SessionItem[]
+}
+
+export interface SessionEvent {
+  type: 'snapshot' | 'item' | 'status'
+  item?: SessionItem
+  status?: SessionStatus
+  error?: string
+  session?: AgentSession
+}
+
 export interface WhoAmI {
   // Token name, or the signed-in person's email.
   name: string
@@ -474,6 +544,18 @@ export const api = {
     req<WhoAmI>('POST', '/v1/links/accept', { secret, ...body }),
   moveApp: (name: string, org: string) => req<App>('POST', `/v1/apps/${enc(name)}/move`, { org }),
   tokens: () => req<Token[]>('GET', '/v1/tokens'),
+  agents: () => req<{ presets: AgentPreset[]; agents: Agent[] }>('GET', '/v1/agents'),
+  saveAgent: (name: string, body: { kind: string; command?: string; env?: Record<string, string>; scope?: Scope; apps?: string[] }) =>
+    req<Agent>('PUT', `/v1/agents/${enc(name)}`, body),
+  deleteAgent: (name: string) => req<{ deleted: boolean }>('DELETE', `/v1/agents/${enc(name)}`),
+  startSession: (agent: string) => req<AgentSession>('POST', `/v1/agents/${enc(agent)}/sessions`),
+  sessions: () => req<AgentSession[]>('GET', '/v1/agent-sessions'),
+  session: (id: string) => req<AgentSession>('GET', `/v1/agent-sessions/${enc(id)}`),
+  prompt: (id: string, text: string) => req<{ sent: boolean }>('POST', `/v1/agent-sessions/${enc(id)}/prompt`, { text }),
+  answer: (id: string, perm: string, option: string) =>
+    req<{ answered: boolean }>('POST', `/v1/agent-sessions/${enc(id)}/permissions/${enc(perm)}`, { option }),
+  cancelTurn: (id: string) => req<{ cancelled: boolean }>('POST', `/v1/agent-sessions/${enc(id)}/cancel`),
+  endSession: (id: string) => req<{ ended: boolean }>('DELETE', `/v1/agent-sessions/${enc(id)}`),
   revokeToken: (name: string, reason = 'revoked from the dashboard') =>
     req<{ revoked: boolean }>('DELETE', `/v1/tokens/${enc(name)}?reason=${enc(reason)}`),
   logout: () => req<{ signed_out: boolean }>('DELETE', '/v1/sessions'),

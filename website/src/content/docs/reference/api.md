@@ -63,6 +63,15 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/account` | admin token | Create a person's account (an admin) from a token session |
 | `PATCH` | `/v1/account`, `POST` `/v1/account/password` | person | Change your name; change your password (`{current, new}`) |
 | `POST` | `/v1/apps/{name}/move` | admin of both | Move an app to another organization: `{org}` |
+| `GET` | `/v1/agents` | read | `{presets, agents}`: the agents you can connect, and the org's connected ones (key names only, never values) |
+| `PUT` | `/v1/agents/{name}` | admin | Connect or change an agent: `{kind, command?, env?, scope?, apps?}`. `kind` is `claude`, `codex`, `gemini` or `custom`; an empty `env` value keeps the saved one; `scope` is `read` or `deploy` |
+| `DELETE` | `/v1/agents/{name}` | admin | Remove an agent and end its sessions |
+| `POST` | `/v1/agents/{name}/sessions` | deploy | Start a session; it becomes `ready` in the background |
+| `GET` | `/v1/agent-sessions`, `/v1/agent-sessions/{id}` | read | Sessions, and one with its transcript |
+| `GET` | `/v1/agent-sessions/{id}/stream` | read | Server-sent events, as JSON: a `snapshot`, then `item` and `status` changes |
+| `POST` | `/v1/agent-sessions/{id}/prompt` | deploy | Send a message: `{text}` |
+| `POST` | `/v1/agent-sessions/{id}/permissions/{perm}` | deploy | Answer the agent's request: `{option}` |
+| `POST` | `/v1/agent-sessions/{id}/cancel`, `DELETE` `/v1/agent-sessions/{id}` | deploy | Stop the current turn; end the session |
 
 Everything acts in the caller's organization: apps, data services, plans, deployments, tokens and audit entries of other organizations are reported as not found. Server-wide endpoints (`/v1/system/*` other than `GET /v1/system`) need an admin of the default organization.
 

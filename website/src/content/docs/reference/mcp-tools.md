@@ -15,6 +15,7 @@ description: The tools coldship mcp exposes to AI agents.
 | `coldship_rollback` | `app`, `reason`, optional `to_deployment` | destructive | Redeploy the last good or a specific deployment |
 | `coldship_logs` | `app`, optional `tail`, `since` | read-only | Recent logs, marked untrusted |
 | `coldship_diagnose` | `app` | read-only | Findings with suggested fixes, plus state and logs |
+| `coldship_server_status` | none | read-only | The host: CPU, memory, swap, load, disks, uptime and the container engine (default organization only) |
 | `coldship_deployments` | `app` | read-only | Deployment history, with the commit and `failed_in` |
 | `coldship_preview_create` | `app`, `ref` or `image`, optional `name`, `ttl`, `env`, `inherit_env`, `reason` | not destructive, idempotent | Create or update a [preview](/guides/previews/). Returns its name, URLs and expiry |
 | `coldship_preview_list` | — | read-only | Previews, soonest-expiring first |
