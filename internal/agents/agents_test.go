@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -24,6 +25,8 @@ type fakeLauncher struct {
 	specs   []runtime.AttachSpec
 	agent   *fakeAgent
 	canLoad bool
+	replay  int           // history updates session/load sends
+	slowEnd time.Duration // how long an agent takes to exit
 }
 
 func (f *fakeLauncher) RunAttached(_ context.Context, s runtime.AttachSpec, _ io.Writer) (*runtime.Attached, error) {
@@ -33,7 +36,7 @@ func (f *fakeLauncher) RunAttached(_ context.Context, s runtime.AttachSpec, _ io
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
-	a := &fakeAgent{in: inR, out: outW, pending: map[string]chan json.RawMessage{}, cancel: make(chan struct{}, 1), exited: make(chan struct{}), canLoad: f.canLoad}
+	a := &fakeAgent{in: inR, out: outW, pending: map[string]chan json.RawMessage{}, cancel: make(chan struct{}, 1), exited: make(chan struct{}), canLoad: f.canLoad, replay: f.replay}
 	f.mu.Lock()
 	f.agent = a
 	f.mu.Unlock()
@@ -47,7 +50,8 @@ func (f *fakeLauncher) RunAttached(_ context.Context, s runtime.AttachSpec, _ io
 			errW.Close()
 		})
 	}
-	return &runtime.Attached{Stdin: inW, Stdout: outR, Stderr: errR, Wait: func() error { <-a.exited; return nil }, Kill: kill}, nil
+	slow := f.slowEnd
+	return &runtime.Attached{Stdin: inW, Stdout: outR, Stderr: errR, Wait: func() error { <-a.exited; time.Sleep(slow); return nil }, Kill: kill}, nil
 }
 
 func (f *fakeLauncher) RemoveLabeled(context.Context, string) error { return nil }
@@ -66,6 +70,7 @@ type fakeAgent struct {
 	fsErr   int
 
 	canLoad bool
+	replay  int
 	cmu     sync.Mutex
 	calls   []string // methods called, with their main parameter
 }
@@ -183,6 +188,9 @@ func (a *fakeAgent) handle(m rpc) {
 		// Replays history, which the client already has.
 		a.update(map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]string{"type": "text", "text": "old question"}})
 		a.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "old answer"}})
+		for i := 0; i < a.replay; i++ {
+			a.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": fmt.Sprint("old", i), "title": "old tool", "status": "completed"})
+		}
 		a.reply(m.ID, map[string]any{"modes": fakeModes, "configOptions": fakeConfig("big")})
 	case "session/set_mode":
 		var p struct{ ModeID string }
@@ -199,6 +207,20 @@ func (a *fakeAgent) handle(m rpc) {
 	case "session/prompt":
 		var p acp.PromptParams
 		json.Unmarshal(m.Params, &p)
+		if p.Prompt[0].Text == "leak" {
+			tok := ""
+			for _, e := range a.mcp[0].Env {
+				if e.Name == "COLDSHIP_TOKEN" {
+					tok = e.Value
+				}
+			}
+			a.update(map[string]any{"sessionUpdate": "agent_message_chunk", "messageId": "l", "content": map[string]string{"type": "text", "text": "my key is sk-ant-"}})
+			a.update(map[string]any{"sessionUpdate": "agent_message_chunk", "messageId": "l", "content": map[string]string{"type": "text", "text": "secret-1234 and"}})
+			a.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "env", "title": "env", "status": "in_progress",
+				"rawInput": map[string]string{"cmd": "env"}, "content": []map[string]any{{"type": "content", "content": map[string]string{"type": "text", "text": "COLDSHIP_TOKEN=" + tok}}}})
+			a.reply(m.ID, map[string]string{"stopReason": "end_turn"})
+			return
+		}
 		if strings.HasPrefix(p.Prompt[0].Text, "quick") {
 			a.called("prompt:" + p.Prompt[0].Text)
 			a.update(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []map[string]any{
@@ -649,4 +671,79 @@ func TestSessionHistoryAndSettings(t *testing.T) {
 	if l := m2.Sessions("default"); len(l) != 0 {
 		t.Fatalf("list after forgetting: %+v", l)
 	}
+}
+
+func TestSessionRunsDontCross(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"), secrets.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	fl := &fakeLauncher{canLoad: true, replay: 300, slowEnd: 150 * time.Millisecond}
+	m := New(st, fl, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, err := m.Save(ctx, "default", "dana", "helper", ConfigRequest{Kind: "claude", Env: map[string]string{"ANTHROPIC_API_KEY": "sk-ant-secret-1234"}}); err != nil {
+		t.Fatal(err)
+	}
+	sv, err := m.StartSession(ctx, StartRequest{Org: "default", Agent: "helper", Actor: "dana", Caller: store.ScopeDeploy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Session("default", sv.ID)
+	waitFor(t, "ready", func() bool { return s.View(false).Status == StatusReady })
+
+	// Keys and the session's token never reach the transcript.
+	if err := s.Prompt("dana", "leak"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "answer", func() bool { return s.View(false).Status == StatusReady })
+	var all strings.Builder
+	for _, it := range s.View(true).Items {
+		b, _ := json.Marshal(it)
+		all.Write(b)
+	}
+	tok := ""
+	for _, e := range fl.agent.mcp[0].Env {
+		if e.Name == "COLDSHIP_TOKEN" {
+			tok = e.Value
+		}
+	}
+	if strings.Contains(all.String(), "sk-ant-secret-1234") || strings.Contains(all.String(), tok) || !strings.Contains(all.String(), "my key is [redacted] and") {
+		t.Fatalf("transcript: %s", all.String())
+	}
+
+	// Stopping marks unfinished tools cancelled; resuming at once starts a
+	// run the old one's slow exit doesn't end.
+	s.Stop("dana")
+	if v := s.View(true); v.Items[len(v.Items)-2].Tool == nil || v.Items[len(v.Items)-2].Tool.Status != "cancelled" {
+		t.Fatalf("unfinished tool: %+v", v.Items[len(v.Items)-2])
+	}
+	items := len(s.View(true).Items)
+	if _, err := m.Resume(ctx, "default", sv.ID, "dana", store.ScopeDeploy); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "resumed", func() bool { return s.View(false).Status == StatusReady })
+	time.Sleep(400 * time.Millisecond)
+	v := s.View(true)
+	if v.Status != StatusReady {
+		t.Fatalf("the old run ended the new one: %s %+v", v.Status, v.Items[len(v.Items)-1])
+	}
+	for _, e := range fl.agent.mcp[0].Env {
+		if e.Name == "COLDSHIP_TOKEN" {
+			if tt, _ := st.LookupToken(ctx, e.Value); tt == nil {
+				t.Fatal("the new run's token was revoked")
+			}
+		}
+	}
+	// The 300 replayed updates were all dropped, even those arriving just
+	// before the load's answer.
+	if len(v.Items) != items+1 {
+		t.Fatalf("%d items after resuming, want %d: %+v", len(v.Items), items+1, v.Items[len(v.Items)-1])
+	}
+	if err := s.Prompt("dana", "quick one"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "answer", func() bool { return strings.Contains(fl.agent.callList(), "prompt:quick one") })
+	waitFor(t, "ready", func() bool { return s.View(false).Status == StatusReady })
+	s.Stop("dana")
 }

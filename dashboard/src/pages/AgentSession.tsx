@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Circle,
   CircleDashed,
+  CircleSlash,
   Loader2,
   Play,
   Send,
@@ -57,8 +58,18 @@ function useLiveSession(id: string) {
         setSession(e.session)
         setItems(e.session.items ?? [])
       } else if (e.type === 'session' && e.session) {
+        // Fields the server leaves out when empty must clear, not linger.
         const v = e.session
-        setSession((s) => ({ ...s, ...v, items: undefined }))
+        setSession((s) => ({
+          ...s,
+          ...v,
+          error: v.error,
+          modes: v.modes,
+          config_options: v.config_options,
+          commands: v.commands,
+          usage: v.usage,
+          items: undefined,
+        }))
       } else if (e.type === 'status') {
         setSession((s) => (s ? { ...s, status: e.status!, error: e.error } : s))
       } else if (e.type === 'item' && e.item) {
@@ -609,6 +620,7 @@ function Collapsible({
 function ToolStatus({ status }: { status: string }) {
   if (status === 'completed') return <CheckCircle2 className="size-4 flex-none text-ok" aria-label="done" />
   if (status === 'failed') return <XCircle className="size-4 flex-none text-destructive" aria-label="failed" />
+  if (status === 'cancelled') return <CircleSlash className="size-4 flex-none text-muted-foreground" aria-label="cancelled" />
   return <Loader2 className="size-4 flex-none animate-spin text-muted-foreground" aria-label="running" />
 }
 
@@ -655,7 +667,7 @@ function Tool({ item, flat }: { item: SessionItem; flat?: boolean }) {
 
 function ToolGroup({ items }: { items: SessionItem[] }) {
   const [open, setOpen] = useState(false)
-  const running = items.some((it) => it.tool!.status !== 'completed' && it.tool!.status !== 'failed')
+  const running = items.some((it) => !['completed', 'failed', 'cancelled'].includes(it.tool!.status))
   const failed = items.filter((it) => it.tool!.status === 'failed').length
   const names = [...new Set(items.map((it) => toolName(it.tool!.title)))]
   return (

@@ -64,7 +64,9 @@ type Conn struct {
 	// Incoming messages are handled in order: notifications one at a
 	// time (session updates must apply in sequence), requests each on
 	// their own goroutine once their turn comes, so a request waiting on
-	// a person never blocks what follows.
+	// a person never blocks what follows. Responses wait their turn too:
+	// a prompt's (or session/load's) answer arrives only after the
+	// updates the agent sent before it have been applied.
 	qmu   sync.Mutex
 	queue []message
 	qcond *sync.Cond
@@ -110,20 +112,11 @@ func (c *Conn) read(r io.Reader) {
 		if json.Unmarshal(line, &m) != nil {
 			continue // not a message (agents log to stderr, but be lenient)
 		}
-		switch {
-		case m.Method != "":
+		if m.Method != "" || m.ID != nil {
 			c.qmu.Lock()
 			c.queue = append(c.queue, m)
 			c.qcond.Signal()
 			c.qmu.Unlock()
-		case m.ID != nil:
-			c.mu.Lock()
-			ch := c.pending[string(m.ID)]
-			delete(c.pending, string(m.ID))
-			c.mu.Unlock()
-			if ch != nil {
-				ch <- m
-			}
 		}
 	}
 	if errors.Is(err, io.EOF) {
@@ -131,10 +124,6 @@ func (c *Conn) read(r io.Reader) {
 	}
 	c.mu.Lock()
 	c.err = err
-	for id, ch := range c.pending {
-		close(ch)
-		delete(c.pending, id)
-	}
 	c.mu.Unlock()
 	c.cancel()
 	close(c.done)
@@ -150,6 +139,14 @@ func (c *Conn) dispatch() {
 			select {
 			case <-c.done:
 				c.qmu.Unlock()
+				// Everything read has been delivered: fail the calls
+				// still waiting.
+				c.mu.Lock()
+				for id, ch := range c.pending {
+					close(ch)
+					delete(c.pending, id)
+				}
+				c.mu.Unlock()
 				return
 			default:
 			}
@@ -158,9 +155,18 @@ func (c *Conn) dispatch() {
 		m := c.queue[0]
 		c.queue = c.queue[1:]
 		c.qmu.Unlock()
-		if m.ID == nil {
+		switch {
+		case m.Method == "":
+			c.mu.Lock()
+			ch := c.pending[string(m.ID)]
+			delete(c.pending, string(m.ID))
+			c.mu.Unlock()
+			if ch != nil {
+				ch <- m
+			}
+		case m.ID == nil:
 			c.handle(m)
-		} else {
+		default:
 			go c.handle(m)
 		}
 	}

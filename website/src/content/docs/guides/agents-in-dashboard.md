@@ -38,7 +38,7 @@ With an agent connected, **Ask an agent** buttons appear where they help: on an 
 
 ### History and resuming
 
-Each organization keeps its last 100 sessions, with a title (the agent's, or your first message), encrypted like every other secret. Open an ended session to read it, including after the server restarts. **Resume** starts it again: agents that support reloading a conversation (ACP `loadSession`, like Claude Code) pick up where they left off, since they keep it in their home volume; others start over in the same transcript, and the transcript says so. The trash button deletes a transcript; the audit log still records what the agent did.
+Each organization keeps its last 100 sessions, with a title (the agent's, or your first message), encrypted like every other secret. Open an ended session to read it, including after the server restarts. **Resume** starts it again: agents that support reloading a conversation (ACP `loadSession`) pick up where they left off from what they keep in their home volume; others start over in the same transcript, and the transcript says so. Keys the agent was given and its Coldship token are blanked out of transcripts (shown as `[redacted]`), in case the agent prints its environment. The trash button deletes a transcript; the audit log still records what the agent did.
 
 Agents' messages are shown as Markdown. Images in them are shown as links and never loaded, so an agent tricked by something it read can't send data out just by being displayed.
 

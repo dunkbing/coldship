@@ -486,6 +486,12 @@ type Session struct {
 	dirty     bool // changed since last saved
 	resume    bool // the next run reloads acpID
 	loading   bool // the agent is replaying history we already have
+	// gen counts runs: a resumed session is a new run, and what an old one
+	// left behind (its exit, a late answer) must not touch it.
+	gen int
+	// secrets are values never to keep in the transcript: the agent's
+	// provider keys and its Coldship token.
+	secrets []string
 
 	// alertKind and alertApp say what started it, for good; alert is set
 	// while nobody has taken over.
@@ -551,7 +557,7 @@ func (m *Manager) StartSession(ctx context.Context, r StartRequest) (*SessionVie
 	sctx, cancel := context.WithCancel(context.Background())
 	s := &Session{ID: newID(), Org: r.Org, Agent: a.Name, Kind: a.Kind, StartedBy: r.Actor, Scope: scope, CreatedAt: time.Now(),
 		m: m, Status: StatusStarting, byKey: map[string]*Item{}, subs: map[chan Event]struct{}{}, perms: map[string]chan acp.PermissionOutcome{},
-		lastActive: time.Now(), ctx: sctx, cancel: cancel, alert: r.alert, alertKey: r.alertKey, prompt: strings.TrimSpace(r.Prompt)}
+		lastActive: time.Now(), ctx: sctx, cancel: cancel, alert: r.alert, alertKey: r.alertKey, prompt: strings.TrimSpace(r.Prompt), gen: 1}
 	if r.alert != nil {
 		s.alertKind, s.alertApp = r.alert.Kind, r.alert.App
 		s.title = alertTitles[r.alert.Kind]
@@ -624,6 +630,7 @@ func (m *Manager) Resume(ctx context.Context, org, id, actor string, caller stor
 		return nil, apierr.New(409, "session_running", "the session is still running")
 	}
 	sctx, cancel := context.WithCancel(context.Background())
+	s.gen++
 	s.ctx, s.cancel = sctx, cancel
 	s.Scope, s.Kind = scope, a.Kind
 	s.Status, s.Error = StatusStarting, ""
@@ -739,6 +746,9 @@ func (m *Manager) restore(r *store.AgentSessionRecord) *Session {
 		s.byKey[it.Key] = it
 		if it.Permission != nil && it.Permission.Status == "pending" {
 			it.Permission.Status = "cancelled"
+		}
+		if it.Tool != nil && it.Tool.Status != "completed" && it.Tool.Status != "failed" {
+			it.Tool.Status = "cancelled"
 		}
 	}
 	return s
@@ -900,6 +910,7 @@ func (s *Session) upsert(it *Item) {
 	if it.Time.IsZero() {
 		it.Time = time.Now()
 	}
+	s.redact(it)
 	if old, ok := s.byKey[it.Key]; ok {
 		*old = *it
 	} else {
@@ -922,6 +933,41 @@ const (
 	maxOutput = 16 << 10
 )
 
+// redact blanks the agent's keys and token out of an item before it is
+// shown or saved: an agent's own shell could print its environment.
+// Holds s.mu.
+func (s *Session) redact(it *Item) {
+	if len(s.secrets) == 0 {
+		return
+	}
+	clean := func(t string) string {
+		for _, v := range s.secrets {
+			if v != "" && strings.Contains(t, v) {
+				t = strings.ReplaceAll(t, v, "[redacted]")
+			}
+		}
+		return t
+	}
+	it.Text = clean(it.Text)
+	if it.Tool != nil {
+		t := *it.Tool
+		t.Title, t.Input, t.Output = clean(t.Title), clean(t.Input), clean(t.Output)
+		it.Tool = &t
+	}
+	if it.Permission != nil {
+		p := *it.Permission
+		p.Title, p.Input = clean(p.Title), clean(p.Input)
+		it.Permission = &p
+	}
+	if len(it.Plan) > 0 {
+		plan := append([]acp.PlanEntry(nil), it.Plan...)
+		for i := range plan {
+			plan[i].Content = clean(plan[i].Content)
+		}
+		it.Plan = plan
+	}
+}
+
 // clipTitle makes a one-line title of at most 80 characters.
 func clipTitle(t string) string {
 	t = strings.Join(strings.Fields(t), " ")
@@ -942,21 +988,39 @@ func clip(s string, n int) string {
 // agent exits or the session is stopped.
 func (s *Session) run(a store.AgentConfig) {
 	m := s.m
+	s.mu.Lock()
+	gen, ctx := s.gen, s.ctx
+	s.mu.Unlock()
 	fail := func(err error) {
-		s.add("notice", err.Error())
-		s.setStatus(StatusFailed, err.Error())
-		s.cleanup()
-		s.report("The agent didn't start: " + err.Error())
+		if s.finish(gen, StatusFailed, err.Error(), err.Error()) {
+			s.report("The agent didn't start: " + err.Error())
+		}
 	}
 	scopeApps := a.Apps
+	// Each run has its own token, so revoking an old one never touches it.
 	tokName := TokenPrefix + s.ID
-	tok, err := m.st.CreateToken(s.ctx, s.Org, tokName, s.Scope, scopeApps)
+	if gen > 1 {
+		tokName += fmt.Sprintf("-%d", gen)
+	}
+	tok, err := m.st.CreateToken(ctx, s.Org, tokName, s.Scope, scopeApps)
 	if err != nil {
 		fail(fmt.Errorf("creating the agent's token: %w", err))
 		return
 	}
 	s.mu.Lock()
+	if !s.current(gen) {
+		// Ended while starting.
+		s.mu.Unlock()
+		m.st.DeleteToken(context.Background(), tokName)
+		return
+	}
 	s.token = tokName
+	s.secrets = []string{tok}
+	for _, v := range a.Env {
+		if len(v) >= 8 {
+			s.secrets = append(s.secrets, v)
+		}
+	}
 	s.mu.Unlock()
 
 	cmd := []string{"sh", "-c", a.Command}
@@ -969,7 +1033,7 @@ func (s *Session) run(a store.AgentConfig) {
 	}
 	status := &lineLog{s: s, key: "log:start"}
 	fmt.Fprintf(status, "starting %s in a container (%s)…\n", a.Name, m.Image)
-	proc, err := m.launch.RunAttached(s.ctx, runtime.AttachSpec{
+	proc, err := m.launch.RunAttached(ctx, runtime.AttachSpec{
 		Name:       "coldship-agent-" + s.ID,
 		Image:      m.Image,
 		Cmd:        cmd,
@@ -984,33 +1048,29 @@ func (s *Session) run(a store.AgentConfig) {
 		fail(err)
 		return
 	}
-	s.mu.Lock()
-	s.proc = proc
-	s.mu.Unlock()
 	go status.copy(proc.Stderr)
 	conn := acp.NewConn(proc.Stdout, proc.Stdin, s.handle)
 	s.mu.Lock()
-	s.conn = conn
+	if !s.current(gen) {
+		s.mu.Unlock()
+		proc.Kill()
+		return
+	}
+	s.proc, s.conn = proc, conn
 	s.mu.Unlock()
 	go func() {
 		<-conn.Done()
 		err := proc.Wait()
-		s.mu.Lock()
-		live := s.live()
-		s.mu.Unlock()
-		if live {
-			msg := "the agent exited"
-			if err != nil {
-				msg = err.Error()
-			}
-			s.add("notice", msg)
-			s.setStatus(StatusEnded, "")
+		msg := "the agent exited"
+		if err != nil {
+			msg = err.Error()
 		}
-		s.cleanup()
+		s.finish(gen, StatusEnded, "", msg)
+		proc.Kill() // removes the container, whatever ended the run
 	}()
 
 	// npx may download the adapter first: give it time.
-	ictx, cancel := context.WithTimeout(s.ctx, 10*time.Minute)
+	ictx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	var init acp.InitializeResult
 	if err := conn.Call(ictx, "initialize", acp.InitializeParams{ProtocolVersion: acp.ProtocolVersion,
@@ -1125,17 +1185,34 @@ func authMethod(methods []acp.AuthMethod, env map[string]string) string {
 	return first
 }
 
-// cleanup revokes the token and removes the container.
-func (s *Session) cleanup() {
+// current reports whether run gen is the session's and still going. Holds
+// s.mu.
+func (s *Session) current(gen int) bool { return s.gen == gen && s.live() }
+
+// finish ends run gen, if it is still the session's: it says why, sets the
+// status, revokes the token, removes the container and saves. It reports
+// whether it did.
+func (s *Session) finish(gen int, status, errText, notice string) bool {
 	s.mu.Lock()
-	tok, proc := s.token, s.proc
-	s.token = ""
+	if !s.current(gen) {
+		s.mu.Unlock()
+		return false
+	}
+	if notice != "" {
+		s.seq++
+		s.upsert(&Item{Key: fmt.Sprintf("notice:%d", s.seq), Kind: "notice", Text: notice})
+	}
+	s.settle()
+	s.Status, s.Error = status, errText
+	s.broadcast(Event{Type: "status", Status: status, Error: errText})
+	tok, proc, cancel := s.token, s.proc, s.cancel
+	s.token, s.proc = "", nil
 	for id, ch := range s.perms {
 		close(ch)
 		delete(s.perms, id)
 	}
 	s.mu.Unlock()
-	s.cancel()
+	cancel()
 	if tok != "" {
 		if _, err := s.m.st.DeleteToken(context.Background(), tok); err != nil {
 			s.m.log.Warn("revoking an agent token failed", "token", tok, "err", err)
@@ -1145,21 +1222,29 @@ func (s *Session) cleanup() {
 		proc.Kill()
 	}
 	s.save()
+	return true
+}
+
+// settle marks tool calls that never finished as cancelled, so an ended
+// session shows nothing as still running. Holds s.mu.
+func (s *Session) settle() {
+	for _, it := range s.items {
+		if it.Tool != nil && it.Tool.Status != "completed" && it.Tool.Status != "failed" && it.Tool.Status != "cancelled" {
+			c := *it
+			t := *it.Tool
+			t.Status = "cancelled"
+			c.Tool = &t
+			s.upsert(&c)
+		}
+	}
 }
 
 // stop ends the session.
 func (s *Session) stop(why string) {
 	s.mu.Lock()
-	live := s.live()
+	gen := s.gen
 	s.mu.Unlock()
-	if !live {
-		return
-	}
-	if why != "" {
-		s.add("notice", why)
-	}
-	s.setStatus(StatusEnded, "")
-	s.cleanup()
+	s.finish(gen, StatusEnded, "", why)
 }
 
 // Stop ends the session for a person.
@@ -1192,14 +1277,18 @@ func (s *Session) Prompt(actor, text string) error {
 		s.title = clipTitle(text)
 		s.changed()
 	}
-	conn, id := s.conn, s.acpID
+	conn, id, ctx, gen := s.conn, s.acpID, s.ctx, s.gen
 	s.mu.Unlock()
 	go func() {
 		var res acp.PromptResult
-		err := conn.Call(s.ctx, "session/prompt", acp.PromptParams{SessionID: id, Prompt: []acp.ContentBlock{{Type: "text", Text: text}}}, &res)
+		err := conn.Call(ctx, "session/prompt", acp.PromptParams{SessionID: id, Prompt: []acp.ContentBlock{{Type: "text", Text: text}}}, &res)
 		s.mu.Lock()
 		s.lastActive = time.Now()
+		mine := s.current(gen)
 		s.mu.Unlock()
+		if !mine {
+			return // the run ended (and maybe another began) meanwhile
+		}
 		failed := ""
 		switch {
 		case err != nil:
@@ -1212,7 +1301,7 @@ func (s *Session) Prompt(actor, text string) error {
 			s.report(failed)
 		}
 		s.mu.Lock()
-		if s.Status == StatusWorking {
+		if s.gen == gen && s.Status == StatusWorking {
 			s.Status = StatusReady
 			s.broadcast(Event{Type: "status", Status: StatusReady})
 		}
@@ -1557,7 +1646,7 @@ type SettingRequest struct {
 // Configure changes a setting the agent offers.
 func (s *Session) Configure(actor string, req SettingRequest) error {
 	s.mu.Lock()
-	conn, id, live := s.conn, s.acpID, s.live()
+	conn, id, live, sctx := s.conn, s.acpID, s.live(), s.ctx
 	ready := live && s.Status != StatusStarting && conn != nil && id != ""
 	var label string
 	var opt *acp.ConfigOption
@@ -1597,7 +1686,7 @@ func (s *Session) Configure(actor string, req SettingRequest) error {
 	if !ready {
 		return apierr.New(409, "agent_not_ready", "the session isn't running")
 	}
-	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(sctx, 30*time.Second)
 	defer cancel()
 	if req.Mode != "" {
 		if err := conn.Call(ctx, "session/set_mode", map[string]string{"sessionId": id, "modeId": req.Mode}, nil); err != nil {
