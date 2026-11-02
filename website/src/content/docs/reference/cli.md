@@ -123,6 +123,18 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 | `coldship db snapshots <app> [--database D]` | Snapshots, newest first |
 | `coldship db restore <app> <database> <snapshot> --reason "..."` | Plan and apply a restore. Stops with exit 3 if approval is needed. |
 
+## Backups
+
+| Command | Description |
+|---|---|
+| `coldship backups` | Off-site backup status: bucket, last sync, copied and waiting snapshots |
+| `coldship backups set --endpoint URL --bucket B --access-key K [--region R] [--prefix P] [--path-style] [--keep N]` | Set the bucket (admin). The secret key comes from `COLDSHIP_BACKUP_SECRET_KEY` or a prompt; it's checked before saving |
+| `coldship backups sync` | Copy snapshots now (admin) |
+| `coldship backups list [--data S \| --app A --database D]` | Backups in the bucket, newest first |
+| `coldship backups off` | Stop copying; the bucket's contents stay (admin) |
+| `coldship data restore <service> --backup KEY --reason "..."` | Restore a data service from an off-site backup (admin) |
+| `coldship db import <app> <database> --backup KEY` | Copy an off-site backup in as a snapshot of an app's database, then restore it with `coldship db restore` (admin) |
+
 ## Previews
 
 | Command | Description |

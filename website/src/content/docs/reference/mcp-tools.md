@@ -25,6 +25,7 @@ description: The tools coldship mcp exposes to AI agents.
 | `coldship_db_list` | `app` | read-only | Databases: engine, status, injected env var, latest snapshot. Never credentials |
 | `coldship_db_snapshot` | `app`, `database`, optional `reason` | not destructive | Snapshot a database now (e.g. before a migration) |
 | `coldship_db_snapshots` | `app`, optional `database` | read-only | Snapshots, newest first |
+| `coldship_backups` | optional `data`, or `app` and `database` | read-only | [Off-site backup](/guides/backups/) status, and the backups in the bucket for one database |
 | `coldship_deploy_log` | `deployment` | read-only | What happened during a deployment: build output, start, health checks, a failed container's output. Untrusted |
 
 There is intentionally **no approve tool**. Approving destructive production changes is a human step.

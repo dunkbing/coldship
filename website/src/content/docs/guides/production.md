@@ -27,7 +27,7 @@ All platform state (apps, plans, deployments, tokens, audit log) is in one SQLit
 sqlite3 coldship.db ".backup 'coldship-backup.db'"
 ```
 
-App data lives in Docker volumes named `coldship-<app>-<volume>`. Back those up separately. [Managed databases](/guides/databases/) are snapshotted daily into `--snapshot-dir`; copy that directory off the server too, since a disk failure takes local snapshots with it.
+App data lives in Docker volumes named `coldship-<app>-<volume>`. Back those up separately. [Managed databases](/guides/databases/) are snapshotted daily into `--snapshot-dir`. Set an [off-site backup bucket](/guides/backups/) so a disk failure doesn't take the snapshots with it.
 
 ## Git builds
 

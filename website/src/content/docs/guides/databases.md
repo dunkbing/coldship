@@ -40,7 +40,7 @@ Coldship snapshots databases automatically:
 - **daily** (`--db-snapshot-interval`, default 24h; `0` turns it off)
 - **on demand:** `coldship db snapshot shop main --reason "before migration"`, the `coldship_db_snapshot` MCP tool, or **Snapshot now** in the dashboard
 
-Postgres snapshots are `pg_dump` custom-format archives; Redis snapshots are RDB files. Each is stored with a SHA-256 checksum under `--snapshot-dir` (default `coldship-snapshots/` next to the state file). Coldship keeps the newest 20 per database (`--snapshot-keep`), counting manual snapshots separately so they never push out automatic ones. Previews are throwaway, so they're not snapshotted.
+Postgres snapshots are `pg_dump` custom-format archives; Redis snapshots are RDB files. Each is stored with a SHA-256 checksum under `--snapshot-dir` (default `coldship-snapshots/` next to the state file). Coldship keeps the newest 20 per database (`--snapshot-keep`), counting manual snapshots separately so they never push out automatic ones. Previews are throwaway, so they're not snapshotted. To keep copies off the server, set an [off-site backup bucket](/guides/backups/).
 
 **If a snapshot fails, nothing is deleted.** Deleting an app stops with `snapshot_failed` and leaves everything running. A database removed from the spec is kept while the rest of the deploy goes ahead, and the failure is logged and audited.
 

@@ -34,6 +34,14 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `GET` | `/v1/apps/{name}/databases` | read | Databases with status and latest snapshot |
 | `GET` | `/v1/apps/{name}/snapshots?database=` | read | Snapshots, newest first |
 | `POST` | `/v1/apps/{name}/databases/{db}/snapshots` | deploy | Snapshot now: `{reason?}` |
+| `POST` | `/v1/apps/{name}/databases/{db}/import` | admin | Copy an off-site backup in as a snapshot, to restore with a plan: `{backup}` |
+| `POST` | `/v1/data/{name}/restore` | admin | Restore a data service: `{snapshot, reason}` or `{backup, reason}` (an off-site backup's key) |
+| `GET` | `/v1/backups` | read | The org's [off-site backup](/guides/backups/) bucket (never its secret key), last sync and error, copied and waiting snapshots |
+| `PUT` | `/v1/backups` | admin | Set the bucket: `{endpoint, bucket, access_key, secret_key, region?, prefix?, path_style?, keep?}`. Checked before saving; an empty `secret_key` keeps the saved one |
+| `POST` | `/v1/backups/test` | admin | Check a bucket without saving it (same body) |
+| `POST` | `/v1/backups/sync` | admin | Copy snapshots now |
+| `GET` | `/v1/backups/list?database=&app=` | read | Backups in the bucket, newest first: all, a data service's (`database`), or an app database's (`app` and `database`) |
+| `DELETE` | `/v1/backups` | admin | Stop copying; the bucket's contents stay |
 | `POST` | `/v1/build/detect` | deploy | `{app}` or `{spec}`: check out the commit and report how it would be built, without building |
 | `POST` | `/v1/previews` | deploy | Create or update a preview: `{app, ref?, image?, name?, ttl?, env?, inherit_env?, reason?}` |
 | `GET` | `/v1/previews` | read | List previews |
