@@ -34,6 +34,10 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `GET` | `/v1/apps/{name}/databases` | read | Databases with status and latest snapshot |
 | `GET` | `/v1/apps/{name}/snapshots?database=` | read | Snapshots, newest first |
 | `POST` | `/v1/apps/{name}/databases/{db}/snapshots` | deploy | Snapshot now: `{reason?}` |
+| `GET` | `/v1/apps/{name}/jobs` | read | The app's [jobs](/guides/jobs/), each with `next`, `running` (a run id) and `last` |
+| `POST` | `/v1/apps/{name}/jobs/{job}/run` | deploy | Run a job now. Returns the run, `status: running` |
+| `GET` | `/v1/apps/{name}/job-runs?job=` | read | Recent runs, newest first, without output |
+| `GET` | `/v1/apps/{name}/job-runs/{id}` | read | One run with its output (`log`, the last 64 KB; untrusted) |
 | `POST` | `/v1/apps/{name}/databases/{db}/import` | admin | Copy an off-site backup in as a snapshot, to restore with a plan: `{backup}` |
 | `POST` | `/v1/data/{name}/restore` | admin | Restore a data service: `{snapshot, reason}` or `{backup, reason}` (an off-site backup's key) |
 | `GET` | `/v1/backups` | read | The org's [off-site backup](/guides/backups/) bucket (never its secret key), last sync and error, copied and waiting snapshots |

@@ -123,6 +123,17 @@ Runs an MCP server on stdio. Uses `COLDSHIP_URL` and `COLDSHIP_TOKEN`. See [MCP 
 | `coldship db snapshots <app> [--database D]` | Snapshots, newest first |
 | `coldship db restore <app> <database> <snapshot> --reason "..."` | Plan and apply a restore. Stops with exit 3 if approval is needed. |
 
+## Jobs
+
+| Command | Description |
+|---|---|
+| `coldship jobs <app>` | Jobs with their schedule, next run and last result |
+| `coldship jobs set <app> <job> --schedule CRON [--timeout 10m] -- <command>` | Add or change a [job](/guides/jobs/). Flags left out keep the job's current settings. Doesn't redeploy the app |
+| `coldship jobs rm <app> <job>...` | Remove jobs |
+| `coldship jobs run <app> <job> [--wait]` | Run now. With `--wait`, print its output and exit non-zero if it fails |
+| `coldship jobs logs <app> <job> [run]` | A run's output (the last run by default) |
+| `coldship jobs runs <app> [job]` | Recent runs |
+
 ## Notifications
 
 | Command | Description |

@@ -30,7 +30,7 @@ export default defineConfig({
       },
       {
         label: 'Guides',
-        items: ['guides/ai-agents', 'guides/agents-in-dashboard', 'guides/build-from-git', 'guides/webhooks', 'guides/domains', 'guides/previews', 'guides/databases', 'guides/backups', 'guides/notifications', 'guides/dashboard', 'guides/organizations', 'guides/production', 'guides/secrets', 'guides/upgrades'],
+        items: ['guides/ai-agents', 'guides/agents-in-dashboard', 'guides/build-from-git', 'guides/webhooks', 'guides/domains', 'guides/previews', 'guides/databases', 'guides/jobs', 'guides/backups', 'guides/notifications', 'guides/dashboard', 'guides/organizations', 'guides/production', 'guides/secrets', 'guides/upgrades'],
       },
       {
         label: 'Reference',

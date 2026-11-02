@@ -36,6 +36,7 @@ volumes:
 | `env` | map | no | Environment variables. Keys match `[A-Za-z_][A-Za-z0-9_]*`; values are single-line. Values are write-only and redacted in all output. |
 | `on_push` | object | no | What Git webhook pushes do (apps with `build`): `{action: plan\|deploy, previews, preview_ttl}`. See [Git webhooks](/guides/webhooks/). |
 | `databases` | list | no | Managed databases: `{name, engine: postgres\|redis, version, env}`. Connection URLs are injected into env. Removing one deletes its data after a snapshot. See [Managed databases](/guides/databases/). |
+| `jobs` | list | no | Scheduled jobs: `{name, schedule, command, timeout}`. `schedule` is 5-field cron in UTC or `@hourly`/`@daily`/`@weekly`/`@monthly`; `command` runs with `sh -c`; `timeout` defaults to 30m. Changing only jobs doesn't redeploy the app. See [Scheduled jobs](/guides/jobs/). |
 | `volumes` | list | no | Persistent Docker volumes, each `{name, path}`. The name follows the same rules as app names, and the path must be absolute. Removing a volume from the spec **deletes it and its data**. |
 
 ## `build`

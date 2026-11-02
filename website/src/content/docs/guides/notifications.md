@@ -17,6 +17,7 @@ Coldship tells you when something needs attention, wherever your team already lo
 | `app.down` | An app's container stopped running (two checks a minute apart, so a quick restart doesn't page you) | yes |
 | `app.recovered` | It's running again | yes |
 | `backup.failing` / `backup.recovered` | [Off-site backups](/guides/backups/) started failing, or work again | yes |
+| `job.failed` / `job.recovered` | A [scheduled job](/guides/jobs/) started failing (once, not every run), or works again | yes |
 | `disk.low` | The server's disk is 90% full. Repeats at most daily; default organization only | yes |
 | `agent.report` | An agent [started by an alert](/guides/agents-in-dashboard/#responding-to-alerts) reports what it found | yes |
 | `agent.waiting` | An agent on an alert asks permission for a tool and waits for a person | yes |

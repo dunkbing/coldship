@@ -38,6 +38,7 @@ An agent can start on its own when something goes wrong. In its settings, under 
 |---|---|
 | An app goes down | `app.down` |
 | A deploy or build fails | `deploy.failed` |
+| A scheduled job fails | `job.failed` |
 | Off-site backups fail | `backup.failing` |
 | The server's disk is almost full | `disk.low` (default organization only) |
 

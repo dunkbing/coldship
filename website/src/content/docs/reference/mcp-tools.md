@@ -17,6 +17,10 @@ description: The tools coldship mcp exposes to AI agents.
 | `coldship_diagnose` | `app` | read-only | Findings with suggested fixes, plus state and logs |
 | `coldship_server_status` | none | read-only | The host: CPU, memory, swap, load, disks, uptime and the container engine (default organization only) |
 | `coldship_deployments` | `app` | read-only | Deployment history, with the commit and `failed_in` |
+| `coldship_jobs` | `app` | read-only | [Scheduled jobs](/guides/jobs/) with next run and last result. Change them with `coldship_plan` and a patch (`set_jobs`, `remove_jobs`) |
+| `coldship_job_run` | `app`, `job` | not destructive | Run a job now |
+| `coldship_job_runs` | `app`, optional `job` | read-only | Recent runs: status, exit code, error, who started it |
+| `coldship_job_log` | `app`, `run` | read-only | A run with its output, marked untrusted |
 | `coldship_preview_create` | `app`, `ref` or `image`, optional `name`, `ttl`, `env`, `inherit_env`, `reason` | not destructive, idempotent | Create or update a [preview](/guides/previews/). Returns its name, URLs and expiry |
 | `coldship_preview_list` | — | read-only | Previews, soonest-expiring first |
 | `coldship_preview_delete` | `name`, optional `reason` | destructive, idempotent | Delete a preview (never a regular app) |
