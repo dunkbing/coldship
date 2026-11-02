@@ -323,6 +323,9 @@ func (e *Engine) specFromPatch(ctx context.Context, p *spec.Patch) (*spec.App, e
 	if err != nil {
 		return nil, err
 	}
+	if p.OnlyJobs() {
+		return s, nil // nothing else changes, not even a detected port
+	}
 	// An image with exactly one declared port: that's the app's port.
 	if s.Port == 0 && s.Image != "" {
 		if ip, ok := e.rt.(interface {
@@ -1289,7 +1292,12 @@ func (e *Engine) Rollback(ctx context.Context, actor, appName, toDeployment, rea
 		return nil, apierr.New(409, "no_rollback_target", "app %s has no earlier successful deployment to roll back to", appName)
 	}
 
-	p, err := e.plan(ctx, actor, PlanRequest{Spec: target.Spec, Redeploy: true})
+	// Jobs aren't part of a deployment: rolling back keeps today's.
+	desired := target.Spec.Clone()
+	if app.Spec != nil {
+		desired.Jobs = app.Spec.Jobs
+	}
+	p, err := e.plan(ctx, actor, PlanRequest{Spec: desired, Redeploy: true})
 	if err != nil {
 		return nil, err
 	}

@@ -52,7 +52,8 @@ func ParseSchedule(s string) (cron.Schedule, error) {
 	if strings.HasPrefix(s, "@every") || strings.HasPrefix(s, "TZ=") || strings.HasPrefix(s, "CRON_TZ=") {
 		return nil, fmt.Errorf("use a 5-field cron expression or @hourly, @daily, @weekly, @monthly")
 	}
-	return cronParser.Parse(s)
+	// Schedules are UTC whatever the server's time zone.
+	return cronParser.Parse("CRON_TZ=UTC " + s)
 }
 
 // JobTimeout is the job's timeout, or the default.

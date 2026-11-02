@@ -245,3 +245,47 @@ func TestJobsOnGitApp(t *testing.T) {
 		t.Fatal("removing a missing job")
 	}
 }
+
+func TestJobsEdgeCases(t *testing.T) {
+	e, rt := setup(t)
+	ctx := context.Background()
+	// Schedules are UTC, whatever zone the server's clock is in.
+	zone := time.FixedZone("x", 5*3600+1800)
+	sched, err := spec.ParseSchedule("0 3 * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next := sched.Next(time.Date(2026, 11, 2, 12, 0, 0, 0, zone)); !next.Equal(time.Date(2026, 11, 3, 3, 0, 0, 0, time.UTC)) {
+		t.Fatalf("next %v", next.UTC())
+	}
+
+	// A worker with no port: a jobs patch doesn't detect one and redeploy.
+	rt.Ports["worker:1"] = []int{8080}
+	p, err := e.Plan(ctx, "agent", PlanRequest{Spec: &spec.App{Name: "worker", Image: "worker:1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Apply(ctx, "agent", p.ID, "ship")
+	deploys := rt.Deploys
+	p, err = e.Plan(ctx, "agent", PlanRequest{Patch: &spec.Patch{Name: "worker", SetJobs: []spec.Job{{Name: "tick", Schedule: "@hourly", Command: "true"}}}})
+	if err != nil || p.Action != planner.OpConfig {
+		t.Fatalf("plan %+v %v", p, err)
+	}
+	e.Apply(ctx, "agent", p.ID, "add tick")
+	if rt.Deploys != deploys {
+		t.Fatal("redeployed")
+	}
+
+	// Rolling back keeps the jobs added since.
+	p, _ = e.Plan(ctx, "agent", PlanRequest{Spec: &spec.App{Name: "worker", Image: "worker:2", Jobs: []spec.Job{{Name: "tick", Schedule: "@hourly", Command: "true"}}}})
+	if _, err := e.Apply(ctx, "agent", p.ID, "v2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Rollback(ctx, "agent", "worker", "", "bad v2"); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := e.st.GetApp(ctx, "worker")
+	if a.Spec.Image != "worker:1" || len(a.Spec.Jobs) != 1 {
+		t.Fatalf("after rollback: %+v", a.Spec)
+	}
+}

@@ -46,7 +46,7 @@ coldship jobs rm web cleanup
 - Runs missed while the server was down aren't caught up. A run cut off by a restart is marked **interrupted**.
 - At most 4 jobs run at once on the server. Self-upgrades wait for running jobs.
 - The last 50 runs of each job are kept, with the last 64 KB of output.
-- Jobs share the app's memory limit setting, but run in their own container: a job can't take memory from the running app, and the app doesn't have to be up for its jobs to run.
+- A job runs in its own container, with the same memory limit as the app (its own limit, not a share of the app's), and the app doesn't have to be up for its jobs to run.
 - Static sites have no image, so they can't have jobs. Previews don't run jobs.
 
 ## When a job fails

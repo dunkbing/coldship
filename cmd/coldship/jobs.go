@@ -11,6 +11,7 @@ import (
 
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/engine"
+	"github.com/dunkbing/coldship/internal/planner"
 	"github.com/dunkbing/coldship/internal/spec"
 	"github.com/dunkbing/coldship/internal/store"
 )
@@ -82,7 +83,7 @@ The command runs with sh -c, so the image needs a shell.`,
 			if j.Command == "" {
 				return apierr.Invalid("command", "give the command after --, like: coldship jobs set %s %s --schedule '%s' -- npm run %s", app, name, j.Schedule, name)
 			}
-			return planAndApply(cmd, engine.PlanRequest{Patch: &spec.Patch{Name: app, SetJobs: []spec.Job{j}}}, orDefault(reason, "set job "+name))
+			return applyJobs(cmd, &spec.Patch{Name: app, SetJobs: []spec.Job{j}}, orDefault(reason, "set job "+name))
 		},
 	}
 	set.Flags().StringVar(&schedule, "schedule", "", "when to run, in UTC: cron like '0 3 * * *', or @hourly, @daily, @weekly, @monthly")
@@ -96,8 +97,7 @@ The command runs with sh -c, so the image needs a shell.`,
 		Short: "Remove jobs",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return planAndApply(cmd, engine.PlanRequest{Patch: &spec.Patch{Name: args[0], RemoveJobs: args[1:]}},
-				orDefault(rmReason, "remove job "+strings.Join(args[1:], ", ")))
+			return applyJobs(cmd, &spec.Patch{Name: args[0], RemoveJobs: args[1:]}, orDefault(rmReason, "remove job "+strings.Join(args[1:], ", ")))
 		},
 	}
 	rm.Flags().StringVar(&rmReason, "reason", "", "why, for the audit log")
@@ -195,6 +195,37 @@ The command runs with sh -c, so the image needs a shell.`,
 	}
 	cmd.AddCommand(set, rm, run, logs, history)
 	return cmd
+}
+
+// applyJobs plans a jobs change and applies it, refusing anything that
+// would redeploy the app.
+func applyJobs(cmd *cobra.Command, patch *spec.Patch, reason string) error {
+	c := newClient()
+	p, err := c.Plan(cmd.Context(), engine.PlanRequest{Patch: patch})
+	if err != nil {
+		return err
+	}
+	switch {
+	case p.Action == "noop":
+		return emit(p, func() { fmt.Println("Nothing to change.") })
+	case p.Action != planner.OpConfig:
+		if !flagJSON {
+			printChanges(p, false)
+		}
+		return apierr.New(409, "not_jobs_only", "plan %s would %s %s, not only change its jobs", p.ID, p.Action, p.App).
+			WithHint("review it and apply it with `coldship apply " + p.ID + " --reason ...`, or change jobs after the app's next deploy")
+	case p.RequiresApproval:
+		return apierr.New(403, "approval_required", "plan %s needs human approval before it can be applied", p.ID).
+			WithHint("review it, run `coldship approve " + p.ID + "`, then `coldship apply " + p.ID + " --reason ...`")
+	}
+	if !flagJSON {
+		printChanges(p, false)
+	}
+	res, err := c.Apply(cmd.Context(), p.ID, reason)
+	if err != nil {
+		return err
+	}
+	return emit(res, func() { printApply(res) })
 }
 
 func printJobs(app string, jobs []engine.JobView) {
