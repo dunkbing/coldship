@@ -372,6 +372,30 @@ func (c *Client) ImportBackup(ctx context.Context, app, database, backup string)
 		map[string]string{"backup": backup}, &out)
 }
 
+func (c *Client) Channels(ctx context.Context) ([]engine.ChannelView, error) {
+	var out []engine.ChannelView
+	return out, c.do(ctx, "GET", "/v1/channels", nil, &out)
+}
+
+func (c *Client) ChannelEvents(ctx context.Context) ([]engine.EventKind, error) {
+	var out []engine.EventKind
+	return out, c.do(ctx, "GET", "/v1/channels/events", nil, &out)
+}
+
+func (c *Client) CreateChannel(ctx context.Context, req engine.ChannelRequest) (*engine.ChannelView, error) {
+	var out engine.ChannelView
+	return &out, c.do(ctx, "POST", "/v1/channels", req, &out)
+}
+
+func (c *Client) DeleteChannel(ctx context.Context, id string) error {
+	return c.do(ctx, "DELETE", "/v1/channels/"+url.PathEscape(id), nil, nil)
+}
+
+func (c *Client) TestChannel(ctx context.Context, id string) (*engine.ChannelView, error) {
+	var out engine.ChannelView
+	return &out, c.do(ctx, "POST", "/v1/channels/"+url.PathEscape(id)+"/test", nil, &out)
+}
+
 // FollowDeployLog calls line for each line of a deployment's log as it is
 // written, until the deployment finishes, and returns its final status.
 func (c *Client) FollowDeployLog(ctx context.Context, deployment string, line func(string)) (string, error) {

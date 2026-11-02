@@ -15,11 +15,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/dunkbing/coldship/internal/netguard"
 )
 
 // Config is where an org's backups go.
@@ -129,7 +130,7 @@ func New(cfg Config, restricted bool) (Remote, error) {
 	}
 	if restricted {
 		tr.Proxy = nil
-		tr.DialContext = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: publicOnly}).DialContext
+		tr.DialContext = netguard.Dialer().DialContext
 	}
 	lookup := minio.BucketLookupAuto
 	if cfg.PathStyle {
@@ -145,46 +146,8 @@ func New(cfg Config, restricted bool) (Remote, error) {
 	return &s3{c: c, bucket: cfg.Bucket, prefix: cfg.Prefix, restricted: restricted}, nil
 }
 
-// publicOnly refuses connections to loopback, private, link-local (cloud
-// metadata) and other non-public addresses. It runs on the address being
-// dialed, after DNS, so a name can't be pointed somewhere else later.
-func publicOnly(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !Public(ip) {
-		return fmt.Errorf("%s is not a public address", host)
-	}
-	return nil
-}
-
-var notPublic = func() []*net.IPNet {
-	var out []*net.IPNet
-	for _, c := range []string{"100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16"} {
-		_, n, _ := net.ParseCIDR(c)
-		out = append(out, n)
-	}
-	return out
-}()
-
 // Public reports whether ip is a public unicast address.
-func Public(ip net.IP) bool {
-	if ip4 := ip.To4(); ip4 != nil {
-		ip = ip4
-	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast() {
-		return false
-	}
-	for _, n := range notPublic {
-		if n.Contains(ip) {
-			return false
-		}
-	}
-	return !ip.Equal(net.IPv4bcast)
-}
+func Public(ip net.IP) bool { return netguard.Public(ip) }
 
 // explain turns a client error into a short message.
 func (s *s3) explain(op string, err error) error {

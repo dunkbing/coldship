@@ -59,7 +59,11 @@ type Engine struct {
 	// NewRemote opens an off-site bucket (tests swap it).
 	NewRemote func(cfg offsite.Config, restricted bool) (offsite.Remote, error)
 	bk        backupState
-	Now       func() time.Time
+	nt        notifier
+	watch     watchState
+	// DiskInfo overrides how disks are read (tests).
+	DiskInfo func() []hostinfo.Disk
+	Now      func() time.Time
 }
 
 // New creates an engine. px may be nil, which disables domains.
@@ -839,6 +843,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 	// Build, data services and audit entries act in the plan's org.
 	ctx = store.WithOrg(ctx, store.OrgOr(p.Org))
 	if p.RequiresApproval && p.ApprovedBy == "" {
+		e.askApproval(ctx, p, actor)
 		return nil, apierr.New(403, "approval_required", "plan %s makes a destructive change to a production app and has not been approved", p.ID).
 			WithHint(fmt.Sprintf("ask a human to review and run: coldship approve %s", p.ID)).WithDetail("plan", p.ID)
 	}
@@ -1060,6 +1065,7 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 		return nil, err
 	}
 	e.audit(ctx, actor, "plan.apply", p.App, reason, map[string]any{"plan": p.ID, "deployment": d.ID, "status": d.Status})
+	e.notifyDeploy(ctx, p, d, actor)
 
 	if runErr != nil {
 		ae, ok := apierr.As(runErr)
@@ -1263,6 +1269,7 @@ func (e *Engine) Rollback(ctx context.Context, actor, appName, toDeployment, rea
 		return nil, err
 	}
 	if p.RequiresApproval {
+		e.askApproval(ctx, p, actor)
 		return nil, apierr.New(403, "approval_required", "rolling back to %s is destructive on a production app (plan %s)", target.ID, p.ID).
 			WithHint(fmt.Sprintf("ask a human to approve it (coldship approve %s), then apply that plan", p.ID)).WithDetail("plan", p.ID)
 	}

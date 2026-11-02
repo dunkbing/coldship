@@ -307,3 +307,30 @@ func TestAppDatabaseFromBucket(t *testing.T) {
 		t.Fatalf("other org: %v", err)
 	}
 }
+
+func TestBackupFailureNotifiesOnChange(t *testing.T) {
+	e, _, mem := backupSetup(t)
+	ctx := org(context.Background())
+	var mu sync.Mutex
+	var kinds []string
+	e.Subscribe(func(ev Event) { mu.Lock(); kinds = append(kinds, ev.Kind); mu.Unlock() })
+	if _, err := e.CreateData(ctx, "admin", DataRequest{Name: "db", Engine: "postgres"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.SaveBackup(ctx, "admin", offsite.Config{Endpoint: "s3.example.com", Bucket: "bk1", AccessKey: "a", SecretKey: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	mem.SetFail(errors.New("down"))
+	for i := 0; i < 3; i++ {
+		e.SnapshotData(ctx, "agent", "db", "")
+		e.SyncBackups(ctx, "")
+	}
+	mem.SetFail(nil)
+	e.SyncBackups(ctx, "")
+	e.SyncBackups(ctx, "")
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(kinds, ",") != EvBackupFailing+","+EvBackupRecovered {
+		t.Fatalf("events: %v", kinds)
+	}
+}

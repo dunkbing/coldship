@@ -157,6 +157,37 @@ export interface BackupConfig {
   keep: number
 }
 
+export type ChannelKind = 'slack' | 'discord' | 'telegram' | 'webhook'
+
+export interface Channel {
+  id: string
+  name: string
+  kind: ChannelKind
+  target: string
+  events: string[]
+  created_by: string
+  created_at: string
+  last_at?: string
+  last_error?: string
+  secret?: string
+}
+
+export interface ChannelRequest {
+  name?: string
+  kind?: ChannelKind
+  url?: string
+  bot_token?: string
+  chat_id?: string
+  events?: string[]
+}
+
+export interface EventKind {
+  kind: string
+  label: string
+  default: boolean
+  server?: boolean
+}
+
 export interface OffsiteBackup {
   key: string
   snapshot: string
@@ -651,6 +682,12 @@ export const api = {
   syncBackups: () => req<BackupStatus>('POST', '/v1/backups/sync'),
   backups: (database = '', app = '') =>
     req<OffsiteBackup[]>('GET', `/v1/backups/list?database=${enc(database)}&app=${enc(app)}`),
+  channels: () => req<Channel[]>('GET', '/v1/channels'),
+  channelEvents: () => req<EventKind[]>('GET', '/v1/channels/events'),
+  createChannel: (r: ChannelRequest) => req<Channel>('POST', '/v1/channels', r),
+  updateChannel: (id: string, r: ChannelRequest) => req<Channel>('PATCH', `/v1/channels/${enc(id)}`, r),
+  deleteChannel: (id: string) => req<{ deleted: boolean }>('DELETE', `/v1/channels/${enc(id)}`),
+  testChannel: (id: string) => req<Channel>('POST', `/v1/channels/${enc(id)}/test`),
   system: () => req<SystemStatus>('GET', '/v1/system'),
   metrics: (name: string) => req<AppMetrics>('GET', `/v1/apps/${enc(name)}/metrics`),
   github: () => req<GitHubStatus>('GET', '/v1/integrations/github'),

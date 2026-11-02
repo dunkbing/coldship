@@ -224,6 +224,7 @@ var sealedColumns = []struct {
 	{"deploy_logs", "lines", []string{"deployment"}, func(k []string) string { return "deploy_logs.lines:" + k[0] }},
 	{"integrations", "secret", []string{"name"}, func(k []string) string { return "integrations.secret:" + k[0] }},
 	{"agents", "env", []string{"org", "name"}, func(k []string) string { return "agents.env:" + k[0] + "/" + k[1] }},
+	{"channels", "target", []string{"id"}, func(k []string) string { return "channels.target:" + k[0] }},
 }
 
 func (s *Store) seal(plain []byte, aad string) (string, error) { return s.kr.Load().Seal(plain, aad) }
@@ -283,6 +284,9 @@ CREATE TABLE IF NOT EXISTS links (
 CREATE TABLE IF NOT EXISTS agents (
   org TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, command TEXT NOT NULL DEFAULT '', env TEXT NOT NULL,
   scope TEXT NOT NULL, apps TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (org, name));
+CREATE TABLE IF NOT EXISTS channels (
+  id TEXT PRIMARY KEY, org TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
+  events TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
   target TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', detail TEXT);

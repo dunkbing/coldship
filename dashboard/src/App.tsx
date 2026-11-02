@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
+  Bell,
   Bot,
   Boxes,
   Building2,
@@ -29,6 +30,7 @@ import Data from './pages/Data'
 import NewData from './pages/NewData'
 import DataDetail from './pages/DataDetail'
 import Backups from './pages/Backups'
+import Notifications from './pages/Notifications'
 import Server from './pages/Server'
 import Apps from './pages/Apps'
 import AppDetail from './pages/AppDetail'
@@ -173,6 +175,7 @@ export default function App() {
                 <Route path="/audit" element={<Audit />} />
                 <Route path="/org/team" element={<Team />} />
                 <Route path="/org/tokens" element={me.scope === 'admin' ? <Tokens /> : <Navigate to="/org/team" replace />} />
+                <Route path="/org/notifications" element={<Notifications />} />
                 <Route path="/org/settings" element={<OrgSettings />} />
                 <Route path="/account" element={<Account />} />
                 <Route path="/agents" element={me.apps?.length ? <Navigate to="/apps" replace /> : <Agents />} />
@@ -245,6 +248,7 @@ function AppSidebar({ me, onSwitch, onSignOut }: { me: WhoAmI; onSwitch: (w: Who
             <SidebarMenu>
               <NavItem to="/org/team" icon={<Users />} label="Team" />
               {me.scope === 'admin' && <NavItem to="/org/tokens" icon={<KeyRound />} label="Tokens" />}
+              {!me.apps?.length && <NavItem to="/org/notifications" icon={<Bell />} label="Notifications" />}
               <NavItem to="/org/settings" icon={<Settings />} label="Settings" />
             </SidebarMenu>
           </SidebarGroupContent>

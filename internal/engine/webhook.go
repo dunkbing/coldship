@@ -292,6 +292,8 @@ func (e *Engine) RecoverDeployments(ctx context.Context) (int, error) {
 		if err := e.st.SaveDeployment(ctx, d); err != nil {
 			return n, err
 		}
+		e.emit(ctx, Event{Kind: EvDeployFailed, App: a.Name, Deployment: d.ID, Severity: "error",
+			Title: a.Name + ": a deploy was interrupted", Detail: "The server restarted during the deploy. Deploy again."})
 		n++
 	}
 	return n, nil
@@ -419,6 +421,10 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 	fail := func(err error) {
 		d.Result, d.Detail = "failed", err.Error()
 		e.saveDelivery(ctx, d)
+		if j.branch == "" { // previews don't notify
+			e.emit(ctx, Event{Kind: EvDeployFailed, App: j.app, Severity: "error",
+				Title: j.app + ": a push couldn't be deployed", Detail: clipText(err.Error(), 1000)})
+		}
 	}
 	by := ""
 	if j.pusher != "" {
@@ -511,6 +517,7 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 		d.Detail = fmt.Sprintf("plan %s is waiting for review: coldship apply %s --reason ...%s", p.ID, p.ID, moved)
 		if p.RequiresApproval {
 			d.Detail = fmt.Sprintf("plan %s needs approval first: coldship approve %s", p.ID, p.ID)
+			e.askApproval(ctx, p, "a git push")
 		}
 		e.saveDelivery(ctx, d)
 		return
@@ -519,6 +526,12 @@ func (e *Engine) processHook(ctx context.Context, j hookJob) {
 	e.saveDelivery(ctx, d)
 	res, err := e.apply(ctx, "webhook", p.ID, reason)
 	if err != nil {
+		if ae, ok := apierr.As(err); ok && ae.Details["deployment"] != nil {
+			// apply already announced the failed deployment
+			d.Result, d.Detail = "failed", err.Error()
+			e.saveDelivery(ctx, d)
+			return
+		}
 		fail(err)
 		return
 	}

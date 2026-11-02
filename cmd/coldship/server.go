@@ -201,6 +201,7 @@ func serverCmd() *cobra.Command {
 				Busy: eng.Busy, Restart: restart, Log: log}
 			apiSrv.SetUpdater(checker)
 			apiSrv.SetPublicURL(publicURL)
+			eng.SetPublicURL(publicURL)
 			apiSrv.SetKeyRotation(rotator.rotate)
 			go checker.Run(ctx)
 			if snapshotInterval > 0 {
@@ -223,6 +224,8 @@ func serverCmd() *cobra.Command {
 			}
 			go eng.RunMetrics(ctx)
 			go eng.RunBackups(ctx, log)
+			go eng.RunNotifications(ctx, log)
+			go eng.RunWatch(ctx)
 			go func() {
 				// Delete previews whose time is up.
 				t := time.NewTicker(time.Minute)
@@ -279,7 +282,7 @@ func serverCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&previewMaxTTL, "preview-max-ttl", 7*24*time.Hour, "longest lifetime a preview may ask for")
 	cmd.Flags().IntVar(&maxPreviews, "max-previews", 20, "most previews that may exist at once")
 	cmd.Flags().StringVar(&keyFile, "secret-key-file", envOr("COLDSHIP_SECRET_KEY_FILE", ""), "key file that encrypts stored secrets (default: coldship.key next to --data; or set COLDSHIP_SECRET_KEY)")
-	cmd.Flags().StringVar(&publicURL, "public-url", envOr("COLDSHIP_PUBLIC_URL", ""), "URL Git hosts use to reach this server, for webhook URLs (e.g. https://coldship.example.com)")
+	cmd.Flags().StringVar(&publicURL, "public-url", envOr("COLDSHIP_PUBLIC_URL", ""), "URL people and Git hosts use to reach this server, for webhook URLs and links in notifications (e.g. https://coldship.example.com)")
 	cmd.Flags().StringVar(&snapshotDir, "snapshot-dir", envOr("COLDSHIP_SNAPSHOT_DIR", ""), "where database snapshots are kept (default: coldship-snapshots next to --data)")
 	cmd.Flags().IntVar(&snapshotKeep, "snapshot-keep", 20, "snapshots to keep per database, manual and automatic counted separately (older ones are deleted)")
 	cmd.Flags().DurationVar(&snapshotInterval, "db-snapshot-interval", 24*time.Hour, "how often to snapshot every database (0 disables scheduled snapshots)")

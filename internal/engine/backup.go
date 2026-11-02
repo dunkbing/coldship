@@ -392,8 +392,16 @@ func (e *Engine) SyncBackups(ctx context.Context, only string) (int, error) {
 			errs = append(errs, fmt.Errorf("org %s: %w", org, err))
 		}
 		b.statusMu.Lock()
+		prev, had := b.status[org]
 		b.status[org] = st
 		b.statusMu.Unlock()
+		switch {
+		case st.err != "" && (!had || prev.err == ""):
+			e.emit(ctx, Event{Kind: EvBackupFailing, Org: org, Severity: "error", Title: "Off-site backups are failing",
+				Detail: clipText(st.err, 1000) + "\nSnapshots stay on the server and are retried every 10 minutes."})
+		case st.err == "" && had && prev.err != "":
+			e.emit(ctx, Event{Kind: EvBackupRecovered, Org: org, Severity: "ok", Title: "Off-site backups work again"})
+		}
 	}
 	return copied, errors.Join(errs...)
 }
