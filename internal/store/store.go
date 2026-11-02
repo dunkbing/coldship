@@ -223,6 +223,7 @@ var sealedColumns = []struct {
 	{"webhooks", "secret", []string{"app"}, func(k []string) string { return "webhooks.secret:" + k[0] }},
 	{"deploy_logs", "lines", []string{"deployment"}, func(k []string) string { return "deploy_logs.lines:" + k[0] }},
 	{"integrations", "secret", []string{"name"}, func(k []string) string { return "integrations.secret:" + k[0] }},
+	{"agents", "env", []string{"org", "name"}, func(k []string) string { return "agents.env:" + k[0] + "/" + k[1] }},
 }
 
 func (s *Store) seal(plain []byte, aad string) (string, error) { return s.kr.Load().Seal(plain, aad) }
@@ -279,6 +280,9 @@ CREATE TABLE IF NOT EXISTS members (
 CREATE TABLE IF NOT EXISTS links (
   id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, org TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '',
   user_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS agents (
+  org TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, command TEXT NOT NULL DEFAULT '', env TEXT NOT NULL,
+  scope TEXT NOT NULL, apps TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (org, name));
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
   target TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', detail TEXT);

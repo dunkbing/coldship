@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dunkbing/coldship/internal/agents"
 	"github.com/dunkbing/coldship/internal/api"
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/builder"
@@ -22,6 +24,7 @@ import (
 	"github.com/dunkbing/coldship/internal/mcpserver"
 	"github.com/dunkbing/coldship/internal/proxy"
 	"github.com/dunkbing/coldship/internal/runtime"
+	"github.com/dunkbing/coldship/internal/store"
 	"github.com/dunkbing/coldship/internal/update"
 	"github.com/dunkbing/coldship/internal/web"
 
@@ -169,6 +172,16 @@ func serverCmd() *cobra.Command {
 			// body reads instead.
 			srv := &http.Server{Addr: addr, Handler: apiSrv, ReadHeaderTimeout: 10 * time.Second,
 				IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}
+			srv.RegisterOnShutdown(apiSrv.StopStreams)
+
+			// AI agents run in containers and reach the API through a Unix
+			// socket in a directory of its own, the only thing mounted in.
+			if mgr, ln, err := startAgents(ctx, eng.DataDir, st, rt, log); err != nil {
+				log.Warn("AI agents are off", "err", err)
+			} else {
+				apiSrv.SetAgents(mgr)
+				go srv.Serve(ln)
+			}
 
 			// Self-upgrade: the checker installs a new binary, then calls
 			// restart, which drains in-flight requests (deployments run
@@ -306,4 +319,34 @@ func alreadyRunning(addr string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// startAgents listens on <data dir>/agent-run/api.sock and starts the agent
+// manager.
+func startAgents(ctx context.Context, dataDir string, st *store.Store, rt *runtime.Docker, log *slog.Logger) (*agents.Manager, net.Listener, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, nil, err
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return nil, nil, err
+	}
+	dir := filepath.Join(dataDir, "agent-run")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, nil, err
+	}
+	sock := filepath.Join(dir, "api.sock")
+	os.Remove(sock) // left by the last run
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := os.Chmod(sock, 0o600); err != nil {
+		ln.Close()
+		return nil, nil, err
+	}
+	m := agents.New(st, rt, log)
+	m.SocketDir, m.Binary, m.Version = dir, exe, version
+	m.Start(ctx)
+	return m, ln, nil
 }

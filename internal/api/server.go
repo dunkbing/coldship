@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/dunkbing/coldship/internal/agents"
 	"github.com/dunkbing/coldship/internal/apierr"
 	"github.com/dunkbing/coldship/internal/engine"
 	"github.com/dunkbing/coldship/internal/store"
@@ -96,7 +98,14 @@ type Server struct {
 	publicURL string
 	rotateKey func(context.Context) (map[string]any, error)
 	logins    loginLimiter
+	agents    *agents.Manager
+	closing   chan struct{}
+	closeOnce sync.Once
 }
+
+// StopStreams ends the long-lived event streams, so a shutdown doesn't wait
+// on open dashboards.
+func (s *Server) StopStreams() { s.closeOnce.Do(func() { close(s.closing) }) }
 
 // SetKeyRotation enables rotating the secret key through the API.
 func (s *Server) SetKeyRotation(f func(context.Context) (map[string]any, error)) { s.rotateKey = f }
@@ -110,7 +119,7 @@ func (s *Server) SetUpdater(c *update.Checker) { s.upd = c }
 // New builds the API server. ui, if non-nil, serves the web dashboard for
 // every path outside /v1/ and /healthz.
 func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler) *Server {
-	s := &Server{eng: eng, st: st, mux: http.NewServeMux(), log: log}
+	s := &Server{eng: eng, st: st, mux: http.NewServeMux(), log: log, closing: make(chan struct{})}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	s.mux.HandleFunc("POST /v1/sessions", s.createSession)
 	s.mux.HandleFunc("DELETE /v1/sessions", s.deleteSession)
@@ -161,6 +170,7 @@ func New(eng *engine.Engine, st *store.Store, log *slog.Logger, ui http.Handler)
 	s.route("GET /v1/integrations/github/repos", store.ScopeDeploy, s.githubRepos)
 	s.route("GET /v1/integrations/github/repos/{owner}/{repo}/branches", store.ScopeDeploy, s.githubBranches)
 	s.routeOrgs()
+	s.routeAgents()
 	s.route("POST /v1/tokens", store.ScopeAdmin, s.createToken)
 	s.route("GET /v1/tokens", store.ScopeAdmin, s.listTokens)
 	s.route("DELETE /v1/tokens/{name}", store.ScopeAdmin, s.revokeToken)
@@ -1047,6 +1057,8 @@ func (s *Server) streamDeployLog(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-s.closing:
 			return
 		case <-heartbeat.C:
 			fmt.Fprint(w, ": keep-alive\n\n")

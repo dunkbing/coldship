@@ -35,6 +35,7 @@ func (d *Docker) PlanPurge(ctx context.Context) (PurgePlan, error) {
 	for _, f := range []client.Filters{
 		client.Filters{}.Add("label", "coldship.app"),
 		client.Filters{}.Add("label", "coldship.data"),
+		client.Filters{}.Add("label", AgentLabel),
 		client.Filters{}.Add("name", "^/?"+proxyContainer+"$"),
 	} {
 		res, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
@@ -55,6 +56,15 @@ func (d *Docker) PlanPurge(ctx context.Context) (PurgePlan, error) {
 				if m.Type == mount.TypeVolume && m.Name != "" {
 					vols[m.Name] = true
 				}
+			}
+		}
+	}
+	// Agents' home volumes (npm cache, agent settings), mounted only while
+	// an agent runs.
+	if vl, err := cli.VolumeList(ctx, client.VolumeListOptions{Filters: client.Filters{}.Add("name", AgentVolumePrefix)}); err == nil {
+		for _, v := range vl.Items {
+			if strings.HasPrefix(v.Name, AgentVolumePrefix) {
+				vols[v.Name] = true
 			}
 		}
 	}

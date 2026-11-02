@@ -417,6 +417,10 @@ func (d *Docker) RestoreDatabase(ctx context.Context, db DB, r io.Reader, log io
 // including into its volumes). It spools r to a temp file first, because a
 // tar header needs the size.
 func (d *Docker) copyFile(ctx context.Context, ctr, dir, name string, r io.Reader) error {
+	return d.copyFileMode(ctx, ctr, dir, name, 0o644, r)
+}
+
+func (d *Docker) copyFileMode(ctx context.Context, ctr, dir, name string, mode int64, r io.Reader) error {
 	cli, err := d.api()
 	if err != nil {
 		return err
@@ -437,7 +441,7 @@ func (d *Docker) copyFile(ctx context.Context, ctr, dir, name string, r io.Reade
 	pr, pw := io.Pipe()
 	go func() {
 		tw := tar.NewWriter(pw)
-		err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: size, ModTime: time.Now()})
+		err := tw.WriteHeader(&tar.Header{Name: name, Mode: mode, Size: size, ModTime: time.Now()})
 		if err == nil {
 			_, err = io.Copy(tw, tmp)
 		}

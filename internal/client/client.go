@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,7 +31,17 @@ type Client struct {
 func New(baseURL, token string) *Client {
 	// Apply may build an image from Git (bounded by the server's build
 	// timeout, 20 minutes by default), so allow plenty of time.
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: &http.Client{Timeout: 45 * time.Minute}}
+	hc := &http.Client{Timeout: 45 * time.Minute}
+	// unix:///path/api.sock talks to the server's Unix socket (how agent
+	// containers reach it).
+	if sock, ok := strings.CutPrefix(baseURL, "unix://"); ok {
+		hc.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		}}
+		baseURL = "http://coldship"
+	}
+	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Token: token, HTTP: hc}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {

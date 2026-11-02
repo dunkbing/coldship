@@ -1359,6 +1359,9 @@ func (e *Engine) CreateToken(ctx context.Context, actor, org, name string, scope
 	if !nameOK(name) {
 		return "", apierr.New(400, "invalid_token_name", "token name %q must be lowercase letters, digits and dashes", name)
 	}
+	if strings.HasPrefix(name, "agent-session-") {
+		return "", apierr.New(400, "invalid_token_name", "token names starting with agent-session- are for agent sessions")
+	}
 	if reservedActors[name] {
 		return "", apierr.New(400, "invalid_token_name", "token name %q is reserved for Coldship's own audit entries", name)
 	}
