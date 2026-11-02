@@ -450,7 +450,9 @@ type SessionView struct {
 	Config    []acp.ConfigOption `json:"config_options,omitempty"`
 	Commands  []acp.Command      `json:"commands,omitempty"`
 	Usage     *acp.Usage         `json:"usage,omitempty"`
-	Items     []*Item            `json:"items,omitempty"`
+	// Waiting: the agent asks for permission and waits for an answer.
+	Waiting bool    `json:"waiting,omitempty"`
+	Items   []*Item `json:"items,omitempty"`
 }
 
 type Session struct {
@@ -555,9 +557,10 @@ func (m *Manager) StartSession(ctx context.Context, r StartRequest) (*SessionVie
 		return nil, err
 	}
 	sctx, cancel := context.WithCancel(context.Background())
-	s := &Session{ID: newID(), Org: r.Org, Agent: a.Name, Kind: a.Kind, StartedBy: r.Actor, Scope: scope, CreatedAt: time.Now(),
+	now := time.Now()
+	s := &Session{ID: newID(), Org: r.Org, Agent: a.Name, Kind: a.Kind, StartedBy: r.Actor, Scope: scope, CreatedAt: now, updatedAt: now,
 		m: m, Status: StatusStarting, byKey: map[string]*Item{}, subs: map[chan Event]struct{}{}, perms: map[string]chan acp.PermissionOutcome{},
-		lastActive: time.Now(), ctx: sctx, cancel: cancel, alert: r.alert, alertKey: r.alertKey, prompt: strings.TrimSpace(r.Prompt), gen: 1}
+		lastActive: now, ctx: sctx, cancel: cancel, alert: r.alert, alertKey: r.alertKey, prompt: strings.TrimSpace(r.Prompt), gen: 1}
 	if r.alert != nil {
 		s.alertKind, s.alertApp = r.alert.Kind, r.alert.App
 		s.title = alertTitles[r.alert.Kind]
@@ -844,7 +847,7 @@ func (s *Session) View(items bool) *SessionView {
 func (s *Session) view(items bool) *SessionView {
 	v := &SessionView{ID: s.ID, Agent: s.Agent, Kind: s.Kind, Scope: string(s.Scope), StartedBy: s.StartedBy, CreatedAt: s.CreatedAt,
 		Status: s.Status, Error: s.Error, AgentInfo: s.agentInfo, Alert: s.alertKind, AlertApp: s.alertApp, Title: s.title,
-		UpdatedAt: s.updatedAt, Resumable: !s.live() && s.acpID != "", Modes: s.modes, Config: s.config, Commands: s.commands, Usage: s.usage}
+		UpdatedAt: s.updatedAt, Resumable: !s.live() && s.acpID != "", Modes: s.modes, Config: s.config, Commands: s.commands, Usage: s.usage, Waiting: len(s.perms) > 0}
 	if items {
 		v.Items = make([]*Item, len(s.items))
 		for i, it := range s.items {

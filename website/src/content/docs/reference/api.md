@@ -15,6 +15,7 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `POST` | `/v1/sessions` | none | Body `{token}` or `{email, password}`, with the `X-Coldship-Request: 1` header. Sets the `coldship_session` cookie and returns the same as `whoami`. Five wrong passwords in 15 minutes block an email or address for the rest of the window. |
 | `DELETE` | `/v1/sessions` | session | Sign out: deletes the session and clears the cookie |
 | `GET` | `/v1/whoami` | read | `{name, scope, apps, org, user, orgs, server_admin}`: the caller, the organization it acts in and, for a signed-in person, their account and organizations |
+| `GET` | `/v1/overview` | read | The organization at a glance: `apps` (as `GET /v1/apps/{name}`), `deploys` (the latest across apps), `data` counts, `jobs`, and `attention`, a list of `{kind, severity, title, detail, link, app, at}` worked out from the current state, errors first. Also `agents` for callers who can use agents, and `server` for the default organization. Filtered like the other lists for tokens limited to some apps |
 | `GET` | `/v1/apps` | read | List apps |
 | `GET` | `/v1/apps/{name}` | read | App with `runtime` status and `latest_deployment` |
 | `GET` | `/v1/apps/{name}/deployments?limit=20` | read | Deployments, newest first (max 200) |
@@ -85,7 +86,7 @@ The dashboard authenticates with a session cookie instead. It gets one from `POS
 | `PUT` | `/v1/agents/{name}` | admin | Connect or change an agent: `{kind, command?, env?, scope?, apps?, triggers?, alert_fix?}`. `kind` is `claude`, `codex`, `gemini` or `custom`; an empty `env` value keeps the saved one; `scope` is `read` or `deploy`; `triggers` are the [alerts](/guides/agents-in-dashboard/#responding-to-alerts) that start it (`app.down`, `deploy.failed`, `job.failed`, `backup.failing`, `disk.low`), and `alert_fix` gives those sessions its role instead of viewer. Left out, both keep their saved values |
 | `DELETE` | `/v1/agents/{name}` | admin | Remove an agent and end its sessions |
 | `POST` | `/v1/agents/{name}/sessions` | deploy | Start a session: `{prompt?}`; it becomes `ready` in the background, then gets `prompt` as its first message |
-| `GET` | `/v1/agent-sessions`, `/v1/agent-sessions/{id}` | read | The org's last 100 sessions (with `title` and `resumable`), and one with its transcript, `modes`, `config_options`, `commands` and `usage` |
+| `GET` | `/v1/agent-sessions`, `/v1/agent-sessions/{id}` | read | The org's last 100 sessions (with `title`, `resumable`, and `waiting` while the agent asks for permission), and one with its transcript, `modes`, `config_options`, `commands` and `usage` |
 | `GET` | `/v1/agent-sessions/{id}/stream` | read | Server-sent events, as JSON: a `snapshot`, then `item`, `status` and `session` (settings, title, usage) changes |
 | `POST` | `/v1/agent-sessions/{id}/settings` | deploy | Change a setting the agent offers: `{mode}`, or `{option, value}` (like `{"option": "model", "value": "..."}`) |
 | `POST` | `/v1/agent-sessions/{id}/resume` | deploy | Start an ended session again; the agent reloads its conversation if it supports that |

@@ -1,26 +1,6 @@
 import { Suspense, createContext, lazy, useContext, useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import {
-  Bell,
-  Bot,
-  Boxes,
-  Building2,
-  Check,
-  ChevronsUpDown,
-  Database,
-  DatabaseBackup,
-  Gauge,
-  KeyRound,
-  LogOut,
-  Plus,
-  ScrollText,
-  Settings,
-  ShieldCheck,
-  Ship,
-  UserRound,
-  Users,
-  X,
-} from 'lucide-react'
+import { Building2, Check, ChevronsUpDown, KeyRound, LogOut, Plus, Search, Ship, UserRound, X } from 'lucide-react'
 import { api, ApiError, type WhoAmI } from './api'
 import { useLoad } from './hooks'
 import Login from './pages/Login'
@@ -42,7 +22,10 @@ import Tokens from './pages/Tokens'
 import OrgSettings from './pages/OrgSettings'
 import Account from './pages/Account'
 import Agents from './pages/Agents'
+import Overview from './pages/Overview'
 import UpdateBanner from './components/UpdateBanner'
+import { PaletteProvider, SearchButton, useOpenPalette } from './components/CommandPalette'
+import { navGroups } from './nav'
 
 // The session page brings a Markdown renderer: load it when opened.
 const AgentSession = lazy(() => import('./pages/AgentSession'))
@@ -141,29 +124,28 @@ export default function App() {
       />
     )
   if (!me) return <Login onLogin={setMe} initialError={bootError} />
+  const signOut = () => {
+    api.logout().finally(() => setMe(null))
+  }
 
   return (
     <SessionContext.Provider value={me}>
       <TooltipProvider>
+        <PaletteProvider me={me} onSwitch={setMe} onSignOut={signOut}>
         <SidebarProvider>
-          <AppSidebar
-            me={me}
-            onSwitch={setMe}
-            onSignOut={() => {
-              api.logout().finally(() => setMe(null))
-            }}
-          />
+          <AppSidebar me={me} onSwitch={setMe} onSignOut={signOut} />
           <SidebarInset>
             <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur md:hidden">
               <SidebarTrigger />
               <span className="font-semibold">Coldship</span>
-              <span className="truncate text-sm text-muted-foreground">· {me.org?.name}</span>
+              <span className="min-w-0 truncate text-sm text-muted-foreground">· {me.org?.name}</span>
+              <MobileSearch />
             </header>
             <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-10 md:py-8">
               <UpdateBanner />
               <AccountPrompt me={me} onCreated={setMe} />
               <Routes key={me.org?.id}>
-                <Route path="/" element={<Navigate to="/apps" replace />} />
+                <Route path="/" element={<Overview />} />
                 <Route path="/apps" element={<Apps />} />
                 <Route path="/apps/new" element={<Launch />} />
                 <Route path="/apps/new/configure" element={<NewApp />} />
@@ -194,16 +176,27 @@ export default function App() {
             </main>
           </SidebarInset>
         </SidebarProvider>
+        </PaletteProvider>
       </TooltipProvider>
     </SessionContext.Provider>
   )
 }
 
+function MobileSearch() {
+  const open = useOpenPalette()
+  return (
+    <Button variant="ghost" size="icon" className="ml-auto flex-none" onClick={open} aria-label="Search">
+      <Search />
+    </Button>
+  )
+}
+
 function NavItem({ to, icon, label, badge }: { to: string; icon: React.ReactNode; label: string; badge?: number }) {
   const { pathname } = useLocation()
+  const active = to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(to + '/')
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild isActive={pathname === to || pathname.startsWith(to + '/')} tooltip={label}>
+      <SidebarMenuButton asChild isActive={active} tooltip={label}>
         <NavLink to={to}>
           {icon}
           <span>{label}</span>
@@ -228,40 +221,21 @@ function AppSidebar({ me, onSwitch, onSignOut }: { me: WhoAmI; onSwitch: (w: Who
           <span className="text-base font-bold tracking-tight">Coldship</span>
         </div>
         <OrgSwitcher me={me} onSwitch={onSwitch} />
+        <SearchButton />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Deploy</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <NavItem to="/apps" icon={<Boxes />} label="Apps" />
-              <NavItem to="/data" icon={<Database />} label="Data & Storage" />
-              {!me.apps?.length && <NavItem to="/backups" icon={<DatabaseBackup />} label="Backups" />}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Operate</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <NavItem to="/approvals" icon={<ShieldCheck />} label="Approvals" badge={needApproval} />
-              {!me.apps?.length && <NavItem to="/agents" icon={<Bot />} label="Agents" />}
-              <NavItem to="/audit" icon={<ScrollText />} label="Audit log" />
-              {me.org?.id === 'default' && !me.apps?.length && <NavItem to="/server" icon={<Gauge />} label="Server" />}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Organization</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <NavItem to="/org/team" icon={<Users />} label="Team" />
-              {me.scope === 'admin' && <NavItem to="/org/tokens" icon={<KeyRound />} label="Tokens" />}
-              {!me.apps?.length && <NavItem to="/org/notifications" icon={<Bell />} label="Notifications" />}
-              <NavItem to="/org/settings" icon={<Settings />} label="Settings" />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navGroups(me).map((g) => (
+          <SidebarGroup key={g.label}>
+            <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {g.pages.map((p) => (
+                  <NavItem key={p.to} to={p.to} icon={p.icon} label={p.label} badge={p.to === '/approvals' ? needApproval : undefined} />
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
       <SidebarFooter>
         <UserMenu me={me} onSignOut={onSignOut} />
@@ -287,7 +261,7 @@ function OrgSwitcher({ me, onSwitch }: { me: WhoAmI; onSwitch: (w: WhoAmI) => vo
     try {
       const w = await api.switchOrg(id)
       onSwitch(w)
-      nav('/apps')
+      nav('/')
     } catch (e) {
       setError(e as Error)
     }

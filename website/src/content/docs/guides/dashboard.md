@@ -13,13 +13,40 @@ People sign in with their email and password; see [Teams and organizations](/gui
 
 You can also sign in with an API token (the **API token** tab). It's exchanged for a 12-hour [session cookie](/concepts/guardrails/#dashboard-sessions) and isn't stored in the browser. Account sessions last 7 days.
 
-## Apps
+## Overview
 
-The landing page lists every app with its live health, stage, image and latest deployment, and refreshes every few seconds. The sidebar badge counts plans waiting for your approval.
+The home page shows the organization at a glance and refreshes every 10 seconds:
 
-![The apps page with three demo apps](../../../assets/screenshots/apps.png)
+- **Needs attention:** what needs someone now. That means apps that are failing or not running, failed deploys, scheduled jobs whose last run failed, changes waiting for approval, agents waiting for an answer, and data services that are down. Admins of the default organization also see failing off-site backups, a disk that's 90% full, and a new Coldship release. The list is worked out from how things are now, so an item goes away once it's fixed. Each item links to the page where you can fix it.
+- **Apps:** every app with its health, failing ones first.
+- **Recent deploys** across the apps, recent **agent sessions**, and, for the default organization, the **server's** memory and disks.
+
+With nothing deployed yet, it shows the first steps instead: deploy an app, add a database, and set up an AI agent.
+
+![The overview, with a failed deploy, a failing job, an approval and an agent waiting](../../../assets/screenshots/overview.png)
 
 It follows your system's dark mode setting:
+
+![The overview in dark mode](../../../assets/screenshots/overview-dark.png)
+
+## Search and commands
+
+Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd> on Linux and Windows), or click **Search…** in the sidebar (the search icon on phones), to jump anywhere:
+
+- pages, apps, data services and recent agent sessions;
+- an app's tab, by name: `web logs`, `api deployments`;
+- actions: a new app or database, switching organization, signing out;
+- **Ask an agent:** whatever you typed becomes the first message of a new agent session.
+
+It only offers what your role and token can see: a token limited to some apps finds only those.
+
+![The command palette, searching for web](../../../assets/screenshots/palette.png)
+
+## Apps
+
+The apps page lists every app with its live health, stage, image and latest deployment, and refreshes every few seconds. The sidebar badge counts plans waiting for your approval.
+
+![The apps page with three demo apps](../../../assets/screenshots/apps.png)
 
 ![The apps page in dark mode](../../../assets/screenshots/apps-dark.png)
 

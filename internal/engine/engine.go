@@ -187,6 +187,13 @@ func (e *Engine) Status(ctx context.Context) ServerStatus {
 	return st
 }
 
+// Glance reads the host without sampling the CPU, for the overview.
+func (e *Engine) Glance() hostinfo.Info {
+	in := hostinfo.Read(0, nil)
+	in.Disks = e.disks()
+	return in
+}
+
 // HostInfo describes what the server runs on: its container engine and
 // its proxy.
 type HostInfo struct {

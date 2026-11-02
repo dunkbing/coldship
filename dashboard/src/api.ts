@@ -558,7 +558,40 @@ export interface AgentSession {
   config_options?: AgentConfigOption[]
   commands?: AgentCommand[]
   usage?: { size: number; used: number; cost?: { amount: number; currency: string } }
+  // The agent asks for permission and waits for an answer.
+  waiting?: boolean
   items?: SessionItem[]
+}
+
+// Something on the overview that needs someone, worked out from how
+// things are now. Title and detail may quote untrusted text.
+export interface Attention {
+  kind: 'app_failing' | 'deploy_failed' | 'job_failed' | 'approval' | 'agent_waiting' | 'data_stopped' | 'backup_failing' | 'disk_low' | 'update'
+  severity: 'error' | 'warning' | 'info'
+  title: string
+  detail?: string
+  link: string
+  app?: string
+  at?: string
+}
+
+export interface Overview {
+  apps: AppView[]
+  previews: number
+  data: { total: number; running: number }
+  deploys: Deployment[]
+  attention: Attention[]
+  jobs: number
+  agents?: { configured: number; live: number; recent: AgentSession[] }
+  server?: {
+    hostname: string
+    version: string
+    load: [number, number, number]
+    cpus: number
+    memory: Usage
+    disks: (Usage & { path: string; for: string })[]
+    uptime_seconds: number
+  }
 }
 
 // A setting the agent offers (ACP config option), like its model.
@@ -708,6 +741,7 @@ export const api = {
     req<{ revoked: boolean }>('DELETE', `/v1/tokens/${enc(name)}?reason=${enc(reason)}`),
   logout: () => req<{ signed_out: boolean }>('DELETE', '/v1/sessions'),
   whoami: () => req<WhoAmI>('GET', '/v1/whoami'),
+  overview: () => req<Overview>('GET', '/v1/overview'),
   apps: () => req<App[]>('GET', '/v1/apps'),
   app: (name: string) => req<AppView>('GET', `/v1/apps/${enc(name)}`),
   deployments: (name: string, limit = 50) => req<Deployment[]>('GET', `/v1/apps/${enc(name)}/deployments?limit=${limit}`),
