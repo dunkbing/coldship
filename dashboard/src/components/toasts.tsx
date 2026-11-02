@@ -22,8 +22,8 @@ export function Toasts() {
   useEffect(() => {
     go = nav
   }, [nav])
-  // At the top on phones, clear of the agent composer at the bottom.
-  return <Toaster position={mobile ? 'top-center' : 'bottom-right'} closeButton />
+  // At the top on phones, below the header and clear of the agent composer.
+  return <Toaster position={mobile ? 'top-center' : 'bottom-right'} offset={mobile ? { top: 56 } : undefined} mobileOffset={{ top: 56, left: 16, right: 16 }} closeButton />
 }
 
 export function notify(message: string, opts?: { description?: string; to?: string; label?: string }) {
@@ -48,7 +48,9 @@ const live = new Map<string, Promise<unknown>>()
 export function trackDeploy(app: string, applying: Promise<ApplyResult>, kind: 'deploy' | 'delete' = 'deploy') {
   if (live.get(app) === applying) return
   live.set(app, applying)
+  // The loading toast steps aside after a while; the result shows up anyway.
   const id = toast.loading(kind === 'delete' ? `Deleting ${app}…` : `Deploying ${app}…`, {
+    duration: 8000,
     action: kind === 'deploy' ? link('Watch', `/apps/${app}?tab=deployments`) : undefined,
   })
   applying.then(
