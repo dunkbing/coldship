@@ -48,7 +48,7 @@ func main() {
 	root.AddCommand(serverCmd(), mcpCmd())
 	root.AddCommand(loginCmd(), logoutCmd(), deployCmd(), deleteCmd(), exportCmd(), planCmd(), applyCmd(), approveCmd(), rollbackCmd())
 	root.AddCommand(appsCmd(), statusCmd(), logsCmd(), diagnoseCmd(), deploymentsCmd(), deployLogCmd(), auditCmd(), tokenCmd(), inviteCmd())
-	root.AddCommand(dataCmd(), backupsCmd(), notifyCmd(), secretsCmd(), buildCmd(), webhookCmd(), dbCmd(), previewCmd(), versionCmd(), upgradeCmd(), selfUpdateCmd(), uninstallCmd(), releaseCmd())
+	root.AddCommand(dataCmd(), backupsCmd(), notifyCmd(), secretsCmd(), buildCmd(), webhookCmd(), dbCmd(), jobsCmd(), previewCmd(), versionCmd(), upgradeCmd(), selfUpdateCmd(), uninstallCmd(), releaseCmd())
 	root.PersistentPostRun = func(cmd *cobra.Command, _ []string) { maybeNotice(cmd) }
 
 	if err := root.Execute(); err != nil {

@@ -1,5 +1,6 @@
 import { SettingsTab } from './AppSettings'
 import { MetricsTab } from './MetricsTab'
+import { JobsTab } from './JobsTab'
 import { LiveLog } from '../components/LiveLog'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -35,7 +36,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-type Tab = 'diagnose' | 'metrics' | 'deployments' | 'logs' | 'databases' | 'webhook' | 'settings'
+type Tab = 'diagnose' | 'metrics' | 'deployments' | 'logs' | 'jobs' | 'databases' | 'webhook' | 'settings'
 
 // Shared look for log boxes.
 const logBox =
@@ -83,6 +84,7 @@ export default function AppDetail() {
     'metrics',
     'deployments',
     'logs',
+    ...(!a.preview_of ? ['jobs'] : []),
     ...(a.databases?.length ? ['databases'] : []),
     ...(a.spec?.build && !a.preview_of ? ['webhook'] : []),
     ...(me.scope !== 'read' && !a.preview_of ? ['settings'] : []),
@@ -167,6 +169,9 @@ export default function AppDetail() {
         </TabsContent>
         <TabsContent value="logs">
           <LogsTab name={name} />
+        </TabsContent>
+        <TabsContent value="jobs">
+          <JobsTab app={a} />
         </TabsContent>
         <TabsContent value="databases">
           <DatabasesTab app={a} onChange={app.reload} />

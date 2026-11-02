@@ -29,6 +29,7 @@ export interface Spec {
   domains?: string[]
   databases?: { name: string; engine: 'postgres' | 'mysql' | 'redis'; version?: string; env?: string }[]
   uses?: string[]
+  jobs?: Job[]
   on_push?: OnPush
   health?: { path?: string; timeout?: string }
   memory?: string
@@ -71,7 +72,8 @@ export interface Deployment {
   error_code?: string
   failed_in?: 'build' | 'deploy'
   kept_previous?: boolean
-  strategy?: 'zero-downtime' | 'recreate'
+  strategy?: 'zero-downtime' | 'recreate' | 'static'
+  static?: boolean
   detected?: string
   actor: string
   reason: string
@@ -394,6 +396,37 @@ export interface Patch {
   add_databases?: { engine: 'postgres' | 'mysql' | 'redis'; name?: string }[]
   add_uses?: string[]
   remove_uses?: string[]
+  set_jobs?: Job[]
+  remove_jobs?: string[]
+}
+
+export interface Job {
+  name: string
+  schedule: string
+  command: string
+  timeout?: string
+}
+
+export type JobStatus = 'running' | 'succeeded' | 'failed' | 'timed_out' | 'interrupted' | 'skipped'
+
+export interface JobRun {
+  id: string
+  app: string
+  job: string
+  trigger: string
+  command: string
+  status: JobStatus
+  exit_code?: number
+  error?: string
+  started_at: string
+  finished_at?: string
+  log?: string
+}
+
+export interface JobView extends Job {
+  next?: string
+  running?: string
+  last?: JobRun
 }
 
 export interface ApplyResult {
@@ -653,6 +686,10 @@ export const api = {
     req<Plan[]>('GET', `/v1/plans?limit=${limit}${status ? `&status=${enc(status)}` : ''}`),
   approve: (id: string) => req<Plan>('POST', `/v1/plans/${enc(id)}/approve`),
   planPatch: (patch: Patch) => req<Plan>('POST', '/v1/plans', { patch }),
+  jobs: (app: string) => req<JobView[]>('GET', `/v1/apps/${enc(app)}/jobs`),
+  runJob: (app: string, job: string) => req<JobRun>('POST', `/v1/apps/${enc(app)}/jobs/${enc(job)}/run`),
+  jobRuns: (app: string, job = '') => req<JobRun[]>('GET', `/v1/apps/${enc(app)}/job-runs?job=${encodeURIComponent(job)}`),
+  jobRun: (app: string, id: string) => req<JobRun>('GET', `/v1/apps/${enc(app)}/job-runs/${enc(id)}`),
   planDelete: (name: string) => req<Plan>('POST', '/v1/plans', { delete: name }),
   plan: (id: string) => req<Plan>('GET', `/v1/plans/${enc(id)}`),
   apply: (id: string, reason: string) => req<ApplyResult>('POST', `/v1/plans/${enc(id)}/apply`, { reason }),

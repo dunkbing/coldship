@@ -439,3 +439,25 @@ func (c *Client) FollowDeployLog(ctx context.Context, deployment string, line fu
 	}
 	return "", sc.Err()
 }
+
+// --- scheduled jobs ---
+
+func (c *Client) Jobs(ctx context.Context, app string) ([]engine.JobView, error) {
+	var out []engine.JobView
+	return out, c.do(ctx, "GET", "/v1/apps/"+esc(app)+"/jobs", nil, &out)
+}
+
+func (c *Client) RunJob(ctx context.Context, app, job string) (*store.JobRun, error) {
+	var out store.JobRun
+	return &out, c.do(ctx, "POST", "/v1/apps/"+esc(app)+"/jobs/"+esc(job)+"/run", nil, &out)
+}
+
+func (c *Client) JobRuns(ctx context.Context, app, job string) ([]store.JobRun, error) {
+	var out []store.JobRun
+	return out, c.do(ctx, "GET", "/v1/apps/"+esc(app)+"/job-runs?job="+url.QueryEscape(job), nil, &out)
+}
+
+func (c *Client) JobRun(ctx context.Context, app, id string) (*store.JobRun, error) {
+	var out store.JobRun
+	return &out, c.do(ctx, "GET", "/v1/apps/"+esc(app)+"/job-runs/"+esc(id), nil, &out)
+}

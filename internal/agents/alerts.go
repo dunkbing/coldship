@@ -26,7 +26,7 @@ type Alert struct {
 }
 
 // AlertKinds are the events an agent can respond to.
-var AlertKinds = []string{"deploy.failed", "app.down", "backup.failing", "disk.low"}
+var AlertKinds = []string{"deploy.failed", "app.down", "job.failed", "backup.failing", "disk.low"}
 
 // What agents send back.
 const (

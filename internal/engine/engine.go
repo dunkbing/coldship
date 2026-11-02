@@ -47,7 +47,9 @@ type Engine struct {
 	locksMu  sync.Mutex
 	locks    map[string]*sync.Mutex // one per app: mutations of an app are serialized
 	active   atomic.Int64           // applies in progress
-	hooks    hookQueue              // background work from Git webhooks
+	jobsOnce sync.Once
+	js       *jobsState
+	hooks    hookQueue // background work from Git webhooks
 	PlanTTL  time.Duration
 	Previews PreviewConfig
 	// SnapshotDir holds database snapshots; SnapshotKeep is how many to
@@ -535,6 +537,7 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 		}
 		return e.restorePlan(ctx, actor, req.Restore)
 	}
+	onlyJobs := req.Patch != nil && req.Patch.OnlyJobs()
 	if req.Patch != nil {
 		if req.Spec != nil || req.Delete != "" {
 			return nil, apierr.New(400, "invalid_request", "give one of spec, patch or delete")
@@ -567,7 +570,8 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 		}
 		// Pin the build to a commit now, so the plan shows exactly what will
 		// be built and a moved branch shows up as a change.
-		if b := desired.Build; b != nil {
+		// Changing only jobs keeps the commit that's deployed.
+		if b := desired.Build; b != nil && (b.Commit == "" || !onlyJobs) {
 			commit, err := e.bd.Resolve(ctx, *b)
 			if err != nil {
 				return nil, err
@@ -638,6 +642,8 @@ func (e *Engine) plan(ctx context.Context, actor string, req PlanRequest) (*stor
 		action = planner.OpDelete
 	case current == nil:
 		action = planner.OpCreate
+	case diff.ConfigOnly:
+		action = planner.OpConfig
 	case diff.NoOp:
 		action = "noop"
 		lastFailed, err := e.lastDeploymentFailed(ctx, name)
@@ -808,7 +814,7 @@ func (e *Engine) Apply(ctx context.Context, actor, planID, reason string) (*Appl
 
 // Busy reports whether any deployment is in progress. Self-upgrades wait for
 // it to become false.
-func (e *Engine) Busy() bool { return e.active.Load() > 0 || e.hooksBusy() }
+func (e *Engine) Busy() bool { return e.active.Load() > 0 || e.hooksBusy() || e.JobsRunning() > 0 }
 
 func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*ApplyResult, error) {
 	e.active.Add(1)
@@ -893,6 +899,19 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 		}
 		return &ApplyResult{Plan: publicPlan(p), Message: "nothing to do"}, nil
 	}
+	if p.Action == planner.OpConfig {
+		// Only jobs changed: the running deployment stays as it is.
+		app.Spec, app.UpdatedAt = p.Desired, now
+		if err := e.st.UpsertApp(ctx, app); err != nil {
+			return nil, err
+		}
+		p.NextStep = nextStep(p)
+		if err := e.st.SavePlan(ctx, p); err != nil {
+			return nil, err
+		}
+		e.audit(ctx, actor, "plan.apply", p.App, reason, map[string]any{"plan": p.ID, "action": planner.OpConfig})
+		return &ApplyResult{Plan: publicPlan(p), Message: "jobs updated; the app wasn't redeployed"}, nil
+	}
 
 	d := &store.Deployment{ID: store.NewID("dep"), App: p.App, Org: store.OrgOr(p.Org), PlanID: p.ID, Spec: p.Desired,
 		Status: store.DeployInProgress, Actor: actor, Reason: reason, CreatedAt: now}
@@ -936,6 +955,9 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			}
 		}
 		if runErr == nil {
+			if err := e.rt.RemoveJobs(ctx, p.App); err != nil {
+				fmt.Fprintf(deployLog, "coldship: warning: stopping the app's jobs failed: %v\n", err)
+			}
 			runErr = e.rt.Remove(ctx, p.App, vols)
 		}
 		if runErr == nil && current != nil {
@@ -948,6 +970,9 @@ func (e *Engine) apply(ctx context.Context, actor, planID, reason string) (*Appl
 			}
 			e.pruneSites(p.App, "")
 			runErr = e.st.DeleteApp(ctx, p.App)
+			if runErr == nil {
+				_ = e.st.DeleteJobRuns(ctx, p.App)
+			}
 		}
 		if runErr != nil {
 			d.FailedIn = store.PhaseDeploy

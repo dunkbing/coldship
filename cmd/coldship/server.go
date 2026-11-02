@@ -234,6 +234,7 @@ func serverCmd() *cobra.Command {
 			go eng.RunBackups(ctx, log)
 			go eng.RunNotifications(ctx, log)
 			go eng.RunWatch(ctx)
+			go eng.RunJobs(ctx, log)
 			go func() {
 				// Delete previews whose time is up.
 				t := time.NewTicker(time.Minute)

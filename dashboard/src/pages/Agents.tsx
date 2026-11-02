@@ -20,6 +20,7 @@ const kinds = ['claude', 'codex', 'gemini', 'custom']
 export const alertLabels: Record<string, string> = {
   'app.down': 'An app goes down',
   'deploy.failed': 'A deploy or build fails',
+  'job.failed': 'A scheduled job fails',
   'backup.failing': 'Off-site backups fail',
   'disk.low': "The server's disk is almost full",
 }

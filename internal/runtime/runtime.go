@@ -58,6 +58,11 @@ type Runtime interface {
 	RemoveDatabase(ctx context.Context, app, name string) error
 	SnapshotDatabase(ctx context.Context, db DB, w io.Writer) error
 	RestoreDatabase(ctx context.Context, db DB, r io.Reader, log io.Writer) error
+
+	// RunJob runs a job in a one-off container and returns its exit code.
+	RunJob(ctx context.Context, s JobSpec, log io.Writer) (int, error)
+	// RemoveJobs kills an app's running jobs ("" for all of them).
+	RemoveJobs(ctx context.Context, app string) error
 }
 
 // Network is the Docker network shared by apps and the proxy. Apps can reach

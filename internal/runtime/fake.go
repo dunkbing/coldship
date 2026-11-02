@@ -34,6 +34,36 @@ type Fake struct {
 	Ports map[string][]int
 	// Stats holds containers' counters, by container name.
 	Stats map[string]RawStats
+	// Job runs a job (default: exit 0); Jobs records the specs run.
+	Job         func(ctx context.Context, s JobSpec, log io.Writer) (int, error)
+	Jobs        []JobSpec
+	RemovedJobs []string
+}
+
+func (f *Fake) RunJob(ctx context.Context, s JobSpec, log io.Writer) (int, error) {
+	f.mu.Lock()
+	f.Jobs = append(f.Jobs, s)
+	run := f.Job
+	f.mu.Unlock()
+	if run == nil {
+		fmt.Fprintln(log, "fake: ran", s.Command)
+		return 0, nil
+	}
+	return run(ctx, s, log)
+}
+
+func (f *Fake) RemoveJobs(_ context.Context, app string) error {
+	f.mu.Lock()
+	f.RemovedJobs = append(f.RemovedJobs, app)
+	f.mu.Unlock()
+	return nil
+}
+
+// JobRuns returns the jobs run so far.
+func (f *Fake) JobRuns() []JobSpec {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]JobSpec(nil), f.Jobs...)
 }
 
 func NewFake() *Fake {

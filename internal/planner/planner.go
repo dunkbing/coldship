@@ -15,6 +15,9 @@ const (
 	OpUpdate   = "update"
 	OpDelete   = "delete"
 	OpRedeploy = "redeploy"
+	// OpConfig changes only what Coldship does around the app (its jobs):
+	// no build, no new container.
+	OpConfig = "config"
 )
 
 type Change struct {
@@ -30,6 +33,8 @@ type Result struct {
 	Changes     []Change
 	Destructive bool
 	NoOp        bool
+	// ConfigOnly: every change is to jobs, so nothing needs redeploying.
+	ConfigOnly bool
 }
 
 // Diff compares current (nil = app does not exist) with desired (nil = delete
@@ -84,12 +89,46 @@ func Diff(cur, des *spec.App) Result {
 		cs = envDiff(cs, cur.Env, des.Env)
 		cs = volDiff(cs, cur.Volumes, des.Volumes)
 		cs = dbDiff(cs, cur.Databases, des.Databases)
+		cs = jobDiff(cs, cur.Jobs, des.Jobs)
 	}
-	r := Result{Changes: cs, NoOp: len(cs) == 0}
+	r := Result{Changes: cs, NoOp: len(cs) == 0, ConfigOnly: cur != nil && des != nil && len(cs) > 0}
 	for _, c := range cs {
 		r.Destructive = r.Destructive || c.Destructive
+		r.ConfigOnly = r.ConfigOnly && strings.HasPrefix(c.Path, "jobs.")
 	}
 	return r
+}
+
+func jobDiff(cs []Change, cur, des []spec.Job) []Change {
+	old := map[string]spec.Job{}
+	for _, j := range cur {
+		old[j.Name] = j
+	}
+	seen := map[string]bool{}
+	for _, j := range des {
+		seen[j.Name] = true
+		o, ok := old[j.Name]
+		switch {
+		case !ok:
+			cs = append(cs, Change{Path: "jobs." + j.Name, Op: OpCreate, To: jobSummary(j)})
+		case o != j:
+			cs = append(cs, Change{Path: "jobs." + j.Name, Op: OpUpdate, From: jobSummary(o), To: jobSummary(j)})
+		}
+	}
+	for _, j := range cur {
+		if !seen[j.Name] {
+			cs = append(cs, Change{Path: "jobs." + j.Name, Op: OpDelete, From: jobSummary(j)})
+		}
+	}
+	return cs
+}
+
+func jobSummary(j spec.Job) string {
+	s := j.Schedule + ": " + j.Command
+	if j.Timeout != "" {
+		s += " (timeout " + j.Timeout + ")"
+	}
+	return s
 }
 
 func scalar[T comparable](cs []Change, path string, from, to T) []Change {

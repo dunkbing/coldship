@@ -36,6 +36,7 @@ func (d *Docker) PlanPurge(ctx context.Context) (PurgePlan, error) {
 		client.Filters{}.Add("label", "coldship.app"),
 		client.Filters{}.Add("label", "coldship.data"),
 		client.Filters{}.Add("label", AgentLabel),
+		client.Filters{}.Add("label", JobLabel),
 		client.Filters{}.Add("name", "^/?"+proxyContainer+"$"),
 	} {
 		res, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})

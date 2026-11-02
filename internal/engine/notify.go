@@ -41,6 +41,8 @@ const (
 	EvBackupFailing   = "backup.failing"
 	EvBackupRecovered = "backup.recovered"
 	EvDiskLow         = "disk.low"
+	EvJobFailed       = "job.failed"
+	EvJobRecovered    = "job.recovered"
 	EvAgentReport     = "agent.report"
 	EvAgentWaiting    = "agent.waiting"
 )
@@ -63,6 +65,8 @@ var EventKinds = []EventKind{
 	{EvBackupFailing, "Off-site backups are failing", true, false},
 	{EvBackupRecovered, "Off-site backups work again", true, false},
 	{EvDiskLow, "The server's disk is almost full", true, true},
+	{EvJobFailed, "A scheduled job failed", true, false},
+	{EvJobRecovered, "A scheduled job works again", true, false},
 	{EvAgentReport, "An agent reports on an alert", true, false},
 	{EvAgentWaiting, "An agent on an alert waits for an answer", true, false},
 }

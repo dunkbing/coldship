@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/dunkbing/coldship/internal/apierr"
@@ -26,6 +28,73 @@ const (
 type Volume struct {
 	Name string `json:"name" yaml:"name" jsonschema:"volume name, lowercase letters, digits and dashes"`
 	Path string `json:"path" yaml:"path" jsonschema:"absolute mount path inside the container"`
+}
+
+// Job is a command run on a schedule.
+type Job struct {
+	Name     string `json:"name" yaml:"name" jsonschema:"job name, lowercase letters, digits and dashes"`
+	Schedule string `json:"schedule" yaml:"schedule" jsonschema:"when to run, in UTC: 5-field cron (e.g. 0 3 * * * for 03:00 daily, */15 * * * * every 15 minutes) or @hourly, @daily, @weekly, @monthly"`
+	Command  string `json:"command" yaml:"command" jsonschema:"shell command to run (with sh -c, so the image needs a shell), e.g. npm run cleanup"`
+	Timeout  string `json:"timeout,omitempty" yaml:"timeout,omitempty" jsonschema:"stop the job after this long, e.g. 10m (default 30m, at most 24h)"`
+}
+
+const (
+	DefaultJobTimeout = 30 * time.Minute
+	maxJobTimeout     = 24 * time.Hour
+	maxJobs           = 20
+)
+
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
+// ParseSchedule parses a job's schedule; times are UTC.
+func ParseSchedule(s string) (cron.Schedule, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "@every") || strings.HasPrefix(s, "TZ=") || strings.HasPrefix(s, "CRON_TZ=") {
+		return nil, fmt.Errorf("use a 5-field cron expression or @hourly, @daily, @weekly, @monthly")
+	}
+	return cronParser.Parse(s)
+}
+
+// JobTimeout is the job's timeout, or the default.
+func (j Job) JobTimeout() time.Duration {
+	if d, err := time.ParseDuration(j.Timeout); err == nil && d > 0 {
+		return d
+	}
+	return DefaultJobTimeout
+}
+
+func (a *App) validateJobs() error {
+	if len(a.Jobs) > maxJobs {
+		return apierr.Invalid("jobs", "at most %d jobs per app", maxJobs)
+	}
+	seen := map[string]bool{}
+	for i, j := range a.Jobs {
+		f := fmt.Sprintf("jobs[%d]", i)
+		if !nameRe.MatchString(j.Name) {
+			return apierr.Invalid(f+".name", "job name %q must be 1-40 chars of lowercase letters, digits and dashes, starting with a letter", j.Name)
+		}
+		if seen[j.Name] {
+			return apierr.Invalid(f+".name", "two jobs are named %q", j.Name)
+		}
+		seen[j.Name] = true
+		if _, err := ParseSchedule(j.Schedule); err != nil {
+			return apierr.Invalid(f+".schedule", "job %s: schedule %q isn't valid: %v", j.Name, j.Schedule, err).
+				WithFix(map[string]any{"schedule": "0 3 * * *"})
+		}
+		if strings.TrimSpace(j.Command) == "" {
+			return apierr.Invalid(f+".command", "job %s needs a command", j.Name)
+		}
+		if len(j.Command) > 4096 {
+			return apierr.Invalid(f+".command", "job %s: the command is too long", j.Name)
+		}
+		if j.Timeout != "" {
+			d, err := time.ParseDuration(j.Timeout)
+			if err != nil || d < time.Second || d > maxJobTimeout {
+				return apierr.Invalid(f+".timeout", "job %s: timeout %q must be a duration from 1s to 24h, like 10m", j.Name, j.Timeout)
+			}
+		}
+	}
+	return nil
 }
 
 // Build describes building the app's image from a Git repository with a
@@ -130,6 +199,7 @@ type App struct {
 	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty" jsonschema:"environment variables; values are write-only and redacted in all output"`
 	Volumes   []Volume          `json:"volumes,omitempty" yaml:"volumes,omitempty" jsonschema:"persistent volumes. Removing one from the spec deletes its data"`
 	Databases []Database        `json:"databases,omitempty" yaml:"databases,omitempty" jsonschema:"managed databases. Their connection URLs are injected into env. Removing one deletes its data (after a snapshot)"`
+	Jobs      []Job             `json:"jobs,omitempty" yaml:"jobs,omitempty" jsonschema:"scheduled jobs: commands run on a cron schedule in a one-off container from the app's image, with its env, databases and volumes. Changing only jobs doesn't redeploy the app"`
 	Uses      []string          `json:"uses,omitempty" yaml:"uses,omitempty" jsonschema:"data services the app connects to (see coldship data list). Each injects its connection env: DATABASE_URL for postgres and mysql, REDIS_URL for redis, AWS_* and S3_* variables for s3 storage. Write name=ENV_VAR to inject a database's URL under another name"`
 }
 
@@ -368,7 +438,7 @@ func (a *App) Validate() error {
 		}
 		names[v.Name], paths[v.Path] = true, true
 	}
-	return nil
+	return a.validateJobs()
 }
 
 func (b *Build) validate() error {
@@ -566,6 +636,7 @@ func (a *App) Redacted() *App {
 	c.Domains = append([]string(nil), a.Domains...)
 	c.Databases = append([]Database(nil), a.Databases...)
 	c.Uses = append([]string(nil), a.Uses...)
+	c.Jobs = append([]Job(nil), a.Jobs...)
 	if a.OnPush != nil {
 		op := *a.OnPush
 		c.OnPush = &op
@@ -594,6 +665,7 @@ func (a *App) Clone() *App {
 	c.Domains = append([]string(nil), a.Domains...)
 	c.Databases = append([]Database(nil), a.Databases...)
 	c.Uses = append([]string(nil), a.Uses...)
+	c.Jobs = append([]Job(nil), a.Jobs...)
 	if a.OnPush != nil {
 		op := *a.OnPush
 		c.OnPush = &op

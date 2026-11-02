@@ -67,6 +67,8 @@ type ContainerSpec struct {
 	Ports  map[int]int
 	Binds  []string // "volume:/path" or "/host/path:/path:ro"
 	Memory int64    // bytes; 0 for no limit
+	// NoRestart: run once (jobs), instead of restarting unless stopped.
+	NoRestart bool
 }
 
 // RunContainer creates and starts a container on the Coldship network, with
@@ -82,6 +84,9 @@ func (d *Docker) RunContainer(ctx context.Context, s ContainerSpec) (string, err
 	restart := container.RestartPolicyUnlessStopped
 	if d.IsPodman(ctx) {
 		restart = container.RestartPolicyAlways
+	}
+	if s.NoRestart {
+		restart = container.RestartPolicyDisabled
 	}
 	host := &container.HostConfig{
 		Binds:         s.Binds,

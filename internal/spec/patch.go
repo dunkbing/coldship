@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"reflect"
 	"slices"
 
 	"github.com/dunkbing/coldship/internal/apierr"
@@ -33,6 +34,15 @@ type Patch struct {
 	AddDatabases  []Database        `json:"add_databases,omitempty" jsonschema:"databases to add, e.g. {engine: postgres}. Name defaults to main"`
 	AddUses       []string          `json:"add_uses,omitempty" jsonschema:"data services to connect, e.g. maindb or reports=REPORTS_URL (see coldship data list)"`
 	RemoveUses    []string          `json:"remove_uses,omitempty" jsonschema:"data services to disconnect (their data stays)"`
+	SetJobs       []Job             `json:"set_jobs,omitempty" jsonschema:"scheduled jobs to add, or replace by name"`
+	RemoveJobs    []string          `json:"remove_jobs,omitempty" jsonschema:"scheduled jobs to remove, by name"`
+}
+
+// OnlyJobs reports whether the patch changes nothing but jobs.
+func (p *Patch) OnlyJobs() bool {
+	q := *p
+	q.Name, q.SetJobs, q.RemoveJobs = "", nil, nil
+	return (len(p.SetJobs) > 0 || len(p.RemoveJobs) > 0) && reflect.ValueOf(q).IsZero()
 }
 
 // Apply returns cur (nil for a new app) with the patch applied. cur is not
@@ -69,7 +79,7 @@ func (p *Patch) Apply(cur *App) (*App, error) {
 			b = kept
 		}
 		a.Image, a.Build = "", b
-	case a.Build != nil:
+	case a.Build != nil && !p.OnlyJobs():
 		// Redeploying builds the branch's current tip, not the old commit.
 		a.Build.Commit = ""
 	}
@@ -122,6 +132,19 @@ func (p *Patch) Apply(cur *App) (*App, error) {
 		}
 		if !hasDatabase(a.Databases, d.Name) {
 			a.Databases = append(a.Databases, d)
+		}
+	}
+	for _, name := range p.RemoveJobs {
+		if !slices.ContainsFunc(a.Jobs, func(j Job) bool { return j.Name == name }) {
+			return nil, apierr.Invalid("remove_jobs", "%s has no job %q", a.Name, name)
+		}
+	}
+	a.Jobs = slices.DeleteFunc(a.Jobs, func(j Job) bool { return slices.Contains(p.RemoveJobs, j.Name) })
+	for _, j := range p.SetJobs {
+		if i := slices.IndexFunc(a.Jobs, func(o Job) bool { return o.Name == j.Name }); i >= 0 {
+			a.Jobs[i] = j
+		} else {
+			a.Jobs = append(a.Jobs, j)
 		}
 	}
 	return a, nil
