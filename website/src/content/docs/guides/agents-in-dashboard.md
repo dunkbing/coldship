@@ -30,6 +30,27 @@ When the agent wants to run a tool, a card asks you to **Allow** or **Reject** i
 
 Sessions end after 30 minutes without a message, and at most 4 run at once on the server (across all organizations). Transcripts are kept in memory, so they're gone after a restart.
 
+## Responding to alerts
+
+An agent can start on its own when something goes wrong. In its settings, under **Start on its own when**, pick the alerts it answers:
+
+| Alert | |
+|---|---|
+| An app goes down | `app.down` |
+| A deploy or build fails | `deploy.failed` |
+| Off-site backups fail | `backup.failing` |
+| The server's disk is almost full | `disk.low` (default organization only) |
+
+When one fires, Coldship starts a session and asks the agent to look into it with its tools (status, logs, deploy logs, metrics) and finish with a short report. That report goes to the organization's [notification channels](/guides/notifications/) as `agent.report`, with a link to the session, so you can read what it did and carry on the conversation.
+
+- **It only looks, unless you say otherwise.** Alert sessions are viewers. Turn on **Let it fix things** (for a deployer agent) to let it roll back or restart; destructive production changes still wait for an admin.
+- **Agents limited to some apps** only hear about those apps, and not about server-wide alerts like the disk.
+- **Nobody may be watching.** If the agent asks permission for a tool, `agent.waiting` tells your channels; unanswered after 15 minutes, the request is declined and the turn ends, so it reports what it has. Alert sessions end after 15 minutes without messages.
+- **No storms.** Each agent takes an alert at most once per app every 30 minutes, at most 2 alert sessions run at once (leaving room for yours), and an agent's own deploys never start agents.
+- **Alert text is data.** Error messages and build output can be written by anyone who can push code, so Coldship hands them to the agent fenced off and marked as data, not instructions.
+
+Sessions started by an alert show a bell in the session list, and the audit log names the alert (`alert:app.down`) as who started it.
+
 ## How it's contained
 
 - Each session runs the agent in its own container (`node:22-bookworm-slim`, 2 GB memory limit), on Docker's default network: it reaches the AI provider, but not Coldship's network, where apps and databases talk to each other. Ports published on the server are reachable from it, as from anywhere else.

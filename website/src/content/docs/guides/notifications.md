@@ -18,6 +18,8 @@ Coldship tells you when something needs attention, wherever your team already lo
 | `app.recovered` | It's running again | yes |
 | `backup.failing` / `backup.recovered` | [Off-site backups](/guides/backups/) started failing, or work again | yes |
 | `disk.low` | The server's disk is 90% full. Repeats at most daily; default organization only | yes |
+| `agent.report` | An agent [started by an alert](/guides/agents-in-dashboard/#responding-to-alerts) reports what it found | yes |
+| `agent.waiting` | An agent on an alert asks permission for a tool and waits for a person | yes |
 
 Previews never notify: agents create and delete them all the time. Planning alone doesn't either; a plan is a dry run until someone applies it.
 
@@ -60,6 +62,7 @@ Each event is POSTed as JSON:
   "severity": "error",
   "title": "web: deploy failed",
   "detail": "health_check_failed: …",
+  "actor": "admin",
   "link": "https://coldship.example.com/apps/web",
   "at": "2026-11-02T07:20:11Z"
 }
@@ -79,7 +82,9 @@ def verify(secret: str, timestamp: str, body: bytes, signature: str) -> bool:
 
 `X-Coldship-Event` names the event. Failed deliveries are retried twice, after 2 and 8 seconds; the last result shows on the channel.
 
-`title` and `detail` can include text from builds and apps, so treat them as untrusted. Coldship escapes them for Slack, stops Discord mentions, and sends Telegram messages as plain text.
+`actor` names who caused the event, when someone did. Agent events also carry `agent_session`.
+
+`title` and `detail` can include text from builds and apps (and agents' reports), so treat them as untrusted. Coldship escapes them for Slack, stops Discord mentions, and sends Telegram messages as plain text.
 
 ## Organizations
 
