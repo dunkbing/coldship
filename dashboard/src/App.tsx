@@ -135,7 +135,7 @@ export default function App() {
         <PaletteProvider me={me} onSwitch={setMe} onSignOut={signOut}>
         <SidebarProvider>
           <AppSidebar me={me} onSwitch={setMe} onSignOut={signOut} />
-          <SidebarInset>
+          <SidebarInset className="min-w-0">
             <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur md:hidden">
               <SidebarTrigger />
               <span className="font-semibold">Coldship</span>
@@ -450,17 +450,15 @@ function AccountPrompt({ me, onCreated }: { me: WhoAmI; onCreated: (w: WhoAmI) =
   return (
     <>
       <Card className="mb-6 border-primary/30 bg-accent/30 py-4">
-        <CardContent className="flex flex-wrap items-center gap-3 px-4">
-          <UserRound className="size-5 text-primary" aria-hidden />
-          <p className="min-w-0 flex-1 text-sm">
+        <CardContent className="grid grid-cols-[auto_1fr_auto] items-start gap-x-3 gap-y-2 px-4 sm:flex sm:items-center">
+          <UserRound className="mt-0.5 size-5 text-primary sm:mt-0" aria-hidden />
+          <p className="min-w-0 text-sm sm:flex-1">
             You're signed in with the token <strong>{me.name}</strong>. Create your own account to sign in with email and password, and invite your team.
           </p>
-          <Button size="sm" onClick={() => setOpen(true)}>
-            Create account
-          </Button>
           <Button
             size="icon"
             variant="ghost"
+            className="-mt-1.5 sm:order-last sm:mt-0"
             aria-label="Dismiss"
             onClick={() => {
               setHidden(true)
@@ -472,6 +470,9 @@ function AccountPrompt({ me, onCreated }: { me: WhoAmI; onCreated: (w: WhoAmI) =
             }}
           >
             <X />
+          </Button>
+          <Button size="sm" className="col-start-2 justify-self-start" onClick={() => setOpen(true)}>
+            Create account
           </Button>
         </CardContent>
       </Card>

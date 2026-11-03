@@ -53,9 +53,9 @@ export default function Tokens() {
             <TableBody>
               {tokens.data.map((t) => (
                 <TableRow key={t.name}>
-                  <TableCell className="pl-4 font-medium">
+                  <TableCell className="pl-4 font-medium whitespace-normal">
                     {t.name}
-                    {t.name === me.name && !me.user && <span className="font-normal text-muted-foreground"> (this session)</span>}
+                    {t.name === me.name && !me.user && <span className="block font-normal text-muted-foreground sm:inline"> (this session)</span>}
                   </TableCell>
                   <TableCell>
                     <ToneBadge t={t.scope === 'admin' ? 'info' : 'muted'}>{roleLabel(t.scope)}</ToneBadge>

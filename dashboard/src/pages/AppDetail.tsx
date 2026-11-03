@@ -4,7 +4,7 @@ import { JobsTab } from './JobsTab'
 import { LiveLog } from '../components/LiveLog'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Camera, ExternalLink, Info, Webhook } from 'lucide-react'
+import { Camera, ChevronDown, ExternalLink, Info, Webhook } from 'lucide-react'
 import { api, type AppView, type Deployment } from '../api'
 import { useSession } from '../App'
 import { fmtTime, timeUntil, useLoad } from '../hooks'
@@ -77,6 +77,8 @@ export default function AppDetail() {
   const tab = (params.get('tab') as Tab) || 'diagnose'
   const app = useLoad(() => api.app(name), [name], 5000)
   const me = useSession()
+  // On phones the spec and container cards fold away, so the tabs are in view.
+  const [details, setDetails] = useState(false)
 
   if (app.error) return <ErrorBox error={app.error} />
   if (!app.data) return <PageSkeleton kind="detail" />
@@ -156,15 +158,20 @@ export default function AppDetail() {
         </Card>
       )}
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2">
+      <Button variant="outline" size="sm" className="mb-4 md:hidden" aria-expanded={details} onClick={() => setDetails((d) => !d)}>
+        <ChevronDown className={cn('transition-transform', details && 'rotate-180')} />
+        {details ? 'Hide spec and container' : 'Spec and container'}
+      </Button>
+      <div className={cn('mb-6 gap-4 md:grid md:grid-cols-2', details ? 'grid' : 'hidden')}>
         <SpecCard a={a} />
         <RuntimeCard a={a} />
       </div>
 
       <Tabs value={tab} onValueChange={(t) => setParams({ tab: t })} className="gap-4">
-        <TabsList className="max-w-full justify-start overflow-x-auto">
+        {/* Tabs wrap onto a second row on phones rather than scroll out of sight. */}
+        <TabsList className="max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto sm:flex-nowrap sm:overflow-x-auto sm:group-data-horizontal/tabs:h-8">
           {tabs.map((t) => (
-            <TabsTrigger key={t} value={t} className="flex-none px-3">
+            <TabsTrigger key={t} value={t} className="h-7 flex-none px-3 sm:h-[calc(100%-1px)]">
               {t[0].toUpperCase() + t.slice(1)}
             </TabsTrigger>
           ))}
@@ -586,11 +593,11 @@ function DeploymentsTab({ name }: { name: string }) {
           <TableRow>
             <TableHead>Deployment</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Image</TableHead>
-            <TableHead>Commit</TableHead>
-            <TableHead>By</TableHead>
-            <TableHead>Reason</TableHead>
-            <TableHead>When</TableHead>
+            <TableHead className="hidden xl:table-cell">Image</TableHead>
+            <TableHead className="hidden xl:table-cell">Commit</TableHead>
+            <TableHead className="hidden xl:table-cell">By</TableHead>
+            <TableHead className="hidden xl:table-cell">Reason</TableHead>
+            <TableHead className="hidden xl:table-cell">When</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -609,6 +616,14 @@ function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean;
       <TableRow className="align-top">
         <TableCell className="align-top">
           <Mono>{x.id}</Mono>
+          {/* On narrow screens the other columns fold in here. */}
+          <div className="mt-1 max-w-44 space-y-0.5 text-xs whitespace-normal text-muted-foreground xl:hidden">
+            <div>
+              {x.actor} · <Time iso={x.created_at} />
+              {x.commit && <> · <Mono className="text-xs">{x.commit.slice(0, 7)}</Mono></>}
+            </div>
+            {x.reason && <div className="line-clamp-2">{x.reason}</div>}
+          </div>
         </TableCell>
         <TableCell className="align-top">
           <div className="flex flex-wrap items-center gap-1">
@@ -632,14 +647,14 @@ function DeploymentRow({ d: x, open, onToggle }: { d: Deployment; open: boolean;
             )}
           </div>
         </TableCell>
-        <TableCell className="align-top">
+        <TableCell className="hidden align-top xl:table-cell">
           <Mono>{x.image || x.spec?.image || '—'}</Mono>
           {x.detected && <div className="text-xs text-muted-foreground">generated: {x.detected}</div>}
         </TableCell>
-        <TableCell className="align-top">{x.commit ? <Mono>{x.commit.slice(0, 7)}</Mono> : '—'}</TableCell>
-        <TableCell className="align-top">{x.actor}</TableCell>
-        <TableCell className="min-w-48 align-top whitespace-normal">{x.reason}</TableCell>
-        <TableCell className="align-top">
+        <TableCell className="hidden align-top xl:table-cell">{x.commit ? <Mono>{x.commit.slice(0, 7)}</Mono> : '—'}</TableCell>
+        <TableCell className="hidden align-top xl:table-cell">{x.actor}</TableCell>
+        <TableCell className="hidden min-w-48 align-top whitespace-normal xl:table-cell">{x.reason}</TableCell>
+        <TableCell className="hidden align-top xl:table-cell">
           <Time iso={x.created_at} />
         </TableCell>
       </TableRow>

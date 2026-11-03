@@ -108,9 +108,9 @@ export default function Data() {
               <TableRow>
                 <TableHead className="px-4">Name</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Used by</TableHead>
-                <TableHead>Gives apps</TableHead>
-                <TableHead className="px-4">Latest snapshot</TableHead>
+                <TableHead className="hidden lg:table-cell">Used by</TableHead>
+                <TableHead className="hidden lg:table-cell">Gives apps</TableHead>
+                <TableHead className="hidden px-4 lg:table-cell">Latest snapshot</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -118,11 +118,12 @@ export default function Data() {
                 <TableRow key={d.name}>
                   <TableCell className="px-4 py-3">
                     <NameCell d={d} link />
+                    {d.used_by.length > 0 && <div className="mt-1 text-xs whitespace-normal text-muted-foreground lg:hidden">used by {d.used_by.join(', ')}</div>}
                   </TableCell>
                   <TableCell>
                     <Status d={d} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     {d.used_by.length === 0 ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
@@ -136,10 +137,10 @@ export default function Data() {
                       ))
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <Mono className="text-xs">{envSummary(d.env)}</Mono>
                   </TableCell>
-                  <TableCell className="px-4 text-muted-foreground">
+                  <TableCell className="hidden px-4 text-muted-foreground lg:table-cell">
                     {d.latest_snapshot ? <Time iso={d.latest_snapshot.created_at} /> : '—'}
                   </TableCell>
                 </TableRow>
@@ -160,10 +161,10 @@ export default function Data() {
               <TableHeader className="bg-muted/50">
                 <TableRow>
                   <TableHead className="px-4">Database</TableHead>
-                  <TableHead>App</TableHead>
+                  <TableHead className="hidden lg:table-cell">App</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Gives the app</TableHead>
-                  <TableHead className="px-4">Latest snapshot</TableHead>
+                  <TableHead className="hidden lg:table-cell">Gives the app</TableHead>
+                  <TableHead className="hidden px-4 lg:table-cell">Latest snapshot</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -171,8 +172,14 @@ export default function Data() {
                   <TableRow key={d.app + '/' + d.name}>
                     <TableCell className="px-4 py-3">
                       <NameCell d={d} />
+                      <div className="mt-1 text-xs text-muted-foreground lg:hidden">
+                        of{' '}
+                        <Link className={linkClass} to={`/apps/${d.app}?tab=databases`}>
+                          {d.app}
+                        </Link>
+                      </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       <Link className={linkClass} to={`/apps/${d.app}`}>
                         {d.app}
                       </Link>
@@ -180,10 +187,10 @@ export default function Data() {
                     <TableCell>
                       <Status d={d} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       <Mono className="text-xs">{envSummary(d.env)}</Mono>
                     </TableCell>
-                    <TableCell className="px-4 text-muted-foreground">
+                    <TableCell className="hidden px-4 text-muted-foreground lg:table-cell">
                       {d.latest_snapshot ? <Time iso={d.latest_snapshot.created_at} /> : '—'}
                     </TableCell>
                   </TableRow>

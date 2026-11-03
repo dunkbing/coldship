@@ -114,7 +114,7 @@ export function MetricsTab({ app }: { app: AppView }) {
           </Table>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2">
           {m.container && (
             <LineChart title="CPU (100% = one core)" times={times} format={pct} minTop={1} series={[{ name: 'CPU', slot: 1, values: pts.map((p) => p.cpu_percent) }]} />
           )}

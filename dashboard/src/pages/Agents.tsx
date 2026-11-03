@@ -119,7 +119,7 @@ export default function Agents() {
             <Card key={a.name} className="py-4">
               <CardContent className="flex flex-wrap items-center gap-3 px-4">
                 <AgentMark kind={a.kind} size={40} />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 basis-48">
                   <div className="flex flex-wrap items-center gap-2 font-medium">
                     {a.name}
                     <span className="text-sm font-normal text-muted-foreground">{agentLabels[a.kind] ?? a.kind}</span>
@@ -137,7 +137,7 @@ export default function Agents() {
                     {a.running > 0 && <ToneBadge t="ok">{a.running} running</ToneBadge>}
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="ml-auto flex items-center gap-1">
                   {admin && (
                     <>
                       <Button variant="ghost" size="icon" aria-label={`Edit ${a.name}`} onClick={() => setEditing({ kind: a.kind, agent: a })}>
@@ -181,7 +181,7 @@ export default function Agents() {
                   <TableHead className="pl-4">Session</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="hidden sm:table-cell">Started by</TableHead>
-                  <TableHead>Last active</TableHead>
+                  <TableHead className="hidden sm:table-cell">Last active</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -192,7 +192,13 @@ export default function Agents() {
                         <AgentMark kind={s.kind} size={28} />
                         <span className="min-w-0">
                           <span className="block truncate font-medium">{s.title || 'New conversation'}</span>
-                          <span className="block truncate text-xs text-muted-foreground">{s.agent}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {s.agent}
+                            <span className="sm:hidden">
+                              {' · '}
+                              <Time iso={s.updated_at && !s.updated_at.startsWith('0001') ? s.updated_at : s.created_at} />
+                            </span>
+                          </span>
                         </span>
                       </Link>
                     </TableCell>
@@ -209,7 +215,7 @@ export default function Agents() {
                         s.started_by
                       )}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="hidden text-muted-foreground sm:table-cell">
                       <Time iso={s.updated_at && !s.updated_at.startsWith('0001') ? s.updated_at : s.created_at} />
                     </TableCell>
                   </TableRow>

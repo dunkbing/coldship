@@ -163,7 +163,7 @@ function Section({ title, description, children }: { title: string; description?
 }
 
 function Row({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col gap-3 sm:flex-row sm:items-end">{children}</div>
+  return <div className="flex flex-col gap-3 lg:flex-row lg:items-end">{children}</div>
 }
 
 function Field({ id, label, children, grow }: { id: string; label: string; children: ReactNode; grow?: boolean }) {
@@ -263,13 +263,13 @@ export function SettingsTab({ app, onChange }: { app: AppView; onChange: () => v
       <Section title="Networking" description="The port the app listens on, a port on the server, and domains (with automatic HTTPS).">
         <Row>
           <Field id="port" label="App port">
-            <Input id="port" type="number" min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} className="sm:w-32" />
+            <Input id="port" type="number" min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} className="lg:w-32" />
           </Field>
           <Button variant="outline" disabled={busy || !port || Number(port) === s.port} onClick={() => ch.change('Change the port', { port: Number(port) })}>
             Save port
           </Button>
           <Field id="hostport" label="Server port">
-            <Input id="hostport" type="number" min={1} max={65535} value={hostPort} onChange={(e) => setHostPort(e.target.value)} placeholder="none" className="sm:w-32" />
+            <Input id="hostport" type="number" min={1} max={65535} value={hostPort} onChange={(e) => setHostPort(e.target.value)} placeholder="none" className="lg:w-32" />
           </Field>
           <Button
             variant="outline"
@@ -321,7 +321,7 @@ export function SettingsTab({ app, onChange }: { app: AppView; onChange: () => v
         </div>
         <Row>
           <Field id="envkey" label="Name">
-            <Input id="envkey" value={envKey} onChange={(e) => setEnvKey(e.target.value)} placeholder="API_KEY" className="font-mono sm:w-48" />
+            <Input id="envkey" value={envKey} onChange={(e) => setEnvKey(e.target.value)} placeholder="API_KEY" className="font-mono lg:w-48" />
           </Field>
           <Field id="envval" label="Value" grow>
             <Input id="envval" type="password" autoComplete="off" value={envVal} onChange={(e) => setEnvVal(e.target.value)} className="font-mono" />
@@ -392,7 +392,7 @@ export function SettingsTab({ app, onChange }: { app: AppView; onChange: () => v
       <Section title="Resources and stage">
         <Row>
           <Field id="memory" label="Memory limit">
-            <Input id="memory" value={memory} onChange={(e) => setMemory(e.target.value)} placeholder="unlimited, or 512m, 1g" className="sm:w-48" />
+            <Input id="memory" value={memory} onChange={(e) => setMemory(e.target.value)} placeholder="unlimited, or 512m, 1g" className="lg:w-48" />
           </Field>
           <Button
             variant="outline"

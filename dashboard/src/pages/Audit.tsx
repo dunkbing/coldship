@@ -52,7 +52,34 @@ export default function Audit() {
         </Empty>
       )}
       {rows.length > 0 && (
-        <Card className="py-0">
+        // Narrow screens get a list: who did what to what, then why.
+        <Card className="gap-0 divide-y py-0 xl:hidden">
+          {rows.map((e) => (
+            <div key={e.id} className="space-y-1 px-4 py-3 text-sm">
+              <div className="flex items-baseline justify-between gap-3">
+                <div className="min-w-0 break-words">
+                  <span className="font-medium">{e.actor}</span> <Mono>{e.action}</Mono> {e.target}
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  <Time iso={e.time} />
+                </span>
+              </div>
+              {e.reason && <div className="text-muted-foreground">{e.reason}</div>}
+              {e.detail && Object.keys(e.detail).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(e.detail).map(([k, v]) => (
+                    <Badge key={k} variant="secondary" className="h-auto max-w-full font-mono font-normal break-all whitespace-normal">
+                      {k}: {String(v)}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </Card>
+      )}
+      {rows.length > 0 && (
+        <Card className="hidden py-0 xl:flex">
           <Table>
             <TableHeader className="bg-muted/50">
               <TableRow>

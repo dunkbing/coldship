@@ -31,7 +31,7 @@ function Stat({ label, value, className }: { label: string; value: number; class
   return (
     <Card size="sm">
       <CardContent>
-        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className="text-xs text-muted-foreground sm:text-sm">{label}</div>
         <div className={cn('text-2xl font-semibold tabular-nums', className)}>{value}</div>
       </CardContent>
     </Card>
@@ -42,12 +42,12 @@ function Stat({ label, value, className }: { label: string; value: number; class
 function AppName({ app }: { app: AppView }) {
   return (
     <div className="min-w-0">
-      <Link className="font-medium hover:underline" to={`/apps/${app.name}`}>
+      <Link className="font-medium break-words hover:underline" to={`/apps/${app.name}`}>
         {app.name}
       </Link>
       {app.urls?.[0] && (
         <div className="text-xs">
-          <a href={app.urls[0]} target="_blank" rel="noreferrer" className="text-muted-foreground hover:underline">
+          <a href={app.urls[0]} target="_blank" rel="noreferrer" className="break-all text-muted-foreground hover:underline">
             {app.urls[0].replace(/^https:\/\//, '')}
           </a>
         </div>
@@ -86,17 +86,17 @@ export default function Apps() {
       />
 
       {data && data.length > 0 && (
-        <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3">
+        <div className="mb-6 grid grid-cols-3 gap-3">
           <Stat label="Apps" value={data.length} />
           <Stat label="Healthy" value={counts.healthy} className="text-ok" />
-          <Stat label="Need attention" value={counts.failing} className={counts.failing ? 'text-destructive' : undefined} />
+          <Stat label="Failing" value={counts.failing} className={counts.failing ? 'text-destructive' : undefined} />
         </div>
       )}
 
       {error && <ErrorBox error={error} />}
       {loading && !data && (
         <div aria-busy="true" aria-label="Loading" className="space-y-6">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-3 gap-3">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-20 rounded-xl" />
             ))}
@@ -138,27 +138,36 @@ export default function Apps() {
               <TableRow>
                 <TableHead className="px-4">App</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Stage</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead className="px-4">Last deployment</TableHead>
+                <TableHead className="hidden lg:table-cell">Stage</TableHead>
+                <TableHead className="hidden lg:table-cell">Source</TableHead>
+                <TableHead className="hidden px-4 lg:table-cell">Last deployment</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {data.map((a) => (
                 <TableRow key={a.name}>
-                  <TableCell className="px-4 py-3">
+                  <TableCell className="px-4 py-3 whitespace-normal">
                     <AppName app={a} />
+                    {/* On narrow screens the other columns fold in here. */}
+                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground lg:hidden">
+                      <StageBadge stage={a.spec?.stage} />
+                      {a.latest_deployment && (
+                        <span>
+                          {a.latest_deployment.status} · <Time iso={a.latest_deployment.created_at} />
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="align-top pt-3.5 lg:align-middle lg:pt-2">
                     <HealthPill health={healthOf(a)} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <StageBadge stage={a.spec?.stage} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <Source spec={a.spec} />
                   </TableCell>
-                  <TableCell className="px-4">
+                  <TableCell className="hidden px-4 lg:table-cell">
                     {a.latest_deployment ? (
                       <span className="inline-flex items-center gap-2">
                         <DeployStatus status={a.latest_deployment.status} />
@@ -191,8 +200,8 @@ function PreviewTable({ previews }: { previews: AppView[] }) {
             <TableRow>
               <TableHead className="px-4">Preview</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Of</TableHead>
-              <TableHead>Source</TableHead>
+              <TableHead className="hidden lg:table-cell">Of</TableHead>
+              <TableHead className="hidden lg:table-cell">Source</TableHead>
               <TableHead className="px-4">Expires</TableHead>
             </TableRow>
           </TableHeader>
@@ -205,12 +214,12 @@ function PreviewTable({ previews }: { previews: AppView[] }) {
                 <TableCell>
                   <HealthPill health={healthOf(a)} />
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden lg:table-cell">
                   <Link className="text-primary hover:underline" to={`/apps/${a.preview_of}`}>
                     {a.preview_of}
                   </Link>
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden lg:table-cell">
                   <Source spec={a.spec} />
                 </TableCell>
                 <TableCell className="px-4 text-muted-foreground">{a.expires_at ? timeUntil(a.expires_at) : '—'}</TableCell>

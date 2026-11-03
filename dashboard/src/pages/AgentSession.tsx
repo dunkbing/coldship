@@ -631,7 +631,7 @@ function ToolTitle({ title, input }: { title: string; input?: string }) {
   return (
     <span className="flex min-w-0 items-baseline gap-2">
       <span className="flex-none font-medium">{toolName(title)}</span>
-      {summary && <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span>}
+      {summary && <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{summary}</span>}
     </span>
   )
 }
